@@ -1,7 +1,10 @@
 import type { NavLinkView } from "./types";
 
-/** JSONL feed written by the WhatsApp bot on every outbound message. */
-export const WEBSITE_FEED_PATH = process.env.WEBSITE_FEED_PATH ?? "";
+/** Max messages returned on initial load / reconnect. */
+export const WHATSAPP_FEED_INITIAL_LIMIT = 50;
+
+/** Shared secret for POST /api/feed (set on Vercel + bot). */
+export const FEED_API_SECRET = process.env.FEED_API_SECRET ?? "";
 
 /** FIFA API configuration (https://api.fifa.com/api/v3). */
 export const FIFA_CONFIG = {
@@ -14,9 +17,6 @@ export const FIFA_CONFIG = {
   enableTeamFlags: process.env.ENABLE_TEAM_FLAGS !== "false",
   revalidateSeconds: Number(process.env.FIFA_REVALIDATE_SECONDS ?? "30"),
 } as const;
-
-/** Max messages returned on initial load / reconnect. */
-export const WHATSAPP_FEED_INITIAL_LIMIT = 50;
 
 export const TOURNAMENT_ID = "fifa-world-cup-2026";
 
