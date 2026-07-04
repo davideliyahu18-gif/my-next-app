@@ -1,24 +1,22 @@
 import type { NavLinkView } from "./types";
 
-/** Path to the FIFA WhatsApp bot (uses football_api.py). */
-export const FOOTBALL_BOT_PATH =
-  process.env.FOOTBALL_BOT_PATH ??
-  `${process.env.HOME ?? ""}/fifa-whatsapp-bot`;
-
 /** JSONL feed written by the WhatsApp bot on every outbound message. */
-export const WEBSITE_FEED_PATH =
-  process.env.WEBSITE_FEED_PATH ??
-  `${FOOTBALL_BOT_PATH}/data/website_feed.jsonl`;
+export const WEBSITE_FEED_PATH = process.env.WEBSITE_FEED_PATH ?? "";
+
+/** FIFA API configuration (https://api.fifa.com/api/v3). */
+export const FIFA_CONFIG = {
+  baseUrl: process.env.FIFA_API_BASE_URL ?? "https://api.fifa.com/api/v3",
+  language: process.env.FIFA_API_LANGUAGE ?? "en",
+  idCompetition: process.env.FIFA_ID_COMPETITION ?? "17",
+  idSeason: process.env.FIFA_ID_SEASON ?? "",
+  matchCount: Number(process.env.FIFA_MATCH_COUNT ?? "500"),
+  enableHebrewTeamNames: process.env.ENABLE_HEBREW_TEAM_NAMES !== "false",
+  enableTeamFlags: process.env.ENABLE_TEAM_FLAGS !== "false",
+  revalidateSeconds: Number(process.env.FIFA_REVALIDATE_SECONDS ?? "30"),
+} as const;
 
 /** Max messages returned on initial load / reconnect. */
 export const WHATSAPP_FEED_INITIAL_LIMIT = 50;
-
-/** Placeholder for future direct HTTP access to the same FIFA endpoints. */
-export const API_CONFIG = {
-  baseUrl: process.env.FIFA_API_BASE_URL ?? "https://api.fifa.com/api/v3",
-  apiKey: process.env.FOOTBALL_API_KEY ?? "",
-  timeoutMs: 10_000,
-} as const;
 
 export const TOURNAMENT_ID = "fifa-world-cup-2026";
 
@@ -43,5 +41,5 @@ export const TOURNAMENT_META = {
   footerHosts: "ארה״ב · קאנדה · מקסיקו",
 } as const;
 
-/** Cache TTL for live bot data (seconds). */
+/** Cache TTL for live FIFA data (seconds). */
 export const LIVE_DATA_REVALIDATE_SECONDS = 30;

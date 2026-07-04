@@ -12,8 +12,9 @@ import {
 } from "./constants";
 import type { WhatsAppFeedMessage } from "./types";
 
-export function getWebsiteFeedPath(): string {
-  return WEBSITE_FEED_PATH;
+export function getWebsiteFeedPath(): string | null {
+  const path = WEBSITE_FEED_PATH.trim();
+  return path || null;
 }
 
 export function parseFeedLine(line: string): WhatsAppFeedMessage | null {
@@ -52,7 +53,7 @@ export function readFeedMessages(options?: {
   limit?: number;
 }): { messages: WhatsAppFeedMessage[]; byteOffset: number } {
   const path = getWebsiteFeedPath();
-  if (!existsSync(path)) {
+  if (!path || !existsSync(path)) {
     return { messages: [], byteOffset: 0 };
   }
 
@@ -71,7 +72,7 @@ export function readFeedTail(fromByteOffset: number): {
   byteOffset: number;
 } {
   const path = getWebsiteFeedPath();
-  if (!existsSync(path)) {
+  if (!path || !existsSync(path)) {
     return { messages: [], byteOffset: 0 };
   }
 

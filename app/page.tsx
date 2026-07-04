@@ -6,6 +6,8 @@ import LiveMatches from "@/components/LiveMatches";
 import Standings from "@/components/Standings";
 import TopScorers from "@/components/TopScorers";
 
+export const revalidate = 30;
+
 export default function Home() {
   return (
     <div dir="rtl" className="min-h-screen bg-[#050505] font-sans text-white">

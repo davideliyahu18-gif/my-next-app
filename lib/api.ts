@@ -1,32 +1,62 @@
+import { unstable_cache } from "next/cache";
+import { LIVE_DATA_REVALIDATE_SECONDS } from "./constants";
 import {
-  getBotGroupStandings,
-  getBotLatestNews,
-  getBotLiveMatches,
-  getBotStatCards,
-  getBotTopScorers,
-  getBotTournament,
-} from "./python-bridge";
+  fetchGroupStandings,
+  fetchLiveMatches,
+  fetchStatCards,
+  fetchTopScorers,
+  fetchTournament,
+} from "./fifa-data";
+import type {
+  GroupStandingView,
+  LiveMatchView,
+  ScorerView,
+  StatCardView,
+} from "./types";
 
-export async function getLiveMatches() {
-  return getBotLiveMatches();
+async function safeFetch<T>(label: string, fn: () => Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await fn();
+  } catch (error) {
+    console.error(`[fifa] ${label} failed:`, error);
+    return fallback;
+  }
 }
 
-export async function getGroupStandings() {
-  return getBotGroupStandings();
+function cachedFetch<T>(key: string, fn: () => Promise<T>, fallback: T): Promise<T> {
+  return unstable_cache(
+    () => safeFetch(key, fn, fallback),
+    ["fifa-api", key],
+    { revalidate: LIVE_DATA_REVALIDATE_SECONDS },
+  )();
 }
 
-export async function getTopScorers() {
-  return getBotTopScorers();
+export function getLiveMatches(): Promise<LiveMatchView[]> {
+  return cachedFetch("live_matches", fetchLiveMatches, []);
 }
 
-export async function getLatestNews() {
-  return getBotLatestNews();
+export function getGroupStandings(): Promise<GroupStandingView[]> {
+  return cachedFetch("group_standings", fetchGroupStandings, []);
 }
 
-export async function getStatCards() {
-  return getBotStatCards();
+export function getTopScorers(): Promise<ScorerView[]> {
+  return cachedFetch("top_scorers", fetchTopScorers, []);
 }
 
-export async function getTournament() {
-  return getBotTournament();
+export function getStatCards(): Promise<StatCardView[]> {
+  return cachedFetch("stat_cards", fetchStatCards, []);
+}
+
+export function getTournament() {
+  return cachedFetch("tournament", fetchTournament, {
+    totalTeams: 48,
+    totalMatches: 104,
+    totalCities: 16,
+    images: {
+      stadium:
+        "https://images.unsplash.com/photo-1529900748604-07564a03e7a6?w=2400&q=85",
+      trophy:
+        "https://images.unsplash.com/photo-1574629810360-7efbc16732a0?w=800&q=90",
+    },
+  });
 }

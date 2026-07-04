@@ -50,7 +50,7 @@ export async function GET(request: Request) {
       byteOffset = currentSize;
       controller.enqueue(sseEncode("init", { messages }));
 
-      if (existsSync(feedPath)) {
+      if (feedPath && existsSync(feedPath)) {
         try {
           watcher = watch(feedPath, { persistent: false }, () => {
             if (!closed) pushTail();
