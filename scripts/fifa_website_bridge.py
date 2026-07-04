@@ -19,7 +19,8 @@ BOT_PATH = Path(os.environ.get("FOOTBALL_BOT_PATH", Path.home() / "fifa-whatsapp
 if str(BOT_PATH) not in sys.path:
     sys.path.insert(0, str(BOT_PATH))
 
-os.chdir(BOT_PATH)
+if BOT_PATH.exists():
+    os.chdir(BOT_PATH)
 
 import config  # noqa: E402
 import football_api as fa  # noqa: E402
