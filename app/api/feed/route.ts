@@ -1,13 +1,21 @@
 import { randomUUID } from "node:crypto";
 import { verifyFeedAuth } from "@/lib/feed-auth";
 import { parseFeedMessage } from "@/lib/feed";
-import { appendFeedMessage } from "@/lib/feed-store";
+import { appendFeedMessage, isRedisConfigured } from "@/lib/feed-store";
 import type { WhatsAppFeedMessage } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const MAX_BODY_LENGTH = 16_384;
+
+/** Lightweight health check for feed storage (no secrets exposed). */
+export async function GET() {
+  return Response.json({
+    ok: true,
+    redis: isRedisConfigured(),
+  });
+}
 
 export async function POST(request: Request) {
   if (!verifyFeedAuth(request)) {
