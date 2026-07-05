@@ -161,9 +161,8 @@ export async function fetchGroupStandings(fresh = false): Promise<GroupStandingV
     Map<string, { name: string; flag: string; played: number; gd: number; pts: number }>
   >();
 
-  for (let dayOffset = -30; dayOffset < 8; dayOffset++) {
-    const rows = await getCalendarMatches(dayOffset, fresh);
-    for (const row of rows) {
+  const rows = await getCalendarRowsById(-14, 7, fresh);
+  for (const row of rows.values()) {
       const groupItems = row.GroupName as
         | { Description?: string }[]
         | undefined;
@@ -207,7 +206,6 @@ export async function fetchGroupStandings(fresh = false): Promise<GroupStandingV
         homeEntry.pts += 1;
         awayEntry.pts += 1;
       }
-    }
   }
 
   const groups: GroupStandingView[] = [];
@@ -236,19 +234,17 @@ export async function fetchTopScorers(limit = 10, fresh = false): Promise<Scorer
   const candidateIds: string[] = [];
   const seen = new Set<string>();
 
-  for (let dayOffset = -30; dayOffset < 2; dayOffset++) {
-    const rows = await getCalendarMatches(dayOffset, fresh);
-    for (const row of rows) {
-      const matchId = String(row.IdMatch);
-      if (seen.has(matchId)) continue;
-      const kickoff = parseDatetime(row.Date as string | undefined);
-      if (kickoff > now && row.HomeTeamScore == null) continue;
-      seen.add(matchId);
-      candidateIds.push(matchId);
-    }
+  const rows = await getCalendarRowsById(-14, 2, fresh);
+  for (const row of rows.values()) {
+    const matchId = String(row.IdMatch);
+    if (seen.has(matchId)) continue;
+    const kickoff = parseDatetime(row.Date as string | undefined);
+    if (kickoff > now && row.HomeTeamScore == null) continue;
+    seen.add(matchId);
+    candidateIds.push(matchId);
   }
 
-  const matches = await getMatchesByIds(candidateIds.slice(0, 80), fresh);
+  const matches = await getMatchesByIds(candidateIds.slice(0, 30), fresh);
   const scorers = new Map<
     string,
     { name: string; team: string; flag: string; goals: number; assists: number }
@@ -299,9 +295,8 @@ export async function fetchStatCards(fresh = false): Promise<StatCardView[]> {
   let finishedCount = 0;
   const teams = new Set<string>();
 
-  for (let dayOffset = -30; dayOffset < 8; dayOffset++) {
-    const rows = await getCalendarMatches(dayOffset, fresh);
-    for (const row of rows) {
+  const rows = await getCalendarRowsById(-14, 7, fresh);
+  for (const row of rows.values()) {
       const homeSide = (row.Home as Record<string, unknown> | undefined) ?? {};
       const awaySide = (row.Away as Record<string, unknown> | undefined) ?? {};
       const home = teamLabelFromSide(homeSide);
@@ -313,7 +308,6 @@ export async function fetchStatCards(fresh = false): Promise<StatCardView[]> {
         finishedCount += 1;
         totalGoals += Number(row.HomeTeamScore) + Number(row.AwayTeamScore);
       }
-    }
   }
 
   const liveCount = (await getLiveMatchesNow(fresh)).length;

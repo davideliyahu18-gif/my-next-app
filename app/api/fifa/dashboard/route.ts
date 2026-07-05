@@ -1,9 +1,10 @@
-import { getFifaDashboard } from "@/lib/api";
+import { getFifaDashboardLive } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 export async function GET() {
-  const dashboard = await getFifaDashboard();
+  const dashboard = await getFifaDashboardLive();
 
   return Response.json(dashboard, {
     headers: {

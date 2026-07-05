@@ -30,6 +30,7 @@ export default function FifaDashboard({ initial }: { initial: FifaDashboardView 
   }, []);
 
   useEffect(() => {
+    void refresh();
     const id = window.setInterval(() => {
       void refresh();
     }, FIFA_LIVE_POLL_MS);

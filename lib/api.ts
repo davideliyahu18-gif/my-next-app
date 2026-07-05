@@ -1,3 +1,5 @@
+import { unstable_cache } from "next/cache";
+import { LIVE_DATA_REVALIDATE_SECONDS } from "./constants";
 import {
   fetchFifaDashboard,
   fetchGroupStandings,
@@ -31,29 +33,42 @@ const emptyDashboard = (): FifaDashboardView => ({
   fetchedAt: new Date().toISOString(),
 });
 
-/** Fresh FIFA data — no cache. Used for live dashboard + API route. */
+function cachedFetch<T>(key: string, fn: () => Promise<T>, fallback: T): Promise<T> {
+  return unstable_cache(
+    () => safeFetch(key, fn, fallback),
+    ["fifa-api", key],
+    { revalidate: LIVE_DATA_REVALIDATE_SECONDS },
+  )();
+}
+
+/** Cached dashboard for SSR — fast first paint. */
 export function getFifaDashboard(): Promise<FifaDashboardView> {
-  return safeFetch("dashboard", () => fetchFifaDashboard(true), emptyDashboard());
+  return cachedFetch("dashboard", () => fetchFifaDashboard(false), emptyDashboard());
+}
+
+/** Live dashboard for client polling API. */
+export function getFifaDashboardLive(): Promise<FifaDashboardView> {
+  return safeFetch("dashboard_live", () => fetchFifaDashboard(true), emptyDashboard());
 }
 
 export function getLiveMatches(): Promise<LiveMatchView[]> {
-  return safeFetch("live_matches", () => fetchLiveMatches(true), []);
+  return cachedFetch("live_matches", () => fetchLiveMatches(false), []);
 }
 
 export function getGroupStandings(): Promise<GroupStandingView[]> {
-  return safeFetch("group_standings", () => fetchGroupStandings(true), []);
+  return cachedFetch("group_standings", () => fetchGroupStandings(false), []);
 }
 
 export function getTopScorers(): Promise<ScorerView[]> {
-  return safeFetch("top_scorers", () => fetchTopScorers(10, true), []);
+  return cachedFetch("top_scorers", () => fetchTopScorers(10, false), []);
 }
 
 export function getStatCards(): Promise<StatCardView[]> {
-  return safeFetch("stat_cards", () => fetchStatCards(true), []);
+  return cachedFetch("stat_cards", () => fetchStatCards(false), []);
 }
 
 export function getTournament() {
-  return safeFetch("tournament", fetchTournament, {
+  return cachedFetch("tournament", fetchTournament, {
     totalTeams: 48,
     totalMatches: 104,
     totalCities: 16,
