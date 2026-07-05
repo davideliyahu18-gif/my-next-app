@@ -1,6 +1,6 @@
 import Image from "next/image";
 import { getStatCards, getTournament } from "@/lib/api";
-import { TOURNAMENT_META } from "@/lib/constants";
+import { IMAGES, TOURNAMENT_META } from "@/lib/constants";
 import GlassCard from "./GlassCard";
 
 async function StatsBar() {
@@ -85,12 +85,12 @@ export default async function Hero() {
           <div className="relative shrink-0">
             <div className="absolute -inset-8 animate-pulse rounded-full bg-amber-400/20 blur-3xl" />
             <div className="absolute -inset-4 rounded-full bg-gradient-to-br from-amber-400/30 to-transparent blur-2xl" />
-            <div className="relative h-56 w-56 overflow-hidden rounded-full border-2 border-amber-400/40 bg-black/30 shadow-[0_0_80px_rgba(212,175,55,0.35)] backdrop-blur-sm md:h-72 md:w-72 lg:h-80 lg:w-80">
+            <div className="relative h-56 w-56 overflow-hidden rounded-full border-2 border-amber-400/40 bg-gradient-to-br from-zinc-900 via-black to-zinc-900 shadow-[0_0_80px_rgba(212,175,55,0.35)] backdrop-blur-sm md:h-72 md:w-72 lg:h-80 lg:w-80">
               <Image
-                src={tournament.images.trophy}
-                alt="גביע העולם FIFA"
+                src={IMAGES.ball}
+                alt="כדור המונדיאל"
                 fill
-                className="object-cover object-center scale-110 transition-transform duration-700 hover:scale-125"
+                className="object-contain p-5 transition-transform duration-700 hover:scale-110 md:p-7"
                 sizes="(max-width:768px) 224px, 320px"
               />
             </div>

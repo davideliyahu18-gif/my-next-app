@@ -108,7 +108,7 @@ export interface Tournament {
   totalCities: number;
   images: {
     stadium: string;
-    trophy: string;
+    ball: string;
   };
 }
 

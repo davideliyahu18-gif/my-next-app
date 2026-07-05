@@ -55,8 +55,8 @@ export function getTournament() {
     images: {
       stadium:
         "https://images.unsplash.com/photo-1529900748604-07564a03e7a6?w=2400&q=85",
-      trophy:
-        "https://images.unsplash.com/photo-1574629810360-7efbc16732a0?w=800&q=90",
+      ball:
+        "https://images.unsplash.com/photo-1579952363873-27f3bade9f55?w=800&q=90",
     },
   });
 }
