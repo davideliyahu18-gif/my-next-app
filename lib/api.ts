@@ -55,8 +55,7 @@ export function getTournament() {
     images: {
       stadium:
         "https://images.unsplash.com/photo-1529900748604-07564a03e7a6?w=2400&q=85",
-      ball:
-        "https://images.unsplash.com/photo-1579952363873-27f3bade9f55?w=800&q=90",
+      ball: "/images/trionda.jpg",
     },
   });
 }

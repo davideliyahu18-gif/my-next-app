@@ -88,10 +88,11 @@ export default async function Hero() {
             <div className="relative h-56 w-56 overflow-hidden rounded-full border-2 border-amber-400/40 bg-gradient-to-br from-zinc-900 via-black to-zinc-900 shadow-[0_0_80px_rgba(212,175,55,0.35)] backdrop-blur-sm md:h-72 md:w-72 lg:h-80 lg:w-80">
               <Image
                 src={IMAGES.ball}
-                alt="כדור המונדיאל"
+                alt="כדור TRIONDA — המונדיאל 2026"
                 fill
-                className="object-contain p-5 transition-transform duration-700 hover:scale-110 md:p-7"
+                className="object-contain p-2 transition-transform duration-700 hover:scale-105 md:p-3"
                 sizes="(max-width:768px) 224px, 320px"
+                priority
               />
             </div>
             <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-amber-400/30 bg-black/60 px-5 py-2 text-xs font-bold tracking-widest text-amber-300 backdrop-blur-xl">
