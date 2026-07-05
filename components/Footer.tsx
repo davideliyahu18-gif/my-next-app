@@ -1,5 +1,5 @@
-import { TOURNAMENT_META } from "@/lib/constants";
-import { navLinks } from "./Header";
+import { NAV_LINKS, TOURNAMENT_META } from "@/lib/constants";
+import ScrollLink from "./ScrollLink";
 
 export default function Footer() {
   return (
@@ -19,14 +19,14 @@ export default function Footer() {
             </p>
           </div>
           <div className="flex flex-wrap gap-x-8 gap-y-3 text-sm text-zinc-400">
-            {navLinks.map((link) => (
-              <a
+            {NAV_LINKS.map((link) => (
+              <ScrollLink
                 key={link.href}
                 href={link.href}
                 className="transition-colors hover:text-amber-300"
               >
                 {link.label}
-              </a>
+              </ScrollLink>
             ))}
           </div>
           <div className="text-sm text-zinc-500 md:text-left">

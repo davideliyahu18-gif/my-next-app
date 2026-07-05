@@ -19,6 +19,18 @@
   }
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
+#matches,
+#news,
+#standings,
+#scorers,
+#stats {
+  scroll-margin-top: 5.5rem;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
