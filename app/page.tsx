@@ -1,30 +1,49 @@
+import CompactScorers from "@/components/CompactScorers";
+import FeedNews from "@/components/FeedNews";
 import Footer from "@/components/Footer";
 import Header from "@/components/Header";
 import Hero from "@/components/Hero";
-import LiveFeed from "@/components/LiveFeed";
+import LeadingStats from "@/components/LeadingStats";
 import LiveMatches from "@/components/LiveMatches";
+import NextMatch from "@/components/NextMatch";
+import SocialBar from "@/components/SocialBar";
 import Standings from "@/components/Standings";
-import TopScorers from "@/components/TopScorers";
+import { getLiveMatches } from "@/lib/api";
 
 export const revalidate = 30;
 
-export default function Home() {
+export default async function Home() {
+  const matches = await getLiveMatches();
+  const nextMatch =
+    matches.find((match) => match.status === "upcoming") ?? matches[0] ?? null;
+
   return (
-    <div dir="rtl" className="min-h-screen bg-[#050505] font-sans text-white">
+    <div dir="rtl" className="min-h-screen bg-black font-sans text-white">
       <Header />
       <Hero />
 
-      <div className="mx-auto max-w-[1440px] px-4 py-16 md:px-8 md:py-24">
-        <div className="grid gap-16 xl:grid-cols-[1fr_360px] xl:gap-12">
-          <div className="min-w-0 space-y-20">
+      <main className="mx-auto max-w-[1440px] px-4 py-8 md:px-8">
+        <div className="grid gap-6 lg:grid-cols-12">
+          <aside className="space-y-6 lg:col-span-3">
+            <NextMatch match={nextMatch} />
+            <div id="scorers">
+              <CompactScorers />
+            </div>
+            <SocialBar />
+          </aside>
+
+          <div className="lg:col-span-6">
             <LiveMatches />
-            <LiveFeed />
-            <TopScorers />
           </div>
 
-          <Standings />
+          <aside className="space-y-6 lg:col-span-3">
+            <Standings compact />
+            <FeedNews />
+          </aside>
         </div>
-      </div>
+
+        <LeadingStats />
+      </main>
 
       <Footer />
     </div>

@@ -27,11 +27,13 @@ export const IMAGES = {
 } as const;
 
 export const NAV_LINKS: NavLinkView[] = [
+  { href: "#home", label: "ראשי" },
   { href: "#matches", label: "משחקים" },
-  { href: "#news", label: "עדכונים" },
-  { href: "#standings", label: "בתים" },
-  { href: "#scorers", label: "מבקיעים" },
-  { href: "#stats", label: "סטטיסטיקה" },
+  { href: "#standings", label: "טבלאות" },
+  { href: "#teams", label: "נבחרות" },
+  { href: "#scorers", label: "שחקנים" },
+  { href: "#stats", label: "סטטיסטיקות" },
+  { href: "#news", label: "חדשות" },
 ];
 
 export const TOURNAMENT_META = {

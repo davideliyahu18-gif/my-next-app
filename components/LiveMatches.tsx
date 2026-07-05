@@ -1,134 +1,111 @@
 import { getLiveMatches } from "@/lib/api";
 import type { LiveMatchView } from "@/lib/types";
-import GlassCard from "./GlassCard";
-import SectionHeader from "./SectionHeader";
+import DashboardCard from "./DashboardCard";
 
-function TeamBlock({
-  flag,
-  name,
-  align = "right",
-}: {
-  flag: string;
-  name: string;
-  align?: "right" | "left";
-}) {
+function parseMinuteProgress(minute: string): number {
+  if (minute === "HT" || minute === "הפסקה") return 50;
+  const numeric = Number.parseInt(minute, 10);
+  if (Number.isNaN(numeric)) return 0;
+  return Math.min((numeric / 90) * 100, 100);
+}
+
+function MinuteRing({ minute, isLive }: { minute: string; isLive: boolean }) {
+  const progress = parseMinuteProgress(minute);
+  const circumference = 2 * Math.PI * 18;
+
   return (
-    <div
-      className={`flex flex-1 flex-col gap-2 ${align === "right" ? "items-center text-center" : "items-center text-center"}`}
-    >
-      <span className="text-4xl transition-transform duration-500 group-hover:scale-110 md:text-5xl">
-        {flag}
-      </span>
-      <span className="max-w-[80px] truncate text-xs font-bold text-white md:text-sm">
-        {name}
-      </span>
+    <div className="relative flex h-11 w-11 shrink-0 items-center justify-center">
+      <svg className="absolute inset-0 -rotate-90" viewBox="0 0 44 44">
+        <circle
+          cx="22"
+          cy="22"
+          r="18"
+          fill="none"
+          stroke="rgba(255,255,255,0.08)"
+          strokeWidth="3"
+        />
+        {isLive && (
+          <circle
+            cx="22"
+            cy="22"
+            r="18"
+            fill="none"
+            stroke={progress > 60 ? "#eab308" : "#22c55e"}
+            strokeWidth="3"
+            strokeDasharray={circumference}
+            strokeDashoffset={circumference - (progress / 100) * circumference}
+            strokeLinecap="round"
+          />
+        )}
+      </svg>
+      <span className="text-[10px] font-bold text-zinc-300">{minute}</span>
     </div>
   );
 }
 
-function ScoreBlock({
-  homeScore,
-  awayScore,
-  minute,
-  isLive,
-}: {
-  homeScore: number | null;
-  awayScore: number | null;
-  minute: string;
-  isLive: boolean;
-}) {
+function MatchRow({ match }: { match: LiveMatchView }) {
+  const isLive = match.status === "live";
   const score =
-    homeScore !== null && awayScore !== null
-      ? `${homeScore} - ${awayScore}`
+    match.homeScore !== null && match.awayScore !== null
+      ? `${match.homeScore} - ${match.awayScore}`
       : "VS";
 
   return (
-    <div className="flex shrink-0 flex-col items-center gap-2 px-2">
-      <span
-        className={`text-3xl font-black tabular-nums tracking-tighter md:text-4xl ${isLive ? "text-white" : "text-zinc-500"}`}
-      >
-        {score}
-      </span>
-      <span
-        className={`rounded-md px-2.5 py-1 text-[11px] font-bold ${isLive ? "bg-red-500/20 text-red-300" : "bg-zinc-800 text-zinc-400"}`}
-      >
-        {minute}
-      </span>
-    </div>
-  );
-}
-
-function LiveMatchCard({
-  match,
-  index,
-}: {
-  match: LiveMatchView;
-  index: number;
-}) {
-  const isLive = match.status === "live";
-
-  return (
-    <GlassCard
-      className={`group relative min-w-[280px] shrink-0 overflow-hidden p-0 sm:min-w-0 ${isLive ? "ring-1 ring-red-500/20" : ""}`}
-      style={{ animationDelay: `${index * 100}ms` }}
+    <div
+      className={`flex items-center gap-3 border-b border-white/[0.04] px-5 py-4 last:border-0 ${
+        isLive ? "bg-red-500/[0.03]" : ""
+      }`}
     >
-      {isLive && (
-        <>
-          <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-l from-red-500 via-red-400 to-transparent" />
-          <span className="absolute left-4 top-4 z-10 flex items-center gap-2 rounded-full bg-red-500/90 px-3 py-1 text-[10px] font-black tracking-widest text-white shadow-lg shadow-red-500/30">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-75" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
-            </span>
-            LIVE
-          </span>
-        </>
-      )}
-
-      <div className="border-b border-white/5 px-5 py-3">
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-          {match.league}
-        </p>
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <span className="text-xl">{match.homeFlag}</span>
+        <span className="truncate text-sm font-semibold text-white">{match.home}</span>
       </div>
 
-      <div className="px-5 py-6">
-        <div className="flex items-center justify-between gap-3">
-          <TeamBlock flag={match.homeFlag} name={match.home} />
-          <ScoreBlock
-            homeScore={match.homeScore}
-            awayScore={match.awayScore}
-            minute={match.minute}
-            isLive={isLive}
-          />
-          <TeamBlock flag={match.awayFlag} name={match.away} align="left" />
-        </div>
+      <div className="flex shrink-0 flex-col items-center gap-1 px-2">
+        <span className="text-lg font-black tabular-nums text-white">{score}</span>
+        <MinuteRing minute={match.minute} isLive={isLive} />
       </div>
 
-      <div className="flex items-center justify-between border-t border-white/5 bg-black/20 px-5 py-3 text-[11px] text-zinc-500">
-        <span>{match.venue}</span>
-        {isLive && (
-          <span className="font-bold text-red-400">{match.minute}</span>
-        )}
+      <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
+        <span className="truncate text-sm font-semibold text-white">{match.away}</span>
+        <span className="text-xl">{match.awayFlag}</span>
       </div>
-    </GlassCard>
+
+      <button
+        type="button"
+        className="hidden shrink-0 rounded-lg border border-[#d4af37]/30 bg-[#d4af37]/10 px-3 py-1.5 text-[11px] font-bold text-[#d4af37] transition-colors hover:bg-[#d4af37]/20 sm:block"
+      >
+        צפו בתקציר
+      </button>
+    </div>
   );
 }
 
 export default async function LiveMatches() {
   const liveMatches = await getLiveMatches();
+  const liveCount = liveMatches.filter((m) => m.status === "live").length;
 
   return (
     <section id="matches">
-      <SectionHeader
+      <DashboardCard
         title="משחקים חיים"
-        subtitle="תוצאות בזמן אמת מכל האצטדיונים"
-        action="כל המשחקים"
-      />
-      <div className="-mx-4 flex gap-4 overflow-x-auto px-4 pb-2 scrollbar-hide sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:px-0 lg:grid-cols-2 xl:grid-cols-2">
-        {liveMatches.map((match, i) => (
-          <LiveMatchCard key={match.id} match={match} index={i} />
-        ))}
-      </div>
+        badge={
+          liveCount > 0 ? (
+            <span className="flex items-center gap-1.5 rounded-full bg-red-500/20 px-2.5 py-0.5 text-[10px] font-black tracking-wider text-red-400">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />
+              LIVE
+            </span>
+          ) : (
+            <span className="text-[10px] text-zinc-500">עדכון אחרון</span>
+          )
+        }
+      >
+        {liveMatches.length === 0 ? (
+          <p className="px-5 py-12 text-center text-sm text-zinc-500">אין משחקים כרגע</p>
+        ) : (
+          liveMatches.map((match) => <MatchRow key={match.id} match={match} />)
+        )}
+      </DashboardCard>
     </section>
   );
 }

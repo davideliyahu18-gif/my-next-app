@@ -4,10 +4,22 @@ import { useEffect, useState } from "react";
 import { NAV_LINKS } from "@/lib/constants";
 import ScrollLink, { scrollToSection } from "./ScrollLink";
 
-const SECTION_IDS = NAV_LINKS.map((link) => link.href.replace("#", ""));
+const SECTION_IDS = [...new Set(NAV_LINKS.map((link) => link.href.replace("#", "")))];
+
+function IconButton({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/5 text-sm text-zinc-400 transition-colors hover:border-[#d4af37]/40 hover:text-[#d4af37]"
+    >
+      {children}
+    </button>
+  );
+}
 
 export default function Header() {
-  const [activeSection, setActiveSection] = useState("");
+  const [activeSection, setActiveSection] = useState("home");
   const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
@@ -21,7 +33,7 @@ export default function Header() {
           setActiveSection(visible[0].target.id);
         }
       },
-      { rootMargin: "-30% 0px -55% 0px", threshold: [0, 0.15, 0.4] },
+      { rootMargin: "-28% 0px -58% 0px", threshold: [0, 0.12, 0.35] },
     );
 
     for (const id of SECTION_IDS) {
@@ -32,124 +44,100 @@ export default function Header() {
     return () => observer.disconnect();
   }, []);
 
-  const handleNavClick = (
-    event: React.MouseEvent<HTMLButtonElement>,
-    href: string,
-  ) => {
-    event.preventDefault();
-    scrollToSection(href.replace("#", ""));
-    window.history.replaceState(null, "", href);
-    setMobileOpen(false);
-  };
-
-  const linkClass = (href: string) => {
+  const navClass = (href: string) => {
     const id = href.replace("#", "");
-    const isActive = activeSection === id;
-    return `rounded-lg px-4 py-2 text-sm font-medium transition-all ${
-      isActive
-        ? "bg-amber-400/15 text-amber-300 shadow-[inset_0_0_0_1px_rgba(251,191,36,0.25)]"
-        : "text-zinc-400 hover:bg-white/5 hover:text-amber-300"
-    }`;
-  };
-
-  const mobileLinkClass = (href: string) => {
-    const id = href.replace("#", "");
-    const isActive = activeSection === id;
-    return `shrink-0 rounded-full border px-4 py-1.5 text-xs font-medium transition-all ${
-      isActive
-        ? "border-amber-400/40 bg-amber-400/15 text-amber-200"
-        : "border-white/10 bg-white/5 text-zinc-300 hover:border-amber-400/30"
+    const isActive =
+      activeSection === id ||
+      (id === "teams" && activeSection === "standings") ||
+      (id === "standings" && activeSection === "teams");
+    return `relative px-3 py-2 text-sm font-medium transition-colors ${
+      isActive ? "text-[#d4af37]" : "text-zinc-400 hover:text-white"
     }`;
   };
 
   return (
-    <nav className="sticky top-0 z-50 border-b border-white/5 bg-[#050505]/80 backdrop-blur-2xl">
-      <div className="mx-auto flex max-w-[1440px] items-center justify-between gap-4 px-4 py-4 md:px-8">
+    <header className="sticky top-0 z-50 border-b border-white/[0.06] bg-black/90 backdrop-blur-xl">
+      <div className="relative mx-auto flex max-w-[1440px] items-center justify-between gap-4 px-4 py-3 md:px-8">
+        <div className="flex items-center gap-2">
+          <IconButton label="פרופיל">👤</IconButton>
+          <IconButton label="מצב כהה">🌙</IconButton>
+          <IconButton label="חיפוש">🔍</IconButton>
+          <button
+            type="button"
+            className="hidden h-9 items-center gap-1 rounded-full border border-white/10 bg-white/5 px-3 text-xs font-semibold text-zinc-300 sm:flex"
+          >
+            HE <span className="text-[10px] text-zinc-500">▾</span>
+          </button>
+        </div>
+
         <button
           type="button"
-          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-          className="flex items-center gap-3 text-right transition-opacity hover:opacity-90"
+          onClick={() => scrollToSection("home")}
+          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-center transition-opacity hover:opacity-90"
         >
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-amber-700 shadow-lg shadow-amber-500/20">
-            <span className="text-lg">🏆</span>
-          </div>
-          <div>
-            <p className="text-sm font-black tracking-wide text-white">
-              FIFA WORLD CUP
-            </p>
-            <p className="text-[10px] font-semibold tracking-[0.25em] text-amber-400">
-              2026
-            </p>
-          </div>
+          <p className="text-[11px] font-bold tracking-[0.35em] text-[#d4af37]">
+            LIVE THE DREAM
+          </p>
+          <p className="text-base font-black tracking-wide text-white md:text-lg">
+            WORLD CUP <span className="text-[#d4af37]">2026</span>
+            <span className="mr-1 text-sm">🏆</span>
+          </p>
         </button>
 
-        <div className="hidden items-center gap-1 lg:flex">
+        <div className="hidden items-center lg:flex">
+          {NAV_LINKS.map((link) => (
+            <ScrollLink key={link.href} href={link.href} className={navClass(link.href)}>
+              {link.label}
+              {(activeSection === link.href.replace("#", "") ||
+                (link.href === "#teams" && activeSection === "standings") ||
+                (link.href === "#standings" && activeSection === "teams")) && (
+                <span className="absolute inset-x-2 -bottom-0.5 h-0.5 rounded-full bg-[#d4af37]" />
+              )}
+            </ScrollLink>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          aria-label={mobileOpen ? "סגור תפריט" : "פתח תפריט"}
+          aria-expanded={mobileOpen}
+          onClick={() => setMobileOpen((open) => !open)}
+          className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/5 text-zinc-300 lg:hidden"
+        >
+          {mobileOpen ? "✕" : "☰"}
+        </button>
+      </div>
+
+      {mobileOpen && (
+        <div className="border-t border-white/[0.06] px-4 py-3 lg:hidden">
           {NAV_LINKS.map((link) => (
             <ScrollLink
               key={link.href}
               href={link.href}
-              className={linkClass(link.href)}
+              onNavigate={() => setMobileOpen(false)}
+              className="block rounded-lg px-3 py-2.5 text-sm font-medium text-zinc-300 hover:bg-white/5 hover:text-[#d4af37]"
             >
               {link.label}
             </ScrollLink>
           ))}
         </div>
+      )}
 
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={(event) => handleNavClick(event, "#news")}
-            className="hidden rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-zinc-300 transition-all hover:border-amber-400/30 hover:bg-amber-400/10 hover:text-amber-300 sm:block"
-          >
-            שידור חי
-          </button>
-          <button
-            type="button"
-            aria-label={mobileOpen ? "סגור תפריט" : "פתח תפריט"}
-            aria-expanded={mobileOpen}
-            onClick={() => setMobileOpen((open) => !open)}
-            className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-zinc-300 transition-colors hover:border-amber-400/30 lg:hidden"
-          >
-            {mobileOpen ? "✕" : "☰"}
-          </button>
-        </div>
-      </div>
-
-      <div
-        className={`flex flex-col gap-2 border-t border-white/5 px-4 py-3 lg:hidden ${
-          mobileOpen ? "" : "hidden"
-        }`}
-      >
+      <div className="flex gap-1 overflow-x-auto border-t border-white/[0.06] px-4 py-2 scrollbar-hide lg:hidden">
         {NAV_LINKS.map((link) => (
           <ScrollLink
             key={link.href}
             href={link.href}
-            onNavigate={() => setMobileOpen(false)}
-            className={`rounded-xl px-4 py-3 text-sm font-medium ${linkClass(link.href)}`}
-          >
-            {link.label}
-          </ScrollLink>
-        ))}
-        <button
-          type="button"
-          onClick={(event) => handleNavClick(event, "#news")}
-          className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm font-semibold text-amber-200"
-        >
-          שידור חי
-        </button>
-      </div>
-
-      <div className="flex gap-2 overflow-x-auto border-t border-white/5 px-4 py-2 lg:hidden">
-        {NAV_LINKS.map((link) => (
-          <ScrollLink
-            key={link.href}
-            href={link.href}
-            className={mobileLinkClass(link.href)}
+            className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium ${
+              activeSection === link.href.replace("#", "")
+                ? "bg-[#d4af37]/15 text-[#d4af37]"
+                : "text-zinc-400"
+            }`}
           >
             {link.label}
           </ScrollLink>
         ))}
       </div>
-    </nav>
+    </header>
   );
 }
