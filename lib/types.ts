@@ -134,9 +134,10 @@ export interface LiveMatchView {
   homeScore: number | null;
   awayScore: number | null;
   minute: string;
-  status: "live" | "upcoming";
+  status: "live" | "upcoming" | "finished";
   venue: string;
   league: string;
+  kickoffAt: string;
 }
 
 export interface ScorerView {
@@ -180,6 +181,14 @@ export interface StatCardView {
 export interface NavLinkView {
   href: string;
   label: string;
+}
+
+export interface FifaDashboardView {
+  matches: LiveMatchView[];
+  standings: GroupStandingView[];
+  scorers: ScorerView[];
+  nextMatch: LiveMatchView | null;
+  fetchedAt: string;
 }
 
 /** One outbound WhatsApp message mirrored to the website feed. */

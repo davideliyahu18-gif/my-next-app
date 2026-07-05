@@ -42,5 +42,8 @@ export const TOURNAMENT_META = {
   footerHosts: "ארה״ב · קאנדה · מקסיקו",
 } as const;
 
-/** Cache TTL for live FIFA data (seconds). */
-export const LIVE_DATA_REVALIDATE_SECONDS = 30;
+/** Cache TTL for FIFA page data served from SSR (seconds). */
+export const LIVE_DATA_REVALIDATE_SECONDS = 15;
+
+/** Client poll interval for live FIFA dashboard (milliseconds). */
+export const FIFA_LIVE_POLL_MS = 15_000;

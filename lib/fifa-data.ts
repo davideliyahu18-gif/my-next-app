@@ -2,6 +2,7 @@ import { IMAGES } from "./constants";
 import {
   type FifaMatch,
   calendarTeamLabels,
+  calendarRowToMatch,
   getCalendarMatches,
   getCalendarRowsById,
   getLiveMatchesNow,
@@ -14,6 +15,7 @@ import {
 } from "./fifa-api";
 import { countryFlag } from "./team-display";
 import type {
+  FifaDashboardView,
   GroupStandingView,
   LiveMatchView,
   ScorerView,
@@ -60,9 +62,12 @@ function matchToLiveView(
   match: FifaMatch,
   venue = "—",
 ): LiveMatchView {
-  const status = match.status === "IN_PLAY" || match.status === "PAUSE"
-    ? "live"
-    : "upcoming";
+  const status =
+    match.status === "IN_PLAY" || match.status === "PAUSE"
+      ? "live"
+      : match.status === "FINISHED"
+        ? "finished"
+        : "upcoming";
 
   return {
     id: match.id,
@@ -76,13 +81,14 @@ function matchToLiveView(
     status,
     venue,
     league: matchStageLabel(match),
+    kickoffAt: match.utcDate.toISOString(),
   };
 }
 
-export async function fetchLiveMatches(): Promise<LiveMatchView[]> {
-  const rows = await getCalendarRowsById(-30, 7);
-  const live = await getLiveMatchesNow();
-  const upcoming = await getNextScheduledKickoffMatches();
+export async function fetchLiveMatches(fresh = false): Promise<LiveMatchView[]> {
+  const rows = await getCalendarRowsById(-1, 3, fresh);
+  const live = await getLiveMatchesNow(fresh);
+  const upcoming = await getNextScheduledKickoffMatches(fresh);
 
   const seen = new Set<string>();
   const views: LiveMatchView[] = [];
@@ -97,6 +103,25 @@ export async function fetchLiveMatches(): Promise<LiveMatchView[]> {
     seen.add(match.id);
     views.push(matchToLiveView(match, venueFromRow(rows.get(match.id) ?? {})));
     if (views.length >= 8) break;
+  }
+
+  if (views.length < 4) {
+    const recentRows = [...rows.values()]
+      .filter((row) => Number(row.MatchStatus ?? -1) === 0)
+      .sort(
+        (a, b) =>
+          parseDatetime(b.Date as string | undefined).getTime() -
+          parseDatetime(a.Date as string | undefined).getTime(),
+      )
+      .slice(0, 4);
+
+    for (const row of recentRows) {
+      const match = calendarRowToMatch(row);
+      if (seen.has(match.id)) continue;
+      seen.add(match.id);
+      views.push(matchToLiveView(match, venueFromRow(row)));
+      if (views.length >= 8) break;
+    }
   }
 
   return views.slice(0, 8);
@@ -122,14 +147,14 @@ function teamLabelFromSide(side: Record<string, unknown>) {
   return calendarTeamLabels(side);
 }
 
-export async function fetchGroupStandings(): Promise<GroupStandingView[]> {
+export async function fetchGroupStandings(fresh = false): Promise<GroupStandingView[]> {
   const tables = new Map<
     string,
     Map<string, { name: string; flag: string; played: number; gd: number; pts: number }>
   >();
 
   for (let dayOffset = -30; dayOffset < 8; dayOffset++) {
-    const rows = await getCalendarMatches(dayOffset);
+    const rows = await getCalendarMatches(dayOffset, fresh);
     for (const row of rows) {
       const groupItems = row.GroupName as
         | { Description?: string }[]
@@ -198,13 +223,13 @@ function playerPhoto(name: string): string {
   return `https://ui-avatars.com/api/?name=${safe}&background=d4af37&color=111&size=200&bold=true`;
 }
 
-export async function fetchTopScorers(limit = 10): Promise<ScorerView[]> {
+export async function fetchTopScorers(limit = 10, fresh = false): Promise<ScorerView[]> {
   const now = new Date();
   const candidateIds: string[] = [];
   const seen = new Set<string>();
 
   for (let dayOffset = -30; dayOffset < 2; dayOffset++) {
-    const rows = await getCalendarMatches(dayOffset);
+    const rows = await getCalendarMatches(dayOffset, fresh);
     for (const row of rows) {
       const matchId = String(row.IdMatch);
       if (seen.has(matchId)) continue;
@@ -215,7 +240,7 @@ export async function fetchTopScorers(limit = 10): Promise<ScorerView[]> {
     }
   }
 
-  const matches = await getMatchesByIds(candidateIds.slice(0, 80));
+  const matches = await getMatchesByIds(candidateIds.slice(0, 80), fresh);
   const scorers = new Map<
     string,
     { name: string; team: string; flag: string; goals: number; assists: number }
@@ -261,13 +286,13 @@ export async function fetchTopScorers(limit = 10): Promise<ScorerView[]> {
   }));
 }
 
-export async function fetchStatCards(): Promise<StatCardView[]> {
+export async function fetchStatCards(fresh = false): Promise<StatCardView[]> {
   let totalGoals = 0;
   let finishedCount = 0;
   const teams = new Set<string>();
 
   for (let dayOffset = -30; dayOffset < 8; dayOffset++) {
-    const rows = await getCalendarMatches(dayOffset);
+    const rows = await getCalendarMatches(dayOffset, fresh);
     for (const row of rows) {
       const homeSide = (row.Home as Record<string, unknown> | undefined) ?? {};
       const awaySide = (row.Away as Record<string, unknown> | undefined) ?? {};
@@ -283,7 +308,7 @@ export async function fetchStatCards(): Promise<StatCardView[]> {
     }
   }
 
-  const liveCount = (await getLiveMatchesNow()).length;
+  const liveCount = (await getLiveMatchesNow(fresh)).length;
 
   return [
     {
@@ -322,15 +347,15 @@ export async function fetchTournament() {
   };
 }
 
-export async function fetchFinishedMatches(limit = 6): Promise<FifaMatch[]> {
+export async function fetchFinishedMatches(limit = 6, fresh = false): Promise<FifaMatch[]> {
   const finished: FifaMatch[] = [];
 
   for (let dayOffset = -7; dayOffset < 1; dayOffset++) {
-    const rows = await getCalendarMatches(dayOffset);
+    const rows = await getCalendarMatches(dayOffset, fresh);
     for (const row of rows) {
       if (!isRowFinished(row)) continue;
       try {
-        finished.push(await getMatchById(String(row.IdMatch)));
+        finished.push(await getMatchById(String(row.IdMatch), fresh));
       } catch {
         // Skip matches that fail to load.
       }
@@ -339,4 +364,25 @@ export async function fetchFinishedMatches(limit = 6): Promise<FifaMatch[]> {
 
   finished.sort((a, b) => b.utcDate.getTime() - a.utcDate.getTime());
   return finished.slice(0, limit);
+}
+
+export async function fetchFifaDashboard(fresh = true): Promise<FifaDashboardView> {
+  const [matches, standings, scorers] = await Promise.all([
+    fetchLiveMatches(fresh),
+    fetchGroupStandings(fresh),
+    fetchTopScorers(10, fresh),
+  ]);
+
+  const nextMatch =
+    matches.find((match) => match.status === "upcoming") ??
+    matches.find((match) => match.status === "live") ??
+    null;
+
+  return {
+    matches,
+    standings,
+    scorers,
+    nextMatch,
+    fetchedAt: new Date().toISOString(),
+  };
 }

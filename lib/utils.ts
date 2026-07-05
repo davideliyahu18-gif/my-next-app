@@ -40,6 +40,9 @@ export function toLiveMatchView(match: Match): LiveMatchView {
     status,
     venue: match.venue,
     league: match.stage,
+    kickoffAt: match.scheduledTime
+      ? new Date().toISOString()
+      : new Date().toISOString(),
   };
 }
 

@@ -1,9 +1,8 @@
-import { getLiveMatches } from "@/lib/api";
 import type { LiveMatchView } from "@/lib/types";
 import DashboardCard from "./DashboardCard";
 
 function parseMinuteProgress(minute: string): number {
-  if (minute === "HT" || minute === "הפסקה") return 50;
+  if (minute === "HT" || minute === "הפסקה" || minute === "סיום") return 50;
   const numeric = Number.parseInt(minute, 10);
   if (Number.isNaN(numeric)) return 0;
   return Math.min((numeric / 90) * 100, 100);
@@ -81,9 +80,8 @@ function MatchRow({ match }: { match: LiveMatchView }) {
   );
 }
 
-export default async function LiveMatches() {
-  const liveMatches = await getLiveMatches();
-  const liveCount = liveMatches.filter((m) => m.status === "live").length;
+export default function LiveMatchesPanel({ matches }: { matches: LiveMatchView[] }) {
+  const liveCount = matches.filter((match) => match.status === "live").length;
 
   return (
     <section id="matches">
@@ -96,14 +94,14 @@ export default async function LiveMatches() {
               LIVE
             </span>
           ) : (
-            <span className="text-[10px] text-zinc-500">עדכון אחרון</span>
+            <span className="text-[10px] text-zinc-500">מ-FIFA API</span>
           )
         }
       >
-        {liveMatches.length === 0 ? (
+        {matches.length === 0 ? (
           <p className="px-5 py-12 text-center text-sm text-zinc-500">אין משחקים כרגע</p>
         ) : (
-          liveMatches.map((match) => <MatchRow key={match.id} match={match} />)
+          matches.map((match) => <MatchRow key={match.id} match={match} />)
         )}
       </DashboardCard>
     </section>

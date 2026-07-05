@@ -1,6 +1,5 @@
-import { unstable_cache } from "next/cache";
-import { LIVE_DATA_REVALIDATE_SECONDS } from "./constants";
 import {
+  fetchFifaDashboard,
   fetchGroupStandings,
   fetchLiveMatches,
   fetchStatCards,
@@ -8,6 +7,7 @@ import {
   fetchTournament,
 } from "./fifa-data";
 import type {
+  FifaDashboardView,
   GroupStandingView,
   LiveMatchView,
   ScorerView,
@@ -23,32 +23,37 @@ async function safeFetch<T>(label: string, fn: () => Promise<T>, fallback: T): P
   }
 }
 
-function cachedFetch<T>(key: string, fn: () => Promise<T>, fallback: T): Promise<T> {
-  return unstable_cache(
-    () => safeFetch(key, fn, fallback),
-    ["fifa-api", key],
-    { revalidate: LIVE_DATA_REVALIDATE_SECONDS },
-  )();
+const emptyDashboard = (): FifaDashboardView => ({
+  matches: [],
+  standings: [],
+  scorers: [],
+  nextMatch: null,
+  fetchedAt: new Date().toISOString(),
+});
+
+/** Fresh FIFA data — no cache. Used for live dashboard + API route. */
+export function getFifaDashboard(): Promise<FifaDashboardView> {
+  return safeFetch("dashboard", () => fetchFifaDashboard(true), emptyDashboard());
 }
 
 export function getLiveMatches(): Promise<LiveMatchView[]> {
-  return cachedFetch("live_matches", fetchLiveMatches, []);
+  return safeFetch("live_matches", () => fetchLiveMatches(true), []);
 }
 
 export function getGroupStandings(): Promise<GroupStandingView[]> {
-  return cachedFetch("group_standings", fetchGroupStandings, []);
+  return safeFetch("group_standings", () => fetchGroupStandings(true), []);
 }
 
 export function getTopScorers(): Promise<ScorerView[]> {
-  return cachedFetch("top_scorers", fetchTopScorers, []);
+  return safeFetch("top_scorers", () => fetchTopScorers(10, true), []);
 }
 
 export function getStatCards(): Promise<StatCardView[]> {
-  return cachedFetch("stat_cards", fetchStatCards, []);
+  return safeFetch("stat_cards", () => fetchStatCards(true), []);
 }
 
 export function getTournament() {
-  return cachedFetch("tournament", fetchTournament, {
+  return safeFetch("tournament", fetchTournament, {
     totalTeams: 48,
     totalMatches: 104,
     totalCities: 16,

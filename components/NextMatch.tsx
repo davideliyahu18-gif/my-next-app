@@ -59,8 +59,16 @@ export default function NextMatch({ match }: { match: LiveMatchView | null }) {
     );
   }
 
-  const kickoff = new Date();
-  kickoff.setHours(kickoff.getHours() + 2, 14, 36, 45);
+  const kickoffLabel = new Date(match.kickoffAt).toLocaleString("he-IL", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Jerusalem",
+  });
+
+  const showCountdown = match.status === "upcoming";
 
   return (
     <DashboardCard title="המשחק הבא">
@@ -82,10 +90,10 @@ export default function NextMatch({ match }: { match: LiveMatchView | null }) {
         <div className="flex items-center justify-center gap-4 text-sm text-zinc-400">
           <span>{match.minute}</span>
           <span className="text-[#d4af37]">•</span>
-          <span>12.06.2026</span>
+          <span>{kickoffLabel}</span>
         </div>
 
-        <Countdown targetIso={kickoff.toISOString()} />
+        {showCountdown && <Countdown targetIso={match.kickoffAt} />}
 
         <ScrollLinkButton
           href="#matches"

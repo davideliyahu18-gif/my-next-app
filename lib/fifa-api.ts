@@ -46,6 +46,7 @@ export interface FifaMatch {
   stage: string | null;
   group: string | null;
   period: number | null;
+  matchTime: string | null;
 }
 
 type LocalizedItem = { Locale?: string; Description?: string };
@@ -84,6 +85,7 @@ export function parseDatetime(value: string | null | undefined): Date {
 async function fifaGet(
   path: string,
   params?: Record<string, string | number>,
+  options?: { fresh?: boolean },
 ): Promise<Record<string, unknown>> {
   const url = new URL(
     `${FIFA_CONFIG.baseUrl.replace(/\/$/, "")}/${path.replace(/^\//, "")}`,
@@ -101,7 +103,9 @@ async function fifaGet(
       "User-Agent": FIFA_USER_AGENT,
       Accept: "application/json",
     },
-    next: { revalidate: FIFA_CONFIG.revalidateSeconds },
+    ...(options?.fresh
+      ? { cache: "no-store" as const }
+      : { next: { revalidate: FIFA_CONFIG.revalidateSeconds } }),
   });
 
   if (!response.ok) {
@@ -138,23 +142,25 @@ function calendarParams(day: Date): Record<string, string | number> {
 
 export async function getCalendarMatches(
   dayOffset = 0,
+  fresh = false,
 ): Promise<CalendarRow[]> {
   const day = new Date();
   day.setUTCDate(day.getUTCDate() + dayOffset);
-  const data = await fifaGet("calendar/matches", calendarParams(day));
+  const data = await fifaGet("calendar/matches", calendarParams(day), { fresh });
   return (data.Results as CalendarRow[] | undefined) ?? [];
 }
 
 export async function getCalendarRowsById(
   fromOffset: number,
   toOffset: number,
+  fresh = false,
 ): Promise<Map<string, CalendarRow>> {
   const offsets = Array.from(
     { length: toOffset - fromOffset + 1 },
     (_, index) => fromOffset + index,
   );
   const batches = await Promise.all(
-    offsets.map((offset) => getCalendarMatches(offset)),
+    offsets.map((offset) => getCalendarMatches(offset, fresh)),
   );
 
   const rows = new Map<string, CalendarRow>();
@@ -168,16 +174,24 @@ export async function getCalendarRowsById(
 
 async function getLiveMatch(
   matchId: string,
+  fresh = false,
 ): Promise<Record<string, unknown>> {
-  return fifaGet(`live/football/${matchId}`, {
-    language: FIFA_CONFIG.language,
-  });
+  return fifaGet(
+    `live/football/${matchId}`,
+    { language: FIFA_CONFIG.language },
+    { fresh },
+  );
 }
 
 async function getTimeline(
   matchId: string,
+  fresh = false,
 ): Promise<Record<string, unknown>> {
-  return fifaGet(`timelines/${matchId}`, { language: FIFA_CONFIG.language });
+  return fifaGet(
+    `timelines/${matchId}`,
+    { language: FIFA_CONFIG.language },
+    { fresh },
+  );
 }
 
 function parseScorer(description: string): string {
@@ -283,12 +297,26 @@ export function calendarTeamLabels(side: Record<string, unknown>): {
   return { name, flag, code };
 }
 
+function formatMatchTimeLabel(
+  matchTime: string | null | undefined,
+  period: number | null,
+  status: FifaMatch["status"],
+): string | null {
+  if (status === "PAUSE" || period === 4) return "HT";
+  if (!matchTime) return null;
+  const cleaned = String(matchTime).trim();
+  if (!cleaned || cleaned === "—") return null;
+  if (cleaned === "HT") return "HT";
+  return cleaned.endsWith("'") ? cleaned : `${cleaned}'`;
+}
+
 async function fetchLiveAndTimeline(
   matchId: string,
+  fresh = false,
 ): Promise<[Record<string, unknown>, Record<string, unknown>]> {
   const [liveResult, timelineResult] = await Promise.allSettled([
-    getLiveMatch(matchId),
-    getTimeline(matchId),
+    getLiveMatch(matchId, fresh),
+    getTimeline(matchId, fresh),
   ]);
 
   return [
@@ -305,6 +333,7 @@ async function buildMatch(
     liveData?: Record<string, unknown>;
     timelineData?: Record<string, unknown>;
   },
+  fresh = false,
 ): Promise<FifaMatch> {
   const matchId = String(calendarRow.IdMatch);
   const home = (calendarRow.Home as Record<string, unknown> | undefined) ?? {};
@@ -317,7 +346,7 @@ async function buildMatch(
   let liveData = prefetched?.liveData;
   let timelineData = prefetched?.timelineData;
   if (!liveData || !timelineData) {
-    const fetched = await fetchLiveAndTimeline(matchId);
+    const fetched = await fetchLiveAndTimeline(matchId, fresh);
     liveData = liveData ?? fetched[0];
     timelineData = timelineData ?? fetched[1];
   }
@@ -362,6 +391,14 @@ async function buildMatch(
     awayLabels.name,
   );
 
+  const matchTime =
+    formatMatchTimeLabel(
+      (liveData.MatchTime as string | undefined) ??
+        (calendarRow.MatchTime as string | undefined),
+      period,
+      status,
+    ) ?? null;
+
   return {
     id: matchId,
     homeTeam: homeLabels.name,
@@ -385,16 +422,43 @@ async function buildMatch(
       localizedName(calendarRow.GroupName as LocalizedItem[] | undefined) ||
       null,
     period,
+    matchTime,
   };
 }
 
 function buildCalendarMatch(calendarRow: CalendarRow): FifaMatch {
+  return calendarRowToMatch(calendarRow);
+}
+
+export function calendarRowToMatch(calendarRow: CalendarRow): FifaMatch {
   const home = (calendarRow.Home as Record<string, unknown> | undefined) ?? {};
   const away = (calendarRow.Away as Record<string, unknown> | undefined) ?? {};
   const homeLabels = calendarTeamLabels(home);
   const awayLabels = calendarTeamLabels(away);
   const utcDate = parseDatetime(calendarRow.Date as string | undefined);
   const now = new Date();
+  const matchStatus = Number(calendarRow.MatchStatus ?? -1);
+  const rawHome = calendarRow.HomeTeamScore ?? home.Score;
+  const rawAway = calendarRow.AwayTeamScore ?? away.Score;
+  const homeScore =
+    rawHome !== null && rawHome !== undefined ? Number(rawHome) : null;
+  const awayScore =
+    rawAway !== null && rawAway !== undefined ? Number(rawAway) : null;
+
+  let status: FifaMatch["status"] = "SCHEDULED";
+  if (matchStatus === 0) {
+    status = "FINISHED";
+  } else if (utcDate <= now && (calendarRow.MatchTime || homeScore !== null)) {
+    status = "IN_PLAY";
+  } else if (utcDate > now) {
+    status = "SCHEDULED";
+  }
+
+  const matchTime = formatMatchTimeLabel(
+    calendarRow.MatchTime as string | undefined,
+    null,
+    status,
+  );
 
   return {
     id: String(calendarRow.IdMatch),
@@ -405,12 +469,12 @@ function buildCalendarMatch(calendarRow: CalendarRow): FifaMatch {
     homeFlag: homeLabels.flag,
     awayFlag: awayLabels.flag,
     utcDate,
-    status: utcDate > now ? "SCHEDULED" : "IN_PLAY",
+    status,
     competition: localizedName(
       calendarRow.CompetitionName as LocalizedItem[] | undefined,
     ),
-    homeScore: null,
-    awayScore: null,
+    homeScore,
+    awayScore,
     goals: [],
     stage:
       localizedName(calendarRow.StageName as LocalizedItem[] | undefined) ||
@@ -419,11 +483,15 @@ function buildCalendarMatch(calendarRow: CalendarRow): FifaMatch {
       localizedName(calendarRow.GroupName as LocalizedItem[] | undefined) ||
       null,
     period: null,
+    matchTime,
   };
 }
 
-export async function getMatchById(matchId: string): Promise<FifaMatch> {
-  const [liveData, timelineData] = await fetchLiveAndTimeline(matchId);
+export async function getMatchById(
+  matchId: string,
+  fresh = false,
+): Promise<FifaMatch> {
+  const [liveData, timelineData] = await fetchLiveAndTimeline(matchId, fresh);
   const liveHome = (liveData.HomeTeam as Record<string, unknown> | undefined) ?? {};
   const liveAway = (liveData.AwayTeam as Record<string, unknown> | undefined) ?? {};
 
@@ -444,19 +512,23 @@ export async function getMatchById(matchId: string): Promise<FifaMatch> {
     },
     HomeTeamScore: liveHome.Score,
     AwayTeamScore: liveAway.Score,
+    MatchTime: liveData.MatchTime,
     CompetitionName: liveData.CompetitionName,
     StageName: liveData.StageName,
     GroupName: liveData.GroupName,
   };
 
-  return buildMatch(calendarRow, { liveData, timelineData });
+  return buildMatch(calendarRow, { liveData, timelineData }, fresh);
 }
 
-export async function getMatchesByIds(matchIds: string[]): Promise<FifaMatch[]> {
+export async function getMatchesByIds(
+  matchIds: string[],
+  fresh = false,
+): Promise<FifaMatch[]> {
   if (!matchIds.length) return [];
 
   const results = await Promise.allSettled(
-    matchIds.map((matchId) => getMatchById(matchId)),
+    matchIds.map((matchId) => getMatchById(matchId, fresh)),
   );
 
   const matches: FifaMatch[] = [];
@@ -472,6 +544,8 @@ export async function getMatchesByIds(matchIds: string[]): Promise<FifaMatch[]> 
 
 export function latestMatchMinuteLabel(match: FifaMatch): string {
   if (match.status === "PAUSE") return "HT";
+  if (match.matchTime) return match.matchTime;
+  if (match.status === "FINISHED") return "סיום";
   let best = 0;
   for (const goal of match.goals) {
     const minuteMatch = goal.minute.match(/(\d+)/);
@@ -480,14 +554,14 @@ export function latestMatchMinuteLabel(match: FifaMatch): string {
   return best > 0 ? `${best}'` : "—";
 }
 
-export async function getLiveMatchesNow(): Promise<FifaMatch[]> {
+export async function getLiveMatchesNow(fresh = false): Promise<FifaMatch[]> {
   const liveStatuses = new Set<FifaMatch["status"]>(["IN_PLAY", "PAUSE"]);
   const now = new Date();
   const candidateIds: string[] = [];
   const seen = new Set<string>();
 
   for (const dayOffset of [0, -1]) {
-    const rows = await getCalendarMatches(dayOffset);
+    const rows = await getCalendarMatches(dayOffset, fresh);
     for (const row of rows) {
       const matchId = String(row.IdMatch);
       if (seen.has(matchId)) continue;
@@ -501,7 +575,7 @@ export async function getLiveMatchesNow(): Promise<FifaMatch[]> {
 
   if (!candidateIds.length) return [];
 
-  const matches = await getMatchesByIds(candidateIds);
+  const matches = await getMatchesByIds(candidateIds, fresh);
   return matches
     .filter((match) => liveStatuses.has(match.status))
     .sort((a, b) => a.utcDate.getTime() - b.utcDate.getTime());
@@ -509,10 +583,11 @@ export async function getLiveMatchesNow(): Promise<FifaMatch[]> {
 
 export async function getUpcomingCalendarRows(
   maxDays = 3,
+  fresh = false,
 ): Promise<CalendarRow[]> {
   const now = new Date();
   const batches = await Promise.all(
-    Array.from({ length: maxDays }, (_, index) => getCalendarMatches(index)),
+    Array.from({ length: maxDays }, (_, index) => getCalendarMatches(index, fresh)),
   );
 
   const rows = batches
@@ -527,13 +602,15 @@ export async function getUpcomingCalendarRows(
   return rows;
 }
 
-export async function getNextScheduledKickoffMatches(): Promise<FifaMatch[]> {
+export async function getNextScheduledKickoffMatches(
+  fresh = false,
+): Promise<FifaMatch[]> {
   const now = new Date();
-  const rows = await getUpcomingCalendarRows();
+  const rows = await getUpcomingCalendarRows(7, fresh);
   const matches: FifaMatch[] = [];
 
   for (const row of rows) {
-    const match = buildCalendarMatch(row);
+    const match = calendarRowToMatch(row);
     if (match.status !== "SCHEDULED") continue;
     if (match.utcDate <= now) continue;
     matches.push(match);
