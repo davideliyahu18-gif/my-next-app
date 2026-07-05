@@ -86,6 +86,10 @@ function matchToLiveView(
     league: matchStageLabel(match),
     kickoffAt: match.utcDate.toISOString(),
     highlightUrl: null,
+    fifaCentreUrl: "",
+    idCompetition: match.idCompetition,
+    idSeason: match.idSeason,
+    idStage: match.idStage,
   };
 }
 

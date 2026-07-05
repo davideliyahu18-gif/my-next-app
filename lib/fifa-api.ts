@@ -47,10 +47,21 @@ export interface FifaMatch {
   group: string | null;
   period: number | null;
   matchTime: string | null;
+  idCompetition: string;
+  idSeason: string;
+  idStage: string;
 }
 
 type LocalizedItem = { Locale?: string; Description?: string };
 type CalendarRow = Record<string, unknown>;
+
+function matchIdsFromRow(row: CalendarRow) {
+  return {
+    idCompetition: String(row.IdCompetition ?? FIFA_CONFIG.idCompetition),
+    idSeason: String(row.IdSeason ?? FIFA_CONFIG.idSeason),
+    idStage: String(row.IdStage ?? FIFA_CONFIG.idStage),
+  };
+}
 
 function localizedName(
   items: LocalizedItem[] | null | undefined,
@@ -423,6 +434,7 @@ async function buildMatch(
       null,
     period,
     matchTime,
+    ...matchIdsFromRow(calendarRow),
   };
 }
 
@@ -484,6 +496,7 @@ export function calendarRowToMatch(calendarRow: CalendarRow): FifaMatch {
       null,
     period: null,
     matchTime,
+    ...matchIdsFromRow(calendarRow),
   };
 }
 
@@ -513,6 +526,9 @@ export async function getMatchById(
     HomeTeamScore: liveHome.Score,
     AwayTeamScore: liveAway.Score,
     MatchTime: liveData.MatchTime,
+    IdCompetition: liveData.IdCompetition,
+    IdSeason: liveData.IdSeason,
+    IdStage: liveData.IdStage,
     CompetitionName: liveData.CompetitionName,
     StageName: liveData.StageName,
     GroupName: liveData.GroupName,

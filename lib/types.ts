@@ -141,6 +141,10 @@ export interface LiveMatchView {
   league: string;
   kickoffAt: string;
   highlightUrl: string | null;
+  fifaCentreUrl: string;
+  idCompetition: string;
+  idSeason: string;
+  idStage: string;
 }
 
 export interface ScorerView {

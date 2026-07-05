@@ -44,6 +44,10 @@ export function toLiveMatchView(match: Match): LiveMatchView {
     league: match.stage,
     kickoffAt: new Date().toISOString(),
     highlightUrl: null,
+    fifaCentreUrl: "",
+    idCompetition: "",
+    idSeason: "",
+    idStage: "",
   };
 }
 
