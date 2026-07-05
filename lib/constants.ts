@@ -23,7 +23,7 @@ export const TOURNAMENT_ID = "fifa-world-cup-2026";
 export const IMAGES = {
   stadium:
     "https://images.unsplash.com/photo-1529900748604-07564a03e7a6?w=2400&q=85",
-  ball: "/images/trionda.jpg",
+  trophy: "/images/world-cup-trophy.jpg",
 } as const;
 
 export const NAV_LINKS: NavLinkView[] = [
