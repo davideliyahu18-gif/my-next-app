@@ -32,17 +32,18 @@ export function toLiveMatchView(match: Match): LiveMatchView {
     id: match.id,
     home: match.homeTeam.name,
     homeFlag: match.homeTeam.flag,
+    homeCode: match.homeTeam.code ?? "",
     away: match.awayTeam.name,
     awayFlag: match.awayTeam.flag,
+    awayCode: match.awayTeam.code ?? "",
     homeScore: match.homeScore,
     awayScore: match.awayScore,
     minute: formatMatchMinute(match),
     status,
     venue: match.venue,
     league: match.stage,
-    kickoffAt: match.scheduledTime
-      ? new Date().toISOString()
-      : new Date().toISOString(),
+    kickoffAt: new Date().toISOString(),
+    highlightUrl: null,
   };
 }
 

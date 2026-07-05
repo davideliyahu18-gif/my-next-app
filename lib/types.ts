@@ -129,8 +129,10 @@ export interface LiveMatchView {
   id: string;
   home: string;
   homeFlag: string;
+  homeCode: string;
   away: string;
   awayFlag: string;
+  awayCode: string;
   homeScore: number | null;
   awayScore: number | null;
   minute: string;
@@ -138,6 +140,7 @@ export interface LiveMatchView {
   venue: string;
   league: string;
   kickoffAt: string;
+  highlightUrl: string | null;
 }
 
 export interface ScorerView {

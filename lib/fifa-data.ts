@@ -14,6 +14,7 @@ import {
   parseDatetime,
 } from "./fifa-api";
 import { countryFlag } from "./team-display";
+import { attachHighlightUrls } from "./match-highlights";
 import type {
   FifaDashboardView,
   GroupStandingView,
@@ -73,8 +74,10 @@ function matchToLiveView(
     id: match.id,
     home: match.homeTeam,
     homeFlag: match.homeFlag,
+    homeCode: match.homeTeamCode,
     away: match.awayTeam,
     awayFlag: match.awayFlag,
+    awayCode: match.awayTeamCode,
     homeScore: match.homeScore,
     awayScore: match.awayScore,
     minute: liveMinute(match),
@@ -82,6 +85,7 @@ function matchToLiveView(
     venue,
     league: matchStageLabel(match),
     kickoffAt: match.utcDate.toISOString(),
+    highlightUrl: null,
   };
 }
 
@@ -124,7 +128,7 @@ export async function fetchLiveMatches(fresh = false): Promise<LiveMatchView[]> 
     }
   }
 
-  return views.slice(0, 8);
+  return attachHighlightUrls(views.slice(0, 8));
 }
 
 function isRowFinished(row: Record<string, unknown>): boolean {

@@ -42,6 +42,27 @@ function MinuteRing({ minute, isLive }: { minute: string; isLive: boolean }) {
   );
 }
 
+function HighlightButton({ url }: { url: string | null }) {
+  if (!url) {
+    return (
+      <span className="shrink-0 rounded-lg border border-white/10 px-3 py-1.5 text-[11px] font-medium text-zinc-600">
+        צפו בתקציר
+      </span>
+    );
+  }
+
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="shrink-0 rounded-lg border border-[#d4af37]/30 bg-[#d4af37]/10 px-3 py-1.5 text-[11px] font-bold text-[#d4af37] transition-colors hover:bg-[#d4af37]/25 hover:text-white"
+    >
+      ▶ צפו בתקציר
+    </a>
+  );
+}
+
 function MatchRow({ match }: { match: LiveMatchView }) {
   const isLive = match.status === "live";
   const score =
@@ -70,12 +91,7 @@ function MatchRow({ match }: { match: LiveMatchView }) {
         <span className="text-xl">{match.awayFlag}</span>
       </div>
 
-      <button
-        type="button"
-        className="hidden shrink-0 rounded-lg border border-[#d4af37]/30 bg-[#d4af37]/10 px-3 py-1.5 text-[11px] font-bold text-[#d4af37] transition-colors hover:bg-[#d4af37]/20 sm:block"
-      >
-        צפו בתקציר
-      </button>
+      <HighlightButton url={match.highlightUrl} />
     </div>
   );
 }
