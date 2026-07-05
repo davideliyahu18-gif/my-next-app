@@ -6,6 +6,12 @@ export const WHATSAPP_FEED_INITIAL_LIMIT = 50;
 /** Shared secret for POST /api/feed (set on Vercel + bot). */
 export const FEED_API_SECRET = process.env.FEED_API_SECRET ?? "";
 
+/** WhatsApp group invite for live match alerts. */
+export const WHATSAPP_INVITE_LINK =
+  process.env.WHATSAPP_INVITE_LINK ||
+  process.env.NEXT_PUBLIC_WHATSAPP_INVITE_LINK ||
+  "https://chat.whatsapp.com/L47SyZIjYAR0k8qZ0C2Fcl";
+
 /** FIFA API configuration (https://api.fifa.com/api/v3). */
 export const FIFA_CONFIG = {
   baseUrl: process.env.FIFA_API_BASE_URL ?? "https://api.fifa.com/api/v3",
