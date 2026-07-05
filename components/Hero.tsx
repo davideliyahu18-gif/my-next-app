@@ -1,7 +1,7 @@
 import Image from "next/image";
+import Link from "next/link";
 import { getTournament } from "@/lib/api";
 import { IMAGES, TOURNAMENT_META } from "@/lib/constants";
-import ScrollLinkButton from "./ScrollLinkButton";
 
 export default async function Hero() {
   const tournament = await getTournament();
@@ -31,13 +31,13 @@ export default async function Hero() {
             </p>
             <p className="mt-2 text-sm text-zinc-500">{TOURNAMENT_META.dateRange}</p>
 
-            <ScrollLinkButton
-              href="#matches"
+            <Link
+              href="/schedule"
               className="mt-8 inline-flex items-center gap-2 rounded-full bg-[#d4af37] px-7 py-3 text-sm font-black text-black shadow-[0_8px_32px_rgba(212,175,55,0.35)] transition-all hover:scale-[1.02] hover:shadow-[0_12px_40px_rgba(212,175,55,0.5)]"
             >
               <span>📅</span>
               לוח משחקים מלא
-            </ScrollLinkButton>
+            </Link>
           </div>
 
           <div className="relative shrink-0">

@@ -147,6 +147,23 @@ export interface LiveMatchView {
   idStage: string;
 }
 
+export interface ScheduleMatchView {
+  id: string;
+  home: string;
+  homeFlag: string;
+  away: string;
+  awayFlag: string;
+  homeScore: number | null;
+  awayScore: number | null;
+  kickoffAt: string;
+  dateLabel: string;
+  timeLabel: string;
+  status: "live" | "upcoming" | "finished";
+  stage: string;
+  venue: string;
+  matchNumber: number | null;
+}
+
 export interface ScorerView {
   rank: number;
   name: string;

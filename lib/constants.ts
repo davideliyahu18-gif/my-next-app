@@ -39,6 +39,8 @@ export const NAV_LINKS: NavLinkView[] = [
 
 export const TOURNAMENT_META = {
   dateRange: "11 יוני – 19 יולי 2026",
+  startDate: "2026-06-11",
+  endDate: "2026-07-19",
   tagline: "ארה״ב · קאנדה · מקסיקו — ההיסטוריה הגדולה ביותר בכדורגל",
   footerHosts: "ארה״ב · קאנדה · מקסיקו",
 } as const;

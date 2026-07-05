@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { NAV_LINKS } from "@/lib/constants";
 import ScrollLink, { scrollToSection } from "./ScrollLink";
@@ -108,8 +109,27 @@ export default function Header() {
         </button>
       </div>
 
+      <div className="border-t border-white/[0.06] bg-[#121212]/90">
+        <div className="mx-auto flex max-w-[1440px] justify-center px-4 py-2.5 md:px-8">
+          <Link
+            href="/schedule"
+            className="inline-flex items-center gap-2 rounded-full border border-[#d4af37]/40 bg-[#d4af37]/10 px-5 py-2 text-sm font-bold text-[#d4af37] transition-all hover:bg-[#d4af37]/20 hover:text-white"
+          >
+            <span>📋</span>
+            טבלת כל המשחקים עד הסוף
+          </Link>
+        </div>
+      </div>
+
       {mobileOpen && (
         <div className="border-t border-white/[0.06] px-4 py-3 lg:hidden">
+          <Link
+            href="/schedule"
+            onClick={() => setMobileOpen(false)}
+            className="mb-2 block rounded-lg border border-[#d4af37]/30 bg-[#d4af37]/10 px-3 py-2.5 text-center text-sm font-bold text-[#d4af37]"
+          >
+            📋 טבלת כל המשחקים עד הסוף
+          </Link>
           {NAV_LINKS.map((link) => (
             <ScrollLink
               key={link.href}

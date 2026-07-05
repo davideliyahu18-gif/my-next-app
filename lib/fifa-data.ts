@@ -1,4 +1,4 @@
-import { IMAGES } from "./constants";
+import { IMAGES, TOURNAMENT_META } from "./constants";
 import {
   type FifaMatch,
   calendarTeamLabels,
@@ -19,6 +19,7 @@ import type {
   FifaDashboardView,
   GroupStandingView,
   LiveMatchView,
+  ScheduleMatchView,
   ScorerView,
   StatCardView,
 } from "./types";
@@ -387,4 +388,71 @@ export async function fetchFifaDashboard(fresh = true): Promise<FifaDashboardVie
     nextMatch,
     fetchedAt: new Date().toISOString(),
   };
+}
+
+function dayOffsetFromIsoDate(isoDate: string): number {
+  const target = new Date(`${isoDate}T12:00:00Z`);
+  const today = new Date();
+  const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  const targetUtc = Date.UTC(
+    target.getUTCFullYear(),
+    target.getUTCMonth(),
+    target.getUTCDate(),
+  );
+  return Math.round((targetUtc - todayUtc) / 86_400_000);
+}
+
+function scheduleStatus(
+  match: FifaMatch,
+): ScheduleMatchView["status"] {
+  if (match.status === "IN_PLAY" || match.status === "PAUSE") return "live";
+  if (match.status === "FINISHED") return "finished";
+  return "upcoming";
+}
+
+function rowToScheduleView(row: Record<string, unknown>): ScheduleMatchView {
+  const match = calendarRowToMatch(row);
+  const kickoff = match.utcDate;
+
+  return {
+    id: match.id,
+    home: match.homeTeam,
+    homeFlag: match.homeFlag,
+    away: match.awayTeam,
+    awayFlag: match.awayFlag,
+    homeScore: match.homeScore,
+    awayScore: match.awayScore,
+    kickoffAt: kickoff.toISOString(),
+    dateLabel: kickoff.toLocaleDateString("he-IL", {
+      weekday: "short",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      timeZone: "Asia/Jerusalem",
+    }),
+    timeLabel: kickoff.toLocaleTimeString("he-IL", {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "Asia/Jerusalem",
+    }),
+    status: scheduleStatus(match),
+    stage: matchStageLabel(match),
+    venue: venueFromRow(row),
+    matchNumber:
+      row.MatchNumber !== null && row.MatchNumber !== undefined
+        ? Number(row.MatchNumber)
+        : null,
+  };
+}
+
+export async function fetchFullSchedule(fresh = false): Promise<ScheduleMatchView[]> {
+  const fromOffset = dayOffsetFromIsoDate(TOURNAMENT_META.startDate);
+  const toOffset = dayOffsetFromIsoDate(TOURNAMENT_META.endDate);
+  const rows = await getCalendarRowsById(fromOffset, toOffset, fresh);
+
+  const matches = [...rows.values()]
+    .map((row) => rowToScheduleView(row))
+    .sort((a, b) => new Date(a.kickoffAt).getTime() - new Date(b.kickoffAt).getTime());
+
+  return matches;
 }

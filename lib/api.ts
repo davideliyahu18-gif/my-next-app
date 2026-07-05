@@ -2,6 +2,7 @@ import { unstable_cache } from "next/cache";
 import { LIVE_DATA_REVALIDATE_SECONDS } from "./constants";
 import {
   fetchFifaDashboard,
+  fetchFullSchedule,
   fetchGroupStandings,
   fetchLiveMatches,
   fetchStatCards,
@@ -12,6 +13,7 @@ import type {
   FifaDashboardView,
   GroupStandingView,
   LiveMatchView,
+  ScheduleMatchView,
   ScorerView,
   StatCardView,
 } from "./types";
@@ -65,6 +67,10 @@ export function getTopScorers(): Promise<ScorerView[]> {
 
 export function getStatCards(): Promise<StatCardView[]> {
   return cachedFetch("stat_cards", () => fetchStatCards(false), []);
+}
+
+export function getFullSchedule(): Promise<ScheduleMatchView[]> {
+  return cachedFetch("full_schedule", () => fetchFullSchedule(false), []);
 }
 
 export function getTournament() {
