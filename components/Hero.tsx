@@ -1,56 +1,60 @@
 import Image from "next/image";
 import Link from "next/link";
 import { getTournament } from "@/lib/api";
-import { IMAGES, TOURNAMENT_META } from "@/lib/constants";
+import { TOURNAMENT_META, WHATSAPP_INVITE_LINK } from "@/lib/constants";
+
+const WHATSAPP_GROUP_URL =
+  WHATSAPP_INVITE_LINK || "https://chat.whatsapp.com/L47SyZIjYAR0k8qZ0C2Fcl";
 
 export default async function Hero() {
   const tournament = await getTournament();
 
   return (
     <section id="home" className="relative overflow-hidden">
-      <div className="relative min-h-[340px] md:min-h-[400px]">
+      <div className="relative min-h-[72vh] md:min-h-[78vh]">
         <Image
           src={tournament.images.stadium}
           alt="אצטדיון מואר בלילה"
           fill
           priority
-          className="object-cover object-center"
+          className="object-cover object-center scale-105 animate-[fade-up_1.2s_ease-out]"
           sizes="100vw"
         />
-        <div className="absolute inset-0 bg-gradient-to-l from-black via-black/80 to-black/40" />
-        <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-black/50" />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_70%_50%,rgba(212,175,55,0.18),transparent_55%)]" />
+        <div className="absolute inset-0 bg-gradient-to-t from-background via-black/70 to-black/50" />
+        <div className="absolute inset-0 bg-gradient-to-l from-background via-black/55 to-transparent" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_30%_40%,rgba(212,175,55,0.22),transparent_55%)]" />
 
-        <div className="relative mx-auto flex max-w-[1440px] flex-col items-center gap-8 px-4 py-12 md:flex-row md:items-center md:justify-between md:gap-12 md:px-8 md:py-16">
-          <div className="max-w-xl text-center md:text-right">
-            <h1 className="text-4xl font-black leading-tight text-[#d4af37] sm:text-5xl md:text-6xl">
+        <div className="relative mx-auto flex min-h-[72vh] max-w-[1440px] flex-col justify-end px-4 pb-14 pt-28 md:min-h-[78vh] md:justify-center md:px-8 md:pb-20 md:pt-24">
+          <div className="max-w-2xl animate-fade-up text-center md:text-right">
+            <p className="mb-4 inline-flex items-center gap-2 rounded-full border border-gold/30 bg-gold/10 px-3 py-1 text-[11px] font-bold tracking-[0.2em] text-gold">
+              <span className="h-1.5 w-1.5 animate-live-pulse rounded-full bg-live" />
+              FIFA WORLD CUP
+            </p>
+
+            <h1 className="font-display text-5xl font-black leading-[1.05] tracking-tight text-gold-gradient sm:text-6xl md:text-7xl lg:text-8xl">
               מונדיאל 2026
             </h1>
-            <p className="mt-4 text-lg text-zinc-200 md:text-xl">
-              כל המשחקים, כל השערים, כל הרגעים
+
+            <p className="mt-5 max-w-lg text-lg text-zinc-200 md:mr-0 md:ml-auto md:text-xl">
+              כל המשחקים, כל השערים, כל הרגעים — בזמן אמת
             </p>
             <p className="mt-2 text-sm text-zinc-500">{TOURNAMENT_META.dateRange}</p>
 
-            <Link
-              href="/schedule"
-              className="mt-8 inline-flex items-center gap-2 rounded-full bg-[#d4af37] px-7 py-3 text-sm font-black text-black shadow-[0_8px_32px_rgba(212,175,55,0.35)] transition-all hover:scale-[1.02] hover:shadow-[0_12px_40px_rgba(212,175,55,0.5)]"
-            >
-              <span>📅</span>
-              לוח משחקים מלא
-            </Link>
-          </div>
-
-          <div className="relative shrink-0">
-            <div className="absolute -inset-6 rounded-full bg-[#d4af37]/20 blur-3xl" />
-            <div className="relative h-48 w-48 md:h-64 md:w-64 lg:h-72 lg:w-72">
-              <Image
-                src={IMAGES.trophy}
-                alt="גביע העולם FIFA"
-                fill
-                className="object-contain drop-shadow-[0_20px_60px_rgba(212,175,55,0.45)]"
-                sizes="(max-width:768px) 192px, 288px"
-                priority
-              />
+            <div className="mt-9 flex flex-wrap items-center justify-center gap-3 md:justify-start">
+              <Link
+                href="/schedule"
+                className="inline-flex items-center gap-2 rounded-full bg-gold px-7 py-3.5 text-sm font-black text-black shadow-[0_12px_40px_rgba(212,175,55,0.4)] transition-all hover:scale-[1.03] hover:shadow-[0_16px_48px_rgba(212,175,55,0.55)]"
+              >
+                לוח משחקים מלא
+              </Link>
+              <a
+                href={WHATSAPP_GROUP_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 rounded-full border border-whatsapp/40 bg-whatsapp/10 px-6 py-3.5 text-sm font-bold text-whatsapp transition-all hover:scale-[1.03] hover:bg-whatsapp/20"
+              >
+                התראות WhatsApp
+              </a>
             </div>
           </div>
         </div>

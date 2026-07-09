@@ -40,10 +40,10 @@ export default function FifaDashboard({ initial }: { initial: FifaDashboardView 
 
   return (
     <>
-      <div className="mb-4 flex items-center justify-end gap-2 text-[11px] text-zinc-500">
+      <div className="mb-5 flex items-center justify-end gap-2 text-[11px] text-zinc-500">
         <span
           className={`h-1.5 w-1.5 rounded-full ${
-            syncing ? "animate-pulse bg-amber-400" : "bg-emerald-400"
+            syncing ? "animate-pulse bg-amber-400" : "bg-success"
           }`}
         />
         נתוני FIFA · עודכן{" "}

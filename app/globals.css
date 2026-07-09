@@ -1,19 +1,35 @@
 @import "tailwindcss";
 
 :root {
-  --background: #000000;
+  --background: #050505;
   --foreground: #f5f5f5;
   --card: #121212;
+  --card-elevated: #1a1a1a;
+  --muted: #a1a1aa;
+  --border: rgba(255, 255, 255, 0.07);
   --gold: #d4af37;
   --gold-dim: #a8892f;
+  --gold-soft: rgba(212, 175, 55, 0.14);
+  --live: #ef4444;
+  --success: #22c55e;
+  --whatsapp: #25d366;
+  --radius-card: 1.25rem;
+  --shadow-card: 0 12px 40px rgba(0, 0, 0, 0.5);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
+  --color-card-elevated: var(--card-elevated);
+  --color-muted: var(--muted);
   --color-gold: var(--gold);
-  --font-sans: var(--font-geist-sans);
+  --color-gold-dim: var(--gold-dim);
+  --color-live: var(--live);
+  --color-success: var(--success);
+  --color-whatsapp: var(--whatsapp);
+  --font-sans: var(--font-heebo);
+  --font-display: var(--font-heebo);
   --font-mono: var(--font-geist-mono);
 }
 
@@ -28,13 +44,17 @@ html {
 #scorers,
 #stats,
 #teams {
-  scroll-margin-top: 5.5rem;
+  scroll-margin-top: 4.5rem;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), "Segoe UI", Tahoma, sans-serif;
+  background-image:
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(212, 175, 55, 0.08), transparent),
+    radial-gradient(ellipse 60% 40% at 100% 50%, rgba(212, 175, 55, 0.03), transparent);
+  background-attachment: fixed;
 }
 
 .scrollbar-hide {
@@ -44,4 +64,52 @@ body {
 
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.55);
+  }
+  50% {
+    opacity: 0.85;
+    box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
+  }
+}
+
+@keyframes gold-shimmer {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 200% 50%;
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.55s ease-out both;
+}
+
+.animate-live-pulse {
+  animation: live-pulse 2s ease-in-out infinite;
+}
+
+.text-gold-gradient {
+  background: linear-gradient(120deg, #f5e6a8 0%, #d4af37 40%, #a8892f 70%, #f0d878 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }

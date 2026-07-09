@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { GroupStandingView } from "@/lib/types";
 import { formatGoalDifference } from "@/lib/utils";
 import DashboardCard from "./DashboardCard";
@@ -40,8 +41,8 @@ export default function StandingsPanel({
               <tbody>
                 {group.teams.map((team, i) => (
                   <tr
-                    key={team.name}
-                    className="border-b border-white/[0.03] transition-colors last:border-0 hover:bg-[#d4af37]/[0.04]"
+                    key={team.code || team.name}
+                    className="border-b border-white/[0.03] transition-colors last:border-0 hover:bg-gold/[0.04]"
                   >
                     <td className="px-4 py-3 text-right">
                       <span
@@ -53,10 +54,13 @@ export default function StandingsPanel({
                       </span>
                     </td>
                     <td className="px-2 py-3">
-                      <span className="flex items-center gap-2 font-semibold text-white">
+                      <Link
+                        href={`/teams/${(team.code || "xxx").toLowerCase()}`}
+                        className="flex items-center gap-2 font-semibold text-white transition-colors hover:text-gold"
+                      >
                         <span>{team.flag}</span>
                         <span className="truncate">{team.name}</span>
-                      </span>
+                      </Link>
                     </td>
                     <td className="px-2 py-3 text-center text-zinc-400">{team.played}</td>
                     <td
@@ -70,13 +74,23 @@ export default function StandingsPanel({
                     >
                       {formatGoalDifference(team.gd)}
                     </td>
-                    <td className="px-4 py-3 text-center text-base font-black text-[#d4af37]">
+                    <td className="px-4 py-3 text-center text-base font-black text-gold">
                       {team.pts}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            {compact && (
+              <div className="border-t border-white/[0.06] px-4 py-3">
+                <Link
+                  href="/teams"
+                  className="text-xs font-bold text-gold transition-colors hover:text-white"
+                >
+                  כל הנבחרות ←
+                </Link>
+              </div>
+            )}
           </DashboardCard>
         ))
       )}

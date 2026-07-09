@@ -19,14 +19,23 @@ export default function ScrollLink({
   children,
   onNavigate,
 }: ScrollLinkProps) {
+  const isHash = href.startsWith("#");
+  const isHomeHash = href.startsWith("/#");
+
   return (
     <a
       href={href}
       className={className}
       onClick={(event) => {
+        if (!isHash && !isHomeHash) return;
+        if (isHomeHash && typeof window !== "undefined" && window.location.pathname !== "/") {
+          onNavigate?.();
+          return;
+        }
         event.preventDefault();
-        scrollToSection(href.replace("#", ""));
-        window.history.replaceState(null, "", href);
+        const id = href.replace(/^\/?#/, "");
+        scrollToSection(id);
+        window.history.replaceState(null, "", `#${id}`);
         onNavigate?.();
       }}
     >

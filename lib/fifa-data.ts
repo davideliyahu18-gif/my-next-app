@@ -159,7 +159,10 @@ function teamLabelFromSide(side: Record<string, unknown>) {
 export async function fetchGroupStandings(fresh = false): Promise<GroupStandingView[]> {
   const tables = new Map<
     string,
-    Map<string, { name: string; flag: string; played: number; gd: number; pts: number }>
+    Map<
+      string,
+      { name: string; code: string; flag: string; played: number; gd: number; pts: number }
+    >
   >();
 
   const rows = await getCalendarRowsById(-14, 7, fresh);
@@ -181,9 +184,11 @@ export async function fetchGroupStandings(fresh = false): Promise<GroupStandingV
       const groupTable = tables.get(group)!;
 
       for (const team of [home, away]) {
-        if (!groupTable.has(team.name)) {
-          groupTable.set(team.name, {
+        const key = team.code || team.name;
+        if (!groupTable.has(key)) {
+          groupTable.set(key, {
             name: team.name,
+            code: team.code,
             flag: team.flag,
             played: 0,
             gd: 0,
@@ -192,8 +197,8 @@ export async function fetchGroupStandings(fresh = false): Promise<GroupStandingV
         }
       }
 
-      const homeEntry = groupTable.get(home.name)!;
-      const awayEntry = groupTable.get(away.name)!;
+      const homeEntry = groupTable.get(home.code || home.name)!;
+      const awayEntry = groupTable.get(away.code || away.name)!;
       homeEntry.played += 1;
       awayEntry.played += 1;
       homeEntry.gd += homeScore - awayScore;
@@ -248,7 +253,14 @@ export async function fetchTopScorers(limit = 10, fresh = false): Promise<Scorer
   const matches = await getMatchesByIds(candidateIds.slice(0, 30), fresh);
   const scorers = new Map<
     string,
-    { name: string; team: string; flag: string; goals: number; assists: number }
+    {
+      name: string;
+      team: string;
+      teamCode: string;
+      flag: string;
+      goals: number;
+      assists: number;
+    }
   >();
 
   for (const match of matches) {
@@ -265,11 +277,13 @@ export async function fetchTopScorers(limit = 10, fresh = false): Promise<Scorer
       const current = scorers.get(key) ?? {
         name: goal.scorer.trim(),
         team,
+        teamCode,
         flag,
         goals: 0,
         assists: 0,
       };
       if (team && !current.team) current.team = team;
+      if (teamCode && !current.teamCode) current.teamCode = teamCode;
       if (flag && !current.flag) current.flag = flag;
       current.goals += 1;
       scorers.set(key, current);
@@ -284,6 +298,7 @@ export async function fetchTopScorers(limit = 10, fresh = false): Promise<Scorer
     rank: index + 1,
     name: scorer.name,
     team: scorer.team,
+    teamCode: scorer.teamCode,
     flag: scorer.flag,
     goals: scorer.goals,
     assists: scorer.assists,
@@ -418,8 +433,10 @@ function rowToScheduleView(row: Record<string, unknown>): ScheduleMatchView {
     id: match.id,
     home: match.homeTeam,
     homeFlag: match.homeFlag,
+    homeCode: match.homeTeamCode,
     away: match.awayTeam,
     awayFlag: match.awayFlag,
+    awayCode: match.awayTeamCode,
     homeScore: match.homeScore,
     awayScore: match.awayScore,
     kickoffAt: kickoff.toISOString(),

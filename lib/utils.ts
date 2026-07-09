@@ -64,6 +64,7 @@ export function toGroupStandingViews(
     group: standing.group,
     teams: standing.rows.map((row) => ({
       name: row.team.name,
+      code: row.team.code ?? "",
       flag: row.team.flag,
       played: row.played,
       gd: row.goalDifference,
@@ -79,6 +80,7 @@ export function toScorerViews(players: Player[]): ScorerView[] {
       rank: index + 1,
       name: player.name,
       team: player.teamName,
+      teamCode: "",
       flag: player.nationalityFlag,
       goals: player.goals,
       assists: player.assists,

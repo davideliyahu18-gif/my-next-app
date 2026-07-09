@@ -10,11 +10,11 @@ const FOOTER_LINKS = [
 
 export default function Footer() {
   return (
-    <footer className="mt-16 border-t border-white/[0.06] bg-black">
-      <div className="mx-auto flex max-w-[1440px] flex-col items-center justify-between gap-6 px-4 py-10 md:flex-row md:px-8">
+    <footer className="mt-16 border-t border-white/[0.07] bg-gradient-to-t from-black to-transparent">
+      <div className="mx-auto flex max-w-[1440px] flex-col items-center justify-between gap-6 px-4 py-12 md:flex-row md:px-8">
         <div className="text-center md:text-right">
           <p className="text-lg font-black text-white">
-            WORLD CUP <span className="text-[#d4af37]">2026</span>
+            מונדיאל <span className="text-gold">2026</span>
           </p>
           <p className="mt-1 text-xs text-zinc-500">{TOURNAMENT_META.footerHosts}</p>
         </div>
@@ -24,7 +24,7 @@ export default function Footer() {
             <ScrollLink
               key={link.label}
               href={link.href}
-              className="transition-colors hover:text-[#d4af37]"
+              className="transition-colors hover:text-gold"
             >
               {link.label}
             </ScrollLink>

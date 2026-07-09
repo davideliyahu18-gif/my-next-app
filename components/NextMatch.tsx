@@ -38,12 +38,12 @@ function Countdown({ targetIso }: { targetIso: string }) {
       {cells.map((cell) => (
         <div
           key={cell.label}
-          className="rounded-lg border border-white/[0.06] bg-black/40 px-2 py-2 text-center"
+          className="rounded-xl border border-gold/20 bg-gradient-to-b from-gold/10 to-black/40 px-1.5 py-3 text-center"
         >
-          <p className="text-lg font-black tabular-nums text-[#d4af37]">
+          <p className="text-xl font-black tabular-nums tracking-tight text-gold md:text-2xl">
             {String(cell.value).padStart(2, "0")}
           </p>
-          <p className="text-[10px] text-zinc-500">{cell.label}</p>
+          <p className="mt-1 text-[10px] font-medium text-zinc-500">{cell.label}</p>
         </div>
       ))}
     </div>
@@ -53,7 +53,7 @@ function Countdown({ targetIso }: { targetIso: string }) {
 export default function NextMatch({ match }: { match: LiveMatchView | null }) {
   if (!match) {
     return (
-      <DashboardCard title="המשחק הבא">
+      <DashboardCard title="המשחק הבא" variant="featured">
         <p className="px-5 py-8 text-center text-sm text-zinc-500">אין משחקים קרובים</p>
       </DashboardCard>
     );
@@ -71,25 +71,33 @@ export default function NextMatch({ match }: { match: LiveMatchView | null }) {
   const showCountdown = match.status === "upcoming";
 
   return (
-    <DashboardCard title="המשחק הבא">
-      <div className="space-y-4 p-5">
-        <p className="text-center text-xs font-semibold text-zinc-500">{match.league}</p>
+    <DashboardCard title="המשחק הבא" variant="featured">
+      <div className="space-y-5 p-5">
+        <p className="text-center text-[11px] font-bold tracking-wide text-gold/80">
+          {match.league}
+        </p>
 
         <div className="flex items-center justify-between gap-3">
           <div className="flex flex-1 flex-col items-center gap-2">
-            <span className="text-3xl">{match.homeFlag}</span>
-            <span className="text-center text-xs font-bold text-white">{match.home}</span>
+            <span className="text-4xl drop-shadow-[0_8px_16px_rgba(0,0,0,0.5)]">
+              {match.homeFlag}
+            </span>
+            <span className="text-center text-xs font-extrabold text-white">{match.home}</span>
           </div>
-          <span className="text-sm font-bold text-zinc-500">VS</span>
+          <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-black text-zinc-400">
+            VS
+          </span>
           <div className="flex flex-1 flex-col items-center gap-2">
-            <span className="text-3xl">{match.awayFlag}</span>
-            <span className="text-center text-xs font-bold text-white">{match.away}</span>
+            <span className="text-4xl drop-shadow-[0_8px_16px_rgba(0,0,0,0.5)]">
+              {match.awayFlag}
+            </span>
+            <span className="text-center text-xs font-extrabold text-white">{match.away}</span>
           </div>
         </div>
 
-        <div className="flex items-center justify-center gap-4 text-sm text-zinc-400">
-          <span>{match.minute}</span>
-          <span className="text-[#d4af37]">•</span>
+        <div className="flex items-center justify-center gap-3 text-xs text-zinc-400">
+          <span className="font-semibold">{match.minute}</span>
+          <span className="text-gold">•</span>
           <span>{kickoffLabel}</span>
         </div>
 
@@ -97,9 +105,9 @@ export default function NextMatch({ match }: { match: LiveMatchView | null }) {
 
         <ScrollLinkButton
           href="#matches"
-          className="w-full rounded-xl border border-[#d4af37]/30 bg-[#d4af37]/10 py-2.5 text-sm font-bold text-[#d4af37] transition-colors hover:bg-[#d4af37]/20"
+          className="w-full rounded-xl bg-gold py-3 text-sm font-black text-black transition-transform hover:scale-[1.02]"
         >
-          פרטי משחק
+          לכל המשחקים
         </ScrollLinkButton>
       </div>
     </DashboardCard>

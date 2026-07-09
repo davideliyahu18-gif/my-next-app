@@ -37,9 +37,9 @@ export const NAV_LINKS: NavLinkView[] = [
   { href: "#home", label: "ראשי" },
   { href: "#matches", label: "משחקים" },
   { href: "#standings", label: "טבלאות" },
-  { href: "#teams", label: "נבחרות" },
+  { href: "/teams", label: "נבחרות" },
+  { href: "/watch", label: "איפה לצפות" },
   { href: "#scorers", label: "שחקנים" },
-  { href: "#stats", label: "סטטיסטיקות" },
   { href: "#news", label: "חדשות" },
 ];
 

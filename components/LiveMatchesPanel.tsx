@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { LiveMatchView } from "@/lib/types";
 import DashboardCard from "./DashboardCard";
 import HighlightButton from "./HighlightButton";
@@ -14,7 +15,7 @@ function MinuteRing({ minute, isLive }: { minute: string; isLive: boolean }) {
   const circumference = 2 * Math.PI * 18;
 
   return (
-    <div className="relative flex h-11 w-11 shrink-0 items-center justify-center">
+    <div className="relative flex h-12 w-12 shrink-0 items-center justify-center">
       <svg className="absolute inset-0 -rotate-90" viewBox="0 0 44 44">
         <circle
           cx="22"
@@ -52,23 +53,55 @@ function MatchRow({ match }: { match: LiveMatchView }) {
 
   return (
     <div
-      className={`flex items-center gap-3 border-b border-white/[0.04] px-5 py-4 last:border-0 ${
-        isLive ? "bg-red-500/[0.03]" : ""
+      className={`group flex items-center gap-3 border-b border-white/[0.05] px-5 py-5 last:border-0 transition-colors ${
+        isLive
+          ? "bg-gradient-to-l from-live/[0.08] via-transparent to-transparent"
+          : "hover:bg-white/[0.02]"
       }`}
     >
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        <span className="text-xl">{match.homeFlag}</span>
-        <span className="truncate text-sm font-semibold text-white">{match.home}</span>
+      <div className="flex min-w-0 flex-1 items-center gap-2.5">
+        <Link
+          href={`/teams/${match.homeCode.toLowerCase()}`}
+          className="flex min-w-0 items-center gap-2.5 transition-colors hover:text-gold"
+        >
+          <span className="text-2xl drop-shadow-sm">{match.homeFlag}</span>
+          <span className="truncate text-sm font-bold text-white md:text-base">
+            {match.home}
+          </span>
+        </Link>
       </div>
 
-      <div className="flex shrink-0 flex-col items-center gap-1 px-2">
-        <span className="text-lg font-black tabular-nums text-white">{score}</span>
-        <MinuteRing minute={match.minute} isLive={isLive} />
+      <div className="flex shrink-0 flex-col items-center gap-1.5 px-2">
+        <span
+          className={`text-xl font-black tabular-nums tracking-wide md:text-2xl ${
+            isLive ? "text-white" : "text-zinc-200"
+          }`}
+        >
+          {score}
+        </span>
+        {isLive ? (
+          <div className="flex flex-col items-center gap-1">
+            <span className="flex items-center gap-1 rounded-full bg-live/20 px-2 py-0.5 text-[9px] font-black tracking-wider text-red-300">
+              <span className="h-1.5 w-1.5 animate-live-pulse rounded-full bg-live" />
+              LIVE
+            </span>
+            <span className="text-[10px] font-bold text-zinc-400">{match.minute}</span>
+          </div>
+        ) : (
+          <MinuteRing minute={match.minute} isLive={false} />
+        )}
       </div>
 
-      <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
-        <span className="truncate text-sm font-semibold text-white">{match.away}</span>
-        <span className="text-xl">{match.awayFlag}</span>
+      <div className="flex min-w-0 flex-1 items-center justify-end gap-2.5">
+        <Link
+          href={`/teams/${match.awayCode.toLowerCase()}`}
+          className="flex min-w-0 items-center justify-end gap-2.5 transition-colors hover:text-gold"
+        >
+          <span className="truncate text-sm font-bold text-white md:text-base">
+            {match.away}
+          </span>
+          <span className="text-2xl drop-shadow-sm">{match.awayFlag}</span>
+        </Link>
       </div>
 
       <HighlightButton href={match.highlightUrl} />
@@ -80,17 +113,20 @@ export default function LiveMatchesPanel({ matches }: { matches: LiveMatchView[]
   const liveCount = matches.filter((match) => match.status === "live").length;
 
   return (
-    <section id="matches">
+    <section id="matches" className="animate-fade-up">
       <DashboardCard
+        variant={liveCount > 0 ? "live" : "featured"}
         title="משחקים חיים"
         badge={
           liveCount > 0 ? (
-            <span className="flex items-center gap-1.5 rounded-full bg-red-500/20 px-2.5 py-0.5 text-[10px] font-black tracking-wider text-red-400">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />
-              LIVE
+            <span className="flex items-center gap-1.5 rounded-full bg-live/20 px-2.5 py-0.5 text-[10px] font-black tracking-wider text-red-300">
+              <span className="h-1.5 w-1.5 animate-live-pulse rounded-full bg-live" />
+              {liveCount} LIVE
             </span>
           ) : (
-            <span className="text-[10px] text-zinc-500">מ-FIFA API</span>
+            <span className="rounded-full border border-white/10 px-2.5 py-0.5 text-[10px] font-semibold text-zinc-500">
+              FIFA
+            </span>
           )
         }
       >

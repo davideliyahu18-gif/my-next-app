@@ -151,8 +151,10 @@ export interface ScheduleMatchView {
   id: string;
   home: string;
   homeFlag: string;
+  homeCode: string;
   away: string;
   awayFlag: string;
+  awayCode: string;
   homeScore: number | null;
   awayScore: number | null;
   kickoffAt: string;
@@ -168,6 +170,7 @@ export interface ScorerView {
   rank: number;
   name: string;
   team: string;
+  teamCode: string;
   flag: string;
   goals: number;
   assists: number;
@@ -178,6 +181,7 @@ export interface GroupStandingView {
   group: string;
   teams: {
     name: string;
+    code: string;
     flag: string;
     played: number;
     gd: number;

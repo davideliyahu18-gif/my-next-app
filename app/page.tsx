@@ -1,4 +1,3 @@
-import FeedNews from "@/components/FeedNews";
 import FifaDashboard from "@/components/FifaDashboard";
 import Footer from "@/components/Footer";
 import Header from "@/components/Header";
@@ -11,11 +10,11 @@ export default async function Home() {
   const dashboard = await getFifaDashboard();
 
   return (
-    <div dir="rtl" className="min-h-screen bg-black font-sans text-white">
+    <div dir="rtl" className="min-h-screen bg-background font-sans text-foreground">
       <Header />
       <Hero />
 
-      <main className="mx-auto max-w-[1440px] px-4 py-8 md:px-8">
+      <main className="mx-auto max-w-[1440px] px-4 py-10 md:px-8">
         <FifaDashboard initial={dashboard} />
       </main>
 

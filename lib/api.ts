@@ -65,6 +65,10 @@ export function getTopScorers(): Promise<ScorerView[]> {
   return cachedFetch("top_scorers", () => fetchTopScorers(10, false), []);
 }
 
+export function getAllScorers(): Promise<ScorerView[]> {
+  return cachedFetch("all_scorers", () => fetchTopScorers(40, false), []);
+}
+
 export function getStatCards(): Promise<StatCardView[]> {
   return cachedFetch("stat_cards", () => fetchStatCards(false), []);
 }
