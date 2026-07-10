@@ -11,7 +11,7 @@ export const FLIGHTS_USER_AGENT = "datagov-external-client";
 export const FLIGHTS_SOURCE_REFRESH_MS = 15 * 60 * 1000;
 
 /** Server cache TTL — poll upstream between authority refresh windows. */
-export const FLIGHTS_CACHE_TTL_MS = 30 * 1000;
+export const FLIGHTS_CACHE_TTL_MS = 15 * 1000;
 
 /** Client + SSE refresh interval. */
 export const FLIGHTS_STREAM_INTERVAL_MS = 30 * 1000;

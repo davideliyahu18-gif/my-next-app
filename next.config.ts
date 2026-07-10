@@ -30,6 +30,28 @@ const nextConfig: NextConfig = {
   images: {
     remotePatterns,
   },
+  async headers() {
+    return [
+      {
+        source: "/flights",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "no-store, must-revalidate",
+          },
+        ],
+      },
+      {
+        source: "/api/flights/:path*",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "no-store, must-revalidate",
+          },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

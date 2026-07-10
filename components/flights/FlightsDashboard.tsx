@@ -353,6 +353,8 @@ export function FlightsDashboard() {
   const [query, setQuery] = useState("");
   const [selectedFlight, setSelectedFlight] = useState<FlightRecord | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [secondsSinceUpdate, setSecondsSinceUpdate] = useState(0);
+  const [pollCount, setPollCount] = useState(0);
 
   const {
     trackedFlights,
@@ -370,31 +372,64 @@ export function FlightsDashboard() {
     setDetailOpen(false);
   }, []);
 
-  const loadFlights = useCallback(async () => {
-    try {
-      const response = await fetch(`/api/flights?day=${dayScope}`, {
-        cache: "no-store",
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const next = (await response.json()) as FlightsSnapshot;
-      setSnapshot(next);
-      setConnected(true);
-      await refreshTracked();
-    } catch {
-      setConnected(false);
-    } finally {
-      setLoading(false);
-    }
-  }, [dayScope, refreshTracked]);
+  const loadFlights = useCallback(
+    async ({ showLoading = false, force = false }: { showLoading?: boolean; force?: boolean } = {}) => {
+      if (showLoading) setLoading(true);
+      try {
+        const response = await fetch(
+          `/api/flights?day=${dayScope}${force ? "&refresh=1" : ""}&_=${Date.now()}`,
+          { cache: "no-store", headers: { Pragma: "no-cache" } },
+        );
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const next = (await response.json()) as FlightsSnapshot;
+        setSnapshot(next);
+        setConnected(true);
+        setPollCount((count) => count + 1);
+      } catch {
+        setConnected(false);
+      } finally {
+        if (showLoading) setLoading(false);
+      }
+    },
+    [dayScope],
+  );
 
   useEffect(() => {
-    setLoading(true);
-    void loadFlights();
+    void loadFlights({ showLoading: true, force: true });
+    void refreshTracked();
+
     const timer = setInterval(() => {
-      void loadFlights();
+      void loadFlights({ force: true });
+      void refreshTracked();
     }, FLIGHTS_STREAM_INTERVAL_MS);
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        void loadFlights({ force: true });
+        void refreshTracked();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [dayScope, loadFlights, refreshTracked]);
+
+  useEffect(() => {
+    if (!snapshot.timestamp) return;
+    const tick = () => {
+      const age = Math.max(
+        0,
+        Math.floor((Date.now() - new Date(snapshot.timestamp).getTime()) / 1000),
+      );
+      setSecondsSinceUpdate(age);
+    };
+    tick();
+    const timer = setInterval(tick, 1000);
     return () => clearInterval(timer);
-  }, [loadFlights]);
+  }, [snapshot.timestamp]);
 
   useEffect(() => {
     if (!selectedFlight) return;
@@ -473,7 +508,7 @@ export function FlightsDashboard() {
                   connected ? "animate-live-pulse bg-emerald-400" : "bg-amber-300"
                 }`}
               />
-              {connected ? "LIVE" : "..."}
+              {connected ? `LIVE · ${secondsSinceUpdate}ש׳` : "..."}
             </span>
             <Link
               href="/"
@@ -544,11 +579,11 @@ export function FlightsDashboard() {
           />
           <StatCard
             label="רענון"
-            value={lastUpdated}
+            value={connected ? `לפני ${secondsSinceUpdate}ש׳` : "—"}
             hint={
               sourceUpdated
-                ? `נתון מהרשות: ${sourceUpdated}`
-                : "אוטומטי כל 30 שניות"
+                ? `רשות: ${sourceUpdated} · סריקות: ${pollCount}`
+                : `אוטומטי כל 30 שניות · ${lastUpdated}`
             }
             accent="bg-cyan-500/20"
             icon="🔄"
@@ -673,8 +708,8 @@ export function FlightsDashboard() {
             <button
               type="button"
               onClick={() => {
-                setLoading(true);
-                void loadFlights();
+                void loadFlights({ force: true });
+                void refreshTracked();
               }}
               className="rounded-full border border-sky-400/25 bg-sky-500/10 px-4 py-2 text-xs font-bold text-sky-100 transition hover:bg-sky-500/20"
             >
@@ -737,6 +772,7 @@ export function FlightsDashboard() {
           </p>
           <p className="mt-2">
             הרשות מעדכנת כל ~15 דקות · האתר מרענן כל 30 שניות
+            {connected ? ` (עודכן לפני ${secondsSinceUpdate} שניות)` : ""}
           </p>
         </footer>
       </main>

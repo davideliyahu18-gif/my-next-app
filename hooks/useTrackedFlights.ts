@@ -42,8 +42,8 @@ export function useTrackedFlights() {
 
     try {
       const response = await fetch(
-        `/api/flights/track?codes=${encodeURIComponent(codes.join(","))}`,
-        { cache: "no-store" },
+        `/api/flights/track?codes=${encodeURIComponent(codes.join(","))}&_=${Date.now()}`,
+        { cache: "no-store", headers: { Pragma: "no-cache" } },
       );
       if (!response.ok) return;
       const payload = (await response.json()) as { flights?: FlightRecord[] };
