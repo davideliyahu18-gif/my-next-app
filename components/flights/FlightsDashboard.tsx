@@ -7,7 +7,8 @@ import { FlightDetailDrawer } from "@/components/flights/FlightDetailDrawer";
 import { useTrackedFlights } from "@/hooks/useTrackedFlights";
 import type { FlightDayScope, FlightRecord, FlightsSnapshot } from "@/lib/flights/types";
 import {
-  FLIGHTS_RUNWAY_IMAGE,
+  FLIGHTS_HERO_IMAGE,
+  FLIGHTS_IAA,
   FLIGHTS_STREAM_INTERVAL_MS,
   FLIGHTS_TIMEZONE,
 } from "@/lib/flights/constants";
@@ -51,28 +52,28 @@ function toneStyles(tone: ReturnType<typeof statusTone>) {
   switch (tone) {
     case "success":
       return {
-        badge: "border-emerald-400/35 bg-emerald-500/15 text-emerald-200 shadow-[0_0_20px_rgba(52,211,153,0.15)]",
-        rail: "bg-emerald-400",
+        badge: "border-emerald-200 bg-emerald-50 text-emerald-800",
+        rail: "bg-emerald-500",
       };
     case "warning":
       return {
-        badge: "border-amber-400/35 bg-amber-500/15 text-amber-100 shadow-[0_0_20px_rgba(251,191,36,0.12)]",
-        rail: "bg-amber-400",
+        badge: "border-amber-200 bg-amber-50 text-amber-900",
+        rail: "bg-amber-500",
       };
     case "danger":
       return {
-        badge: "border-rose-400/35 bg-rose-500/15 text-rose-100 shadow-[0_0_20px_rgba(244,63,94,0.12)]",
-        rail: "bg-rose-400",
+        badge: "border-rose-200 bg-rose-50 text-rose-800",
+        rail: "bg-rose-500",
       };
     case "muted":
       return {
-        badge: "border-white/10 bg-white/5 text-zinc-400",
-        rail: "bg-zinc-500",
+        badge: "border-slate-200 bg-slate-100 text-slate-600",
+        rail: "bg-slate-400",
       };
     default:
       return {
-        badge: "border-sky-400/35 bg-sky-500/15 text-sky-100 shadow-[0_0_20px_rgba(56,189,248,0.12)]",
-        rail: "bg-sky-400",
+        badge: "border-sky-200 bg-sky-50 text-sky-900",
+        rail: "bg-sky-500",
       };
   }
 }
@@ -99,10 +100,10 @@ function LiveClock() {
 
   return (
     <div className="hidden text-left sm:block">
-      <p className="text-[10px] font-bold tracking-[0.2em] text-sky-300/70">
+      <p className="text-[10px] font-bold tracking-[0.2em] text-slate-500">
         שעון ישראל
       </p>
-      <p className="font-mono text-lg font-bold text-white tabular-nums">{now || "—"}</p>
+      <p className="font-mono text-lg font-bold text-[#0b2d52] tabular-nums">{now || "—"}</p>
     </div>
   );
 }
@@ -121,21 +122,21 @@ function StatCard({
   icon: string;
 }) {
   return (
-    <div className="flights-glass group relative overflow-hidden rounded-2xl p-5 transition-transform hover:-translate-y-0.5">
+    <div className="flights-glass group relative overflow-hidden rounded-xl p-5 transition-shadow hover:shadow-lg">
       <div
-        className={`pointer-events-none absolute -left-8 -top-8 h-24 w-24 rounded-full blur-2xl ${accent}`}
+        className={`pointer-events-none absolute -left-8 -top-8 h-24 w-24 rounded-full blur-2xl opacity-60 ${accent}`}
       />
       <div className="relative flex items-start justify-between gap-3">
         <div>
-          <p className="text-[11px] font-bold tracking-[0.18em] text-sky-200/70">
+          <p className="text-[11px] font-bold tracking-[0.14em] text-slate-500">
             {label}
           </p>
-          <p className="mt-2 text-3xl font-black tracking-tight text-white">
+          <p className="mt-2 text-3xl font-black tracking-tight text-[#0b2d52]">
             {value}
           </p>
-          {hint ? <p className="mt-2 text-xs leading-relaxed text-slate-400">{hint}</p> : null}
+          {hint ? <p className="mt-2 text-xs leading-relaxed text-slate-500">{hint}</p> : null}
         </div>
-        <span className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-lg">
+        <span className="flex h-11 w-11 items-center justify-center rounded-xl border border-[#d6e4f0] bg-[#e3f2fd] text-lg">
           {icon}
         </span>
       </div>
@@ -145,7 +146,7 @@ function StatCard({
 
 function FlightSkeleton() {
   return (
-    <div className="border-b border-white/[0.05] px-4 py-4 md:px-6">
+    <div className="border-b border-[#d6e4f0] px-4 py-4 md:px-6">
       <div className="grid gap-3 md:grid-cols-[1.2fr_1.3fr_0.7fr_0.7fr_1fr] md:items-center">
         <div className="flights-skeleton h-10 rounded-xl" />
         <div className="flights-skeleton h-10 rounded-xl" />
@@ -183,30 +184,30 @@ function FlightRow({
     <button
       type="button"
       onClick={() => onSelect(flight)}
-      className={`group relative w-full border-b border-white/[0.05] text-right transition-colors hover:bg-white/[0.04] ${
-        isSelected ? "bg-sky-500/10" : ""
-      } ${isTracked ? "ring-1 ring-inset ring-amber-400/20" : ""}`}
+      className={`flights-row-alt group relative w-full border-b border-[#d6e4f0] text-right transition-colors ${
+        isSelected ? "bg-sky-50 ring-1 ring-inset ring-sky-200" : ""
+      } ${isTracked ? "ring-1 ring-inset ring-amber-200" : ""}`}
     >
       <div className={`absolute inset-y-3 right-0 w-1 rounded-full ${styles.rail} opacity-80`} />
       <div className="grid gap-4 px-4 py-4 md:grid-cols-[1.2fr_1.3fr_0.7fr_0.7fr_1fr] md:items-center md:gap-5 md:px-6 md:py-5">
         <div className="flex items-center gap-3">
           <span
-            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border text-sm ${
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border text-sm ${
               isArrival
-                ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-200"
-                : "border-sky-400/25 bg-sky-500/10 text-sky-200"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border-sky-200 bg-sky-50 text-sky-700"
             }`}
           >
             {isArrival ? "↓" : "↑"}
           </span>
           <div className="min-w-0">
-            <p className="truncate text-lg font-black tracking-wide text-white">
+            <p className="truncate text-lg font-black tracking-wide text-[#0b2d52]">
               {flight.flightCode}
               {isTracked ? (
-                <span className="mr-2 text-[10px] font-bold text-amber-300">★</span>
+                <span className="mr-2 text-[10px] font-bold text-amber-600">★</span>
               ) : null}
             </p>
-            <p className="truncate text-xs text-slate-400">
+            <p className="truncate text-xs text-slate-500">
               {flight.airlineName}
               {showDate ? ` · ${formatFlightDate(flight.scheduledAt)}` : ""}
             </p>
@@ -214,31 +215,31 @@ function FlightRow({
         </div>
 
         <div className="min-w-0">
-          <p className="truncate text-base font-bold text-white">{city}</p>
+          <p className="truncate text-base font-bold text-slate-800">{city}</p>
           <p className="mt-0.5 truncate text-xs text-slate-500">
             {flight.airportCode}
             {country ? ` · ${country}` : ""}
           </p>
         </div>
 
-        <div className="rounded-xl border border-white/[0.06] bg-black/20 px-3 py-2">
+        <div className="rounded-lg border border-[#d6e4f0] bg-white px-3 py-2">
           <p className="text-[10px] font-bold tracking-wider text-slate-500">מתוכנן</p>
-          <p className="font-mono text-lg font-bold text-white tabular-nums">
+          <p className="font-mono text-lg font-bold text-[#0b2d52] tabular-nums">
             {formatFlightTime(flight.scheduledAt)}
           </p>
         </div>
 
-        <div className="rounded-xl border border-white/[0.06] bg-black/20 px-3 py-2">
+        <div className="rounded-lg border border-[#d6e4f0] bg-white px-3 py-2">
           <p className="text-[10px] font-bold tracking-wider text-slate-500">בפועל</p>
           <p
             className={`font-mono text-lg font-bold tabular-nums ${
-              delay ? "text-amber-200" : "text-white"
+              delay ? "text-amber-700" : "text-[#0b2d52]"
             }`}
           >
             {formatFlightTime(flight.actualAt)}
           </p>
           {delay ? (
-            <p className="mt-0.5 text-[11px] font-bold text-amber-300">{delay}</p>
+            <p className="mt-0.5 text-[11px] font-bold text-amber-600">{delay}</p>
           ) : null}
         </div>
 
@@ -249,16 +250,16 @@ function FlightRow({
             {flight.statusHe || flight.statusEn}
           </span>
           {flight.terminal ? (
-            <span className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] text-slate-400">
+            <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] text-slate-600">
               T{flight.terminal}
             </span>
           ) : null}
           {flight.direction === "departure" && flight.checkInCounters ? (
-            <span className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] text-slate-400">
+            <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] text-slate-600">
               דלפק {flight.checkInCounters}
             </span>
           ) : null}
-          <span className="text-[10px] text-sky-400/80 opacity-0 transition group-hover:opacity-100">
+          <span className="text-[10px] text-[#1565c0] opacity-0 transition group-hover:opacity-100">
             פרטים ←
           </span>
         </div>
@@ -279,20 +280,20 @@ function TrackedFlightChip({
     <button
       type="button"
       onClick={() => onSelect(flight)}
-      className="flights-glass min-w-[220px] flex-1 rounded-2xl p-4 text-right transition hover:-translate-y-0.5"
+      className="flights-glass min-w-[220px] flex-1 rounded-xl p-4 text-right transition hover:shadow-md"
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="text-lg font-black text-white">{flight.flightCode}</span>
-        <span className="text-[10px] font-bold text-amber-300">במעקב</span>
+        <span className="text-lg font-black text-[#0b2d52]">{flight.flightCode}</span>
+        <span className="text-[10px] font-bold text-amber-600">במעקב</span>
       </div>
       <p className="mt-1 truncate text-xs text-slate-400">
         {flight.airportNameHe || flight.airportNameEn}
       </p>
       <div className="mt-3 flex items-center justify-between text-xs">
-        <span className="font-mono text-white">{formatFlightTime(flight.actualAt || flight.scheduledAt)}</span>
-        <span className="font-bold text-sky-200">{flight.statusHe}</span>
+        <span className="font-mono text-[#0b2d52]">{formatFlightTime(flight.actualAt || flight.scheduledAt)}</span>
+        <span className="font-bold text-[#1565c0]">{flight.statusHe}</span>
       </div>
-      {delay ? <p className="mt-1 text-[11px] font-bold text-amber-300">{delay}</p> : null}
+      {delay ? <p className="mt-1 text-[11px] font-bold text-amber-600">{delay}</p> : null}
     </button>
   );
 }
@@ -332,10 +333,10 @@ function SegmentButton({
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-full px-4 py-2.5 text-sm font-bold transition-all ${
+      className={`rounded-lg px-4 py-2.5 text-sm font-bold transition-all ${
         active
-          ? `${activeClassName} shadow-lg`
-          : "border border-white/10 text-slate-400 hover:border-white/20 hover:text-white"
+          ? `${activeClassName} shadow-md`
+          : "border border-[#d6e4f0] bg-white text-slate-600 hover:border-[#1565c0]/40 hover:text-[#0b2d52]"
       }`}
     >
       {children}
@@ -470,26 +471,21 @@ export function FlightsDashboard() {
 
   return (
     <div dir="rtl" className="flights-page relative min-h-screen overflow-x-hidden font-sans">
-      <div className="flights-grid-bg pointer-events-none fixed inset-0" />
-      <div className="flights-hero-glow pointer-events-none fixed inset-0" />
-
-      <header className="relative z-20 border-b border-white/[0.08] bg-[#060d18]/75 backdrop-blur-2xl">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 md:px-8">
+      <header className="flights-iaa-header relative z-30">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 md:px-8">
           <div className="flex items-center gap-4">
-            <div className="relative">
-              <span className="flex h-12 w-12 items-center justify-center rounded-2xl border border-sky-400/30 bg-gradient-to-br from-sky-500/20 to-cyan-400/5 text-xl shadow-[0_0_30px_rgba(56,189,248,0.2)]">
-                ✈️
-              </span>
-              <span className="absolute -bottom-1 -left-1 rounded-md bg-[#0f172a] px-1.5 py-0.5 text-[10px] font-black tracking-wider text-sky-300 ring-1 ring-sky-400/30">
-                TLV
-              </span>
+            <div
+              className="flex h-12 w-12 items-center justify-center rounded-lg text-white shadow-md"
+              style={{ background: `linear-gradient(135deg, ${FLIGHTS_IAA.navy}, ${FLIGHTS_IAA.blue})` }}
+            >
+              <span className="text-lg font-black">TLV</span>
             </div>
             <div>
-              <p className="text-[10px] font-bold tracking-[0.32em] text-sky-300/80">
-                BEN GURION AIRPORT
+              <p className="text-[10px] font-bold tracking-[0.22em] text-slate-500">
+                רשות שדות התעופה
               </p>
-              <h1 className="text-flights-gradient text-2xl font-black md:text-3xl">
-                לוח טיסות חי
+              <h1 className="text-flights-gradient text-xl font-black md:text-2xl">
+                נמל התעופה בן גוריון
               </h1>
             </div>
           </div>
@@ -499,20 +495,20 @@ export function FlightsDashboard() {
             <span
               className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-bold ${
                 connected
-                  ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-200"
-                  : "border-amber-400/30 bg-amber-500/10 text-amber-100"
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                  : "border-amber-200 bg-amber-50 text-amber-800"
               }`}
             >
               <span
                 className={`h-2 w-2 rounded-full ${
-                  connected ? "animate-live-pulse bg-emerald-400" : "bg-amber-300"
+                  connected ? "animate-live-pulse bg-emerald-500" : "bg-amber-500"
                 }`}
               />
-              {connected ? `LIVE · ${secondsSinceUpdate}ש׳` : "..."}
+              {connected ? `עדכון · ${secondsSinceUpdate}ש׳` : "..."}
             </span>
             <Link
               href="/"
-              className="hidden rounded-full border border-white/10 px-4 py-2 text-xs font-bold text-slate-300 transition hover:border-sky-400/30 hover:text-white sm:inline-flex"
+              className="hidden rounded-lg border border-[#d6e4f0] bg-white px-4 py-2 text-xs font-bold text-slate-600 transition hover:border-[#1565c0]/40 hover:text-[#0b2d52] sm:inline-flex"
             >
               מונדיאל
             </Link>
@@ -520,36 +516,51 @@ export function FlightsDashboard() {
         </div>
       </header>
 
-      <section className="relative z-10 overflow-hidden border-b border-white/[0.06]">
-        <div className="relative min-h-[42vh] md:min-h-[48vh]">
+      <section className="relative z-10 overflow-hidden">
+        <div className="relative min-h-[52vh] md:min-h-[58vh]">
           <Image
-            src={FLIGHTS_RUNWAY_IMAGE}
-            alt="מסלול נחיתה בלילה"
+            src={FLIGHTS_HERO_IMAGE}
+            alt="נמל התעופה בן גוריון טרמינל 3 בלילה"
             fill
             priority
-            className="object-cover object-center scale-105"
+            className="object-cover object-center"
             sizes="100vw"
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-[#060d18] via-[#060d18]/75 to-[#060d18]/35" />
-          <div className="absolute inset-0 bg-gradient-to-l from-[#060d18]/90 via-transparent to-[#060d18]/50" />
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_70%_20%,rgba(56,189,248,0.18),transparent_55%)]" />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#071d36]/95 via-[#0b2d52]/72 to-[#0b2d52]/45" />
+          <div className="absolute inset-0 bg-gradient-to-l from-[#071d36]/80 via-transparent to-[#071d36]/55" />
 
-          <div className="relative mx-auto flex min-h-[42vh] max-w-7xl flex-col justify-end px-4 pb-10 pt-24 md:min-h-[48vh] md:px-8 md:pb-12">
-            <p className="inline-flex w-fit items-center gap-2 rounded-full border border-sky-400/25 bg-sky-500/10 px-3 py-1 text-[11px] font-bold tracking-[0.18em] text-sky-200">
-              <span className="h-1.5 w-1.5 animate-live-pulse rounded-full bg-sky-300" />
-              OFFICIAL FEED · DATA.GOV.IL
-            </p>
-            <h2 className="mt-4 text-4xl font-black leading-tight text-white md:text-5xl">
-              נתב״ג בזמן אמת
+          <div className="relative mx-auto flex min-h-[52vh] max-w-7xl flex-col justify-end px-4 pb-10 pt-20 md:min-h-[58vh] md:px-8 md:pb-14">
+            <span className="inline-flex w-fit items-center gap-2 rounded-md bg-white/15 px-3 py-1.5 text-xs font-black tracking-wide text-white ring-1 ring-white/25 backdrop-blur-sm">
+              טרמינל 3 · נתב״ג
+            </span>
+            <h2 className="mt-4 max-w-3xl text-3xl font-black leading-tight text-white md:text-5xl">
+              נמל התעופה בן גוריון שלכם ובשבילכם
             </h2>
-            <p className="mt-3 max-w-2xl text-sm leading-relaxed text-slate-300 md:text-base">
-              לחצו על טיסה למעקב מלא — נחיתות, המראות, עיכובים וטרמינלים ישירות
-              מרשות שדות התעופה.
+            <p className="mt-4 max-w-2xl text-sm leading-relaxed text-sky-100 md:text-base">
+              לוח טיסות חי — נחיתות והמראות, עיכובים ומעקב אחרי טיסה. מקור רשמי:
+              data.gov.il
             </p>
-            <p className="mt-3 text-xs text-slate-500">
-              היום: {formatFlightDate(`${todayKey}T12:00:00`)} · לחיצה על שורה =
-              מעקב טיסה
-            </p>
+
+            <div className="mt-8 flex flex-wrap gap-0 overflow-hidden rounded-t-xl border border-white/20 bg-white/95 shadow-2xl backdrop-blur-md">
+              <button
+                type="button"
+                onClick={() => setTab("arrivals")}
+                className={`flights-iaa-tab flex-1 sm:flex-none ${
+                  tab === "arrivals" ? "flights-iaa-tab-active" : ""
+                }`}
+              >
+                נחיתות ({snapshot.stats.arrivals})
+              </button>
+              <button
+                type="button"
+                onClick={() => setTab("departures")}
+                className={`flights-iaa-tab flex-1 sm:flex-none ${
+                  tab === "departures" ? "flights-iaa-tab-active" : ""
+                }`}
+              >
+                המראות ({snapshot.stats.departures})
+              </button>
+            </div>
           </div>
         </div>
       </section>
@@ -560,21 +571,21 @@ export function FlightsDashboard() {
             label={`נחיתות · ${dayLabel}`}
             value={snapshot.stats.arrivals}
             hint={`מתוך ${snapshot.catalogTotal.toLocaleString("he-IL")} במאגר המלא`}
-            accent="bg-emerald-500/20"
+            accent="bg-sky-100"
             icon="🛬"
           />
           <StatCard
             label={`המראות · ${dayLabel}`}
             value={snapshot.stats.departures}
             hint="רשות שדות התעופה"
-            accent="bg-sky-500/20"
+            accent="bg-blue-100"
             icon="🛫"
           />
           <StatCard
             label="עיכובים"
             value={snapshot.stats.delayed}
             hint={`${snapshot.stats.landed} נחתו · ${snapshot.stats.departed} המריאו`}
-            accent="bg-amber-500/20"
+            accent="bg-amber-100"
             icon="⏱️"
           />
           <StatCard
@@ -585,13 +596,13 @@ export function FlightsDashboard() {
                 ? `רשות: ${sourceUpdated} · סריקות: ${pollCount}`
                 : `אוטומטי כל 30 שניות · ${lastUpdated}`
             }
-            accent="bg-cyan-500/20"
+            accent="bg-cyan-100"
             icon="🔄"
           />
         </section>
 
         {snapshot.error ? (
-          <div className="mt-5 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+          <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
             שגיאה זמנית: {snapshot.error}
           </div>
         ) : null}
@@ -599,7 +610,7 @@ export function FlightsDashboard() {
         {trackedFlights.length > 0 ? (
           <section className="mt-8">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <h3 className="text-sm font-black text-white">טיסות במעקב</h3>
+              <h3 className="text-sm font-black text-[#0b2d52]">טיסות במעקב</h3>
               <span className="text-xs text-slate-500">מתעדכן אוטומטית</span>
             </div>
             <div className="flex gap-3 overflow-x-auto pb-1 scrollbar-hide">
@@ -614,7 +625,7 @@ export function FlightsDashboard() {
           </section>
         ) : null}
 
-        <section className="flights-glass sticky top-0 z-30 mt-8 rounded-3xl p-4 md:p-5">
+        <section className="flights-glass -mt-1 sticky top-0 z-30 rounded-b-xl p-4 md:p-5">
           <div className="flex flex-wrap gap-2">
             {(
               [
@@ -628,7 +639,7 @@ export function FlightsDashboard() {
                 key={value}
                 active={dayScope === value}
                 onClick={() => setDayScope(value)}
-                activeClassName="bg-gradient-to-l from-sky-500 to-cyan-400 text-white"
+                activeClassName="bg-[#1565c0] text-white"
               >
                 {label}
               </SegmentButton>
@@ -636,22 +647,10 @@ export function FlightsDashboard() {
           </div>
 
           <div className="mt-4 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-            <div className="flex flex-wrap gap-2">
-              <SegmentButton
-                active={tab === "arrivals"}
-                onClick={() => setTab("arrivals")}
-                activeClassName="bg-gradient-to-l from-emerald-500 to-teal-400 text-white"
-              >
-                נחיתות ({snapshot.stats.arrivals})
-              </SegmentButton>
-              <SegmentButton
-                active={tab === "departures"}
-                onClick={() => setTab("departures")}
-                activeClassName="bg-gradient-to-l from-sky-500 to-blue-400 text-white"
-              >
-                המראות ({snapshot.stats.departures})
-              </SegmentButton>
-            </div>
+            <p className="text-sm font-bold text-[#0b2d52]">
+              {tab === "arrivals" ? "לוח נחיתות" : "לוח המראות"} · {dayLabel} ·{" "}
+              {formatFlightDate(`${todayKey}T12:00:00`)}
+            </p>
 
             <div className="relative w-full xl:max-w-md">
               <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-slate-500">
@@ -662,12 +661,12 @@ export function FlightsDashboard() {
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="חיפוש טיסה, חברה, יעד..."
-                className="w-full rounded-2xl border border-white/10 bg-black/30 py-3 pl-4 pr-10 text-sm text-white outline-none transition focus:border-sky-400/40 focus:ring-2 focus:ring-sky-400/20"
+                className="w-full rounded-lg border border-[#d6e4f0] bg-white py-3 pl-4 pr-10 text-sm text-slate-800 outline-none transition focus:border-[#1565c0] focus:ring-2 focus:ring-[#1565c0]/15"
               />
             </div>
           </div>
 
-          <div className="mt-4 flex flex-wrap gap-2 border-t border-white/[0.06] pt-4">
+          <div className="mt-4 flex flex-wrap gap-2 border-t border-[#d6e4f0] pt-4">
             {(
               [
                 ["all", "הכל"],
@@ -680,10 +679,10 @@ export function FlightsDashboard() {
                 key={value}
                 type="button"
                 onClick={() => setStatusFilter(value)}
-                className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
                   statusFilter === value
-                    ? "bg-white/12 text-white ring-1 ring-white/15"
-                    : "text-slate-500 hover:text-slate-300"
+                    ? "bg-[#0b2d52] text-white"
+                    : "text-slate-500 hover:bg-slate-100 hover:text-slate-800"
                 }`}
               >
                 {label}
@@ -692,17 +691,14 @@ export function FlightsDashboard() {
           </div>
         </section>
 
-        <section className="flights-glass relative mt-5 overflow-hidden rounded-3xl">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] bg-white/[0.02] px-5 py-4">
+        <section className="flights-glass relative mt-5 overflow-hidden rounded-xl">
+          <div className="flights-board-header flex flex-wrap items-center justify-between gap-3 px-5 py-4">
             <div>
-              <p className="text-sm font-bold text-white">
-                {tab === "arrivals" ? "לוח נחיתות" : "לוח המראות"} · {dayLabel}
+              <p className="text-sm font-bold">
+                {tab === "arrivals" ? "נחיתות" : "המראות"} · טרמינל 3
               </p>
-              <p className="mt-0.5 text-xs text-slate-500">
-                מציג {visibleFlights.length} טיסות
-                {snapshot.dayKey
-                  ? ` · ${formatFlightDate(`${snapshot.dayKey}T12:00:00`)}`
-                  : ""}
+              <p className="mt-0.5 text-xs text-sky-100/90">
+                מציג {visibleFlights.length} טיסות · {dayLabel}
               </p>
             </div>
             <button
@@ -711,13 +707,13 @@ export function FlightsDashboard() {
                 void loadFlights({ force: true });
                 void refreshTracked();
               }}
-              className="rounded-full border border-sky-400/25 bg-sky-500/10 px-4 py-2 text-xs font-bold text-sky-100 transition hover:bg-sky-500/20"
+              className="rounded-lg border border-white/25 bg-white/10 px-4 py-2 text-xs font-bold text-white transition hover:bg-white/20"
             >
               רענון עכשיו
             </button>
           </div>
 
-          <div className="hidden border-b border-white/[0.06] bg-black/20 px-6 py-3 text-[11px] font-bold tracking-[0.16em] text-slate-500 md:grid md:grid-cols-[1.2fr_1.3fr_0.7fr_0.7fr_1fr] md:gap-5">
+          <div className="hidden border-b border-[#d6e4f0] bg-[#e3f2fd] px-6 py-3 text-[11px] font-bold tracking-[0.12em] text-[#0b2d52] md:grid md:grid-cols-[1.2fr_1.3fr_0.7fr_0.7fr_1fr] md:gap-5">
             <span>טיסה</span>
             <span>{tab === "arrivals" ? "מוצא" : "יעד"}</span>
             <span>מתוכנן</span>
@@ -758,16 +754,25 @@ export function FlightsDashboard() {
           </div>
         </section>
 
-        <footer className="mt-10 rounded-2xl border border-white/[0.06] bg-white/[0.02] px-5 py-6 text-center text-xs leading-relaxed text-slate-500">
+        <footer className="mt-10 rounded-xl border border-[#d6e4f0] bg-white px-5 py-6 text-center text-xs leading-relaxed text-slate-500">
           <p>
             מקור רשמי:{" "}
             <a
               href="https://data.gov.il/dataset/flydata"
               target="_blank"
               rel="noopener noreferrer"
-              className="font-semibold text-sky-300 hover:underline"
+              className="font-semibold text-[#1565c0] hover:underline"
             >
               data.gov.il · רשות שדות התעופה
+            </a>
+            {" · "}
+            <a
+              href="https://www.iaa.gov.il/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-[#1565c0] hover:underline"
+            >
+              iaa.gov.il
             </a>
           </p>
           <p className="mt-2">

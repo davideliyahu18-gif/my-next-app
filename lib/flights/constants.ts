@@ -18,8 +18,19 @@ export const FLIGHTS_STREAM_INTERVAL_MS = 30 * 1000;
 
 export const FLIGHTS_TIMEZONE = "Asia/Jerusalem";
 
-/** Hero background — runway at night (Unsplash). */
-export const FLIGHTS_RUNWAY_IMAGE =
-  "https://images.unsplash.com/photo-1437840810700-75372276584e?w=2400&q=85&auto=format&fit=crop";
+/** Hero — Terminal 3 arrivals hall at night (Wikimedia Commons). */
+export const FLIGHTS_HERO_IMAGE = "/images/tlv-terminal-3-night.jpg";
+
+/** @deprecated Use FLIGHTS_HERO_IMAGE */
+export const FLIGHTS_RUNWAY_IMAGE = FLIGHTS_HERO_IMAGE;
+
+export const FLIGHTS_IAA = {
+  navy: "#0b2d52",
+  navyDark: "#071d36",
+  blue: "#1565c0",
+  sky: "#e3f2fd",
+  surface: "#f5f8fc",
+  border: "#d6e4f0",
+} as const;
 
 export const FLIGHTS_TRACKED_STORAGE_KEY = "tlv-flights-tracked";

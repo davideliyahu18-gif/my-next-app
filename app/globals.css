@@ -114,45 +114,78 @@ body {
   color: transparent;
 }
 
-/* Flights board — aviation night theme */
+/* Flights board — IAA / Ben Gurion official style */
 .flights-page {
-  --flights-bg: #060d18;
-  --flights-surface: rgba(12, 24, 42, 0.72);
-  --flights-border: rgba(125, 211, 252, 0.14);
-  --flights-glow: rgba(56, 189, 248, 0.22);
-  --flights-arrival: #34d399;
-  --flights-departure: #38bdf8;
-  --flights-delay: #fbbf24;
+  --iaa-navy: #0b2d52;
+  --iaa-navy-dark: #071d36;
+  --iaa-blue: #1565c0;
+  --iaa-sky: #e3f2fd;
+  --iaa-surface: #f5f8fc;
+  --iaa-border: #d6e4f0;
+  --flights-bg: var(--iaa-surface);
+  --flights-surface: rgba(255, 255, 255, 0.94);
+  --flights-border: var(--iaa-border);
   background: var(--flights-bg);
-  color: #f8fafc;
+  color: #0f172a;
 }
 
 .flights-grid-bg {
-  background-image:
-    linear-gradient(rgba(56, 189, 248, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(56, 189, 248, 0.035) 1px, transparent 1px);
-  background-size: 48px 48px;
-  mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, black 20%, transparent 80%);
+  display: none;
 }
 
 .flights-glass {
-  border: 1px solid var(--flights-border);
+  border: 1px solid var(--iaa-border);
   background: var(--flights-surface);
-  backdrop-filter: blur(18px);
-  box-shadow:
-    0 24px 60px rgba(0, 0, 0, 0.45),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 8px 32px rgba(11, 45, 82, 0.08);
 }
 
 .flights-hero-glow {
-  background:
-    radial-gradient(ellipse 70% 55% at 80% -10%, rgba(56, 189, 248, 0.22), transparent 60%),
-    radial-gradient(ellipse 50% 40% at 10% 0%, rgba(52, 211, 153, 0.12), transparent 55%),
-    radial-gradient(ellipse 60% 50% at 50% 100%, rgba(15, 23, 42, 0.9), transparent 70%);
+  display: none;
+}
+
+.flights-iaa-header {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.97) 0%, rgba(245, 248, 252, 0.95) 100%);
+  border-bottom: 3px solid var(--iaa-blue);
+}
+
+.flights-iaa-tab {
+  position: relative;
+  padding: 0.85rem 1.5rem;
+  font-weight: 800;
+  color: #64748b;
+  transition: color 0.2s ease;
+}
+
+.flights-iaa-tab-active {
+  color: var(--iaa-navy);
+}
+
+.flights-iaa-tab-active::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0.75rem;
+  bottom: -3px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--iaa-blue);
+}
+
+.flights-board-header {
+  background: linear-gradient(90deg, var(--iaa-navy-dark), var(--iaa-navy));
+  color: #fff;
+}
+
+.flights-row-alt:nth-child(even) {
+  background: rgba(227, 242, 253, 0.35);
+}
+
+.flights-row-alt:hover {
+  background: rgba(21, 101, 192, 0.08);
 }
 
 .text-flights-gradient {
-  background: linear-gradient(135deg, #e0f2fe 0%, #7dd3fc 35%, #38bdf8 65%, #bae6fd 100%);
+  background: linear-gradient(135deg, #0b2d52 0%, #1565c0 55%, #1e88e5 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
