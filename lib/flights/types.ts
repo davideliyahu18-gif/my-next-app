@@ -1,11 +1,14 @@
 export type FlightDirection = "arrival" | "departure";
 
+export type FlightDayScope = "today" | "tomorrow" | "yesterday" | "all";
+
 export type FlightRecord = {
   id: string;
   airlineCode: string;
   flightNumber: string;
   flightCode: string;
   airlineName: string;
+  scheduledDay: string;
   scheduledAt: string;
   actualAt: string | null;
   direction: FlightDirection;
@@ -26,6 +29,9 @@ export type FlightRecord = {
 
 export type FlightsSnapshot = {
   ok: boolean;
+  dayScope: FlightDayScope;
+  dayKey: string | null;
+  catalogTotal: number;
   flights: FlightRecord[];
   arrivals: FlightRecord[];
   departures: FlightRecord[];

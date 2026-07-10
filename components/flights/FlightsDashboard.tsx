@@ -1,10 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import type { FlightRecord, FlightsSnapshot } from "@/lib/flights/types";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { FlightDayScope, FlightRecord, FlightsSnapshot } from "@/lib/flights/types";
+import { FLIGHTS_STREAM_INTERVAL_MS } from "@/lib/flights/constants";
 import {
+  dayScopeLabel,
   formatDelay,
+  formatFlightDate,
   formatFlightDateTime,
   formatFlightTime,
   matchesFlightQuery,
@@ -16,6 +19,9 @@ type StatusFilter = "all" | "delayed" | "active" | "canceled";
 
 const EMPTY_SNAPSHOT: FlightsSnapshot = {
   ok: true,
+  dayScope: "today",
+  dayKey: null,
+  catalogTotal: 0,
   flights: [],
   arrivals: [],
   departures: [],
@@ -68,7 +74,13 @@ function StatCard({
   );
 }
 
-function FlightRow({ flight }: { flight: FlightRecord }) {
+function FlightRow({
+  flight,
+  showDate,
+}: {
+  flight: FlightRecord;
+  showDate?: boolean;
+}) {
   const tone = statusTone(flight);
   const delay = formatDelay(flight.delayMinutes);
   const city = flight.airportNameHe || flight.airportNameEn;
@@ -80,7 +92,10 @@ function FlightRow({ flight }: { flight: FlightRecord }) {
         <p className="text-lg font-black tracking-wide text-white">
           {flight.flightCode}
         </p>
-        <p className="mt-0.5 text-xs text-zinc-500">{flight.airlineName}</p>
+        <p className="mt-0.5 text-xs text-zinc-500">
+          {flight.airlineName}
+          {showDate ? ` · ${formatFlightDate(flight.scheduledAt)}` : ""}
+        </p>
       </div>
 
       <div>
@@ -152,46 +167,36 @@ function filterFlights(
 export function FlightsDashboard() {
   const [snapshot, setSnapshot] = useState<FlightsSnapshot>(EMPTY_SNAPSHOT);
   const [connected, setConnected] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [dayScope, setDayScope] = useState<FlightDayScope>("today");
   const [tab, setTab] = useState<DirectionTab>("arrivals");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [query, setQuery] = useState("");
 
-  useEffect(() => {
-    let source: EventSource | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let disposed = false;
-
-    const connect = () => {
-      if (disposed) return;
-      source = new EventSource("/api/flights/stream");
-      source.onopen = () => setConnected(true);
-      source.onmessage = (event) => {
-        try {
-          const next = JSON.parse(event.data) as FlightsSnapshot;
-          setSnapshot(next);
-        } catch {
-          // Ignore malformed frames.
-        }
-      };
-      source.onerror = () => {
-        setConnected(false);
-        source?.close();
-        source = null;
-        if (!disposed) {
-          reconnectTimer = setTimeout(connect, 3000);
-        }
-      };
-    };
-
-    connect();
-
-    return () => {
-      disposed = true;
+  const loadFlights = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/flights?day=${dayScope}`, {
+        cache: "no-store",
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const next = (await response.json()) as FlightsSnapshot;
+      setSnapshot(next);
+      setConnected(true);
+    } catch {
       setConnected(false);
-      source?.close();
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-    };
-  }, []);
+    } finally {
+      setLoading(false);
+    }
+  }, [dayScope]);
+
+  useEffect(() => {
+    setLoading(true);
+    void loadFlights();
+    const timer = setInterval(() => {
+      void loadFlights();
+    }, FLIGHTS_STREAM_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [loadFlights]);
 
   const visibleFlights = useMemo(() => {
     const base = tab === "arrivals" ? snapshot.arrivals : snapshot.departures;
@@ -203,6 +208,12 @@ export function FlightsDashboard() {
   const lastUpdated = snapshot.timestamp
     ? formatFlightDateTime(snapshot.timestamp)
     : "—";
+
+  const sourceUpdated = snapshot.sourceUpdatedAt
+    ? formatFlightDateTime(snapshot.sourceUpdatedAt)
+    : null;
+
+  const dayLabel = dayScopeLabel(dayScope);
 
   return (
     <div
@@ -240,7 +251,7 @@ export function FlightsDashboard() {
                   connected ? "bg-emerald-400 animate-pulse" : "bg-amber-300"
                 }`}
               />
-              {connected ? "מחובר לשידור חי" : "מתחבר..."}
+              {connected ? "מתעדכן כל 30 שניות" : "מתחבר..."}
             </span>
             <Link
               href="/"
@@ -255,24 +266,28 @@ export function FlightsDashboard() {
       <main className="relative z-10 mx-auto max-w-6xl px-4 py-8 md:px-8">
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard
-            label="נחיתות"
+            label={`נחיתות · ${dayLabel}`}
             value={snapshot.stats.arrivals}
-            hint="טיסות נכנסות במאגר"
+            hint={`מתוך ${snapshot.catalogTotal} טיסות במאגר המלא`}
           />
           <StatCard
-            label="המראות"
+            label={`המראות · ${dayLabel}`}
             value={snapshot.stats.departures}
-            hint="טיסות יוצאות במאגר"
+            hint="מקור רשמי — רשות שדות התעופה"
           />
           <StatCard
             label="עיכובים"
             value={snapshot.stats.delayed}
-            hint="טיסות עם עיכוב משמעותי"
+            hint="בסינון הנוכחי"
           />
           <StatCard
-            label="עודכן"
+            label="רענון אתר"
             value={lastUpdated}
-            hint="רענון אוטומטי כל 30 שניות"
+            hint={
+              sourceUpdated
+                ? `נתון אחרון מהרשות: ${sourceUpdated}`
+                : "רענון אוטומטי כל 30 שניות"
+            }
           />
         </section>
 
@@ -284,12 +299,36 @@ export function FlightsDashboard() {
         ) : null}
 
         <section className="mt-8 rounded-3xl border border-white/10 bg-white/[0.03] p-4 shadow-[0_20px_60px_rgba(0,0,0,0.35)] md:p-5">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-wrap gap-2">
+            {(
+              [
+                ["today", "היום"],
+                ["tomorrow", "מחר"],
+                ["yesterday", "אתמול"],
+                ["all", "כל הימים"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setDayScope(value)}
+                className={`rounded-full px-4 py-2 text-sm font-bold transition-colors ${
+                  dayScope === value
+                    ? "bg-sky-500 text-white shadow-[0_8px_24px_rgba(14,165,233,0.35)]"
+                    : "border border-white/10 text-zinc-400 hover:text-white"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex flex-wrap gap-2">
               {(
                 [
-                  ["arrivals", "נחיתות"],
-                  ["departures", "המראות"],
+                  ["arrivals", `נחיתות (${snapshot.stats.arrivals})`],
+                  ["departures", `המראות (${snapshot.stats.departures})`],
                 ] as const
               ).map(([value, label]) => (
                 <button
@@ -342,6 +381,20 @@ export function FlightsDashboard() {
         </section>
 
         <section className="mt-4 overflow-hidden rounded-3xl border border-white/10 bg-[#07101d]/80">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.06] bg-white/[0.02] px-5 py-3 text-xs text-zinc-500">
+            <span>
+              מציג {visibleFlights.length}{" "}
+              {tab === "arrivals" ? "נחיתות" : "המראות"} · {dayLabel}
+              {snapshot.dayKey ? ` (${formatFlightDate(`${snapshot.dayKey}T12:00:00`)})` : ""}
+            </span>
+            <button
+              type="button"
+              onClick={() => void loadFlights()}
+              className="rounded-full border border-white/10 px-3 py-1 text-[11px] font-semibold text-zinc-300 hover:text-white"
+            >
+              רענון עכשיו
+            </button>
+          </div>
           <div className="hidden border-b border-white/[0.06] bg-white/[0.02] px-5 py-3 text-[11px] font-bold tracking-[0.16em] text-zinc-500 md:grid md:grid-cols-[1.1fr_1.2fr_0.8fr_0.8fr_0.9fr] md:gap-4">
             <span>טיסה</span>
             <span>{tab === "arrivals" ? "מוצא" : "יעד"}</span>
@@ -352,13 +405,19 @@ export function FlightsDashboard() {
 
           {visibleFlights.length === 0 ? (
             <div className="px-5 py-16 text-center text-sm text-zinc-500">
-              {snapshot.flights.length === 0
+              {loading
                 ? "טוען טיסות מהמקור הרשמי..."
-                : "אין טיסות שמתאימות לחיפוש או לסינון."}
+                : snapshot.flights.length === 0
+                  ? `אין טיסות ליום ${dayLabel} במאגר כרגע.`
+                  : "אין טיסות שמתאימות לחיפוש או לסינון."}
             </div>
           ) : (
             visibleFlights.map((flight) => (
-              <FlightRow key={flight.id} flight={flight} />
+              <FlightRow
+                key={flight.id}
+                flight={flight}
+                showDate={dayScope === "all"}
+              />
             ))
           )}
         </section>
@@ -376,8 +435,10 @@ export function FlightsDashboard() {
             </a>
           </p>
           <p className="mt-1">
-            הנתונים מתעדכנים אצל הרשות כל ~15 דקות · האתר משדר רענון חי כל 30
-            שניות
+            הרשות מעדכנת את המאגר כל ~15 דקות · האתר מושך נתונים חדשים כל 30 שניות
+          </p>
+          <p className="mt-1">
+            ברירת מחדל: טיסות של היום בלבד. לכלל הימים — לחצו &quot;כל הימים&quot;.
           </p>
         </footer>
       </main>

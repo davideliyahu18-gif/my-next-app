@@ -87,6 +87,7 @@ export function normalizeFlightRow(row: RawFlightRow): FlightRecord | null {
     flightNumber,
     flightCode,
     airlineName: String(row.CHOPERD || airlineCode).trim(),
+    scheduledDay: scheduledAt.slice(0, 10),
     scheduledAt,
     actualAt,
     direction,

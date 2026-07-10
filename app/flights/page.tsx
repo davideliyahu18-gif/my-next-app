@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { FlightsDashboard } from "@/components/flights/FlightsDashboard";
 
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = {
   title: "נתב״ג חי · נחיתות והמראות",
   description:

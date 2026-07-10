@@ -1,5 +1,57 @@
-import type { FlightRecord } from "./types";
+import type { FlightDayScope, FlightRecord } from "./types";
 import { FLIGHTS_TIMEZONE } from "./constants";
+
+const israelDayFormatter = new Intl.DateTimeFormat("en-CA", {
+  timeZone: FLIGHTS_TIMEZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+export function getIsraelDayKey(date = new Date()): string {
+  return israelDayFormatter.format(date);
+}
+
+export function shiftIsraelDayKey(dayKey: string, days: number): string {
+  const [year, month, day] = dayKey.split("-").map(Number);
+  const shifted = new Date(Date.UTC(year, month - 1, day + days));
+  return shifted.toISOString().slice(0, 10);
+}
+
+export function resolveFlightDayKey(scope: FlightDayScope): string | null {
+  const today = getIsraelDayKey();
+  if (scope === "today") return today;
+  if (scope === "tomorrow") return shiftIsraelDayKey(today, 1);
+  if (scope === "yesterday") return shiftIsraelDayKey(today, -1);
+  return null;
+}
+
+export function filterFlightsByDay(
+  flights: FlightRecord[],
+  scope: FlightDayScope,
+): FlightRecord[] {
+  if (scope === "all") return flights;
+  const dayKey = resolveFlightDayKey(scope);
+  if (!dayKey) return flights;
+  return flights.filter((flight) => flight.scheduledDay === dayKey);
+}
+
+export function sortFlightsForBoard(flights: FlightRecord[]): FlightRecord[] {
+  return [...flights].sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt));
+}
+
+export function dayScopeLabel(scope: FlightDayScope): string {
+  switch (scope) {
+    case "today":
+      return "היום";
+    case "tomorrow":
+      return "מחר";
+    case "yesterday":
+      return "אתמול";
+    default:
+      return "כל הימים";
+  }
+}
 
 const dateFormatter = new Intl.DateTimeFormat("he-IL", {
   timeZone: FLIGHTS_TIMEZONE,

@@ -1,19 +1,24 @@
 import { FLIGHTS_STREAM_INTERVAL_MS } from "@/lib/flights/constants";
-import { getFlightsSnapshot } from "@/lib/flights/state";
+import {
+  getFlightsSnapshot,
+  parseFlightDayScope,
+} from "@/lib/flights/state";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const encoder = new TextEncoder();
 
-export async function GET() {
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const dayScope = parseFlightDayScope(searchParams.get("day"));
   let closed = false;
 
   const stream = new ReadableStream({
     async start(controller) {
       const send = async (force = false) => {
         if (closed) return;
-        const snapshot = await getFlightsSnapshot(force);
+        const snapshot = await getFlightsSnapshot({ force, dayScope });
         controller.enqueue(
           encoder.encode(`data: ${JSON.stringify(snapshot)}\n\n`),
         );

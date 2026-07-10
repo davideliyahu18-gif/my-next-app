@@ -1,15 +1,21 @@
 import { FLIGHTS_CACHE_TTL_MS } from "./constants";
 import { fetchFlightsFromSource } from "./api";
-import type { FlightRecord, FlightsSnapshot } from "./types";
+import type { FlightDayScope, FlightRecord, FlightsSnapshot } from "./types";
+import {
+  filterFlightsByDay,
+  resolveFlightDayKey,
+  sortFlightsForBoard,
+} from "./utils";
 
-type CachedFlights = {
-  snapshot: FlightsSnapshot;
+type FlightsCatalog = {
+  flights: FlightRecord[];
+  sourceUpdatedAt: string | null;
   fetchedAt: number;
-  inflight: Promise<FlightsSnapshot> | null;
+  inflight: Promise<FlightsCatalog> | null;
 };
 
 const globalRef = globalThis as typeof globalThis & {
-  __flightsCache?: CachedFlights;
+  __flightsCatalog?: FlightsCatalog;
 };
 
 function buildStats(flights: FlightRecord[]) {
@@ -32,20 +38,25 @@ function buildStats(flights: FlightRecord[]) {
 }
 
 function buildSnapshot(
-  flights: FlightRecord[],
+  allFlights: FlightRecord[],
   sourceUpdatedAt: string | null,
+  dayScope: FlightDayScope,
   ok = true,
   error?: string,
 ): FlightsSnapshot {
-  const arrivals = flights.filter((flight) => flight.direction === "arrival");
-  const departures = flights.filter((flight) => flight.direction === "departure");
+  const scoped = sortFlightsForBoard(filterFlightsByDay(allFlights, dayScope));
+  const arrivals = scoped.filter((flight) => flight.direction === "arrival");
+  const departures = scoped.filter((flight) => flight.direction === "departure");
 
   return {
     ok,
-    flights,
+    dayScope,
+    dayKey: resolveFlightDayKey(dayScope),
+    catalogTotal: allFlights.length,
+    flights: scoped,
     arrivals,
     departures,
-    stats: buildStats(flights),
+    stats: buildStats(scoped),
     timestamp: new Date().toISOString(),
     sourceUpdatedAt,
     source: "data.gov.il",
@@ -53,62 +64,86 @@ function buildSnapshot(
   };
 }
 
-function getCache(): CachedFlights {
-  if (!globalRef.__flightsCache) {
-    globalRef.__flightsCache = {
-      snapshot: buildSnapshot([], null, false, "not loaded"),
+function getCatalog(): FlightsCatalog {
+  if (!globalRef.__flightsCatalog) {
+    globalRef.__flightsCatalog = {
+      flights: [],
+      sourceUpdatedAt: null,
       fetchedAt: 0,
       inflight: null,
     };
   }
-  return globalRef.__flightsCache;
+  return globalRef.__flightsCatalog;
 }
 
-async function refreshFlights(force = false): Promise<FlightsSnapshot> {
-  const cache = getCache();
-  const age = Date.now() - cache.fetchedAt;
+async function refreshCatalog(force = false): Promise<FlightsCatalog> {
+  const catalog = getCatalog();
+  const age = Date.now() - catalog.fetchedAt;
 
-  if (!force && cache.fetchedAt > 0 && age < FLIGHTS_CACHE_TTL_MS) {
-    return cache.snapshot;
+  if (!force && catalog.fetchedAt > 0 && age < FLIGHTS_CACHE_TTL_MS) {
+    return catalog;
   }
 
-  if (cache.inflight) {
-    return cache.inflight;
+  if (catalog.inflight) {
+    return catalog.inflight;
   }
 
-  cache.inflight = (async () => {
+  catalog.inflight = (async () => {
     try {
       const { flights, sourceUpdatedAt } = await fetchFlightsFromSource();
-      const snapshot = buildSnapshot(flights, sourceUpdatedAt, true);
-      cache.snapshot = snapshot;
-      cache.fetchedAt = Date.now();
-      return snapshot;
+      catalog.flights = flights;
+      catalog.sourceUpdatedAt = sourceUpdatedAt;
+      catalog.fetchedAt = Date.now();
+      return catalog;
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "failed to fetch flights";
-
-      if (cache.fetchedAt > 0 && cache.snapshot.flights.length > 0) {
-        cache.snapshot = {
-          ...cache.snapshot,
-          ok: false,
-          timestamp: new Date().toISOString(),
-          error: message,
-        };
-        return cache.snapshot;
-      }
-
-      const snapshot = buildSnapshot([], null, false, message);
-      cache.snapshot = snapshot;
-      cache.fetchedAt = Date.now();
-      return snapshot;
+      catalog.fetchedAt = Date.now();
+      throw error;
     } finally {
-      cache.inflight = null;
+      catalog.inflight = null;
     }
   })();
 
-  return cache.inflight;
+  return catalog.inflight;
 }
 
-export async function getFlightsSnapshot(force = false): Promise<FlightsSnapshot> {
-  return refreshFlights(force);
+export function parseFlightDayScope(value: string | null | undefined): FlightDayScope {
+  if (value === "tomorrow" || value === "yesterday" || value === "all") {
+    return value;
+  }
+  return "today";
+}
+
+export async function getFlightsSnapshot(
+  options: { force?: boolean; dayScope?: FlightDayScope } = {},
+): Promise<FlightsSnapshot> {
+  const dayScope = options.dayScope ?? "today";
+  const catalog = getCatalog();
+
+  try {
+    const fresh = await refreshCatalog(options.force === true);
+    return buildSnapshot(
+      fresh.flights,
+      fresh.sourceUpdatedAt,
+      dayScope,
+      true,
+    );
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "failed to fetch flights";
+
+    if (catalog.flights.length > 0) {
+      return {
+        ...buildSnapshot(
+          catalog.flights,
+          catalog.sourceUpdatedAt,
+          dayScope,
+          false,
+          message,
+        ),
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    return buildSnapshot([], null, dayScope, false, message);
+  }
 }
