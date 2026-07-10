@@ -113,3 +113,95 @@ body {
   background-clip: text;
   color: transparent;
 }
+
+/* Flights board — aviation night theme */
+.flights-page {
+  --flights-bg: #060d18;
+  --flights-surface: rgba(12, 24, 42, 0.72);
+  --flights-border: rgba(125, 211, 252, 0.14);
+  --flights-glow: rgba(56, 189, 248, 0.22);
+  --flights-arrival: #34d399;
+  --flights-departure: #38bdf8;
+  --flights-delay: #fbbf24;
+  background: var(--flights-bg);
+  color: #f8fafc;
+}
+
+.flights-grid-bg {
+  background-image:
+    linear-gradient(rgba(56, 189, 248, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56, 189, 248, 0.035) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, black 20%, transparent 80%);
+}
+
+.flights-glass {
+  border: 1px solid var(--flights-border);
+  background: var(--flights-surface);
+  backdrop-filter: blur(18px);
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.flights-hero-glow {
+  background:
+    radial-gradient(ellipse 70% 55% at 80% -10%, rgba(56, 189, 248, 0.22), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 10% 0%, rgba(52, 211, 153, 0.12), transparent 55%),
+    radial-gradient(ellipse 60% 50% at 50% 100%, rgba(15, 23, 42, 0.9), transparent 70%);
+}
+
+.text-flights-gradient {
+  background: linear-gradient(135deg, #e0f2fe 0%, #7dd3fc 35%, #38bdf8 65%, #bae6fd 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+@keyframes flights-scan {
+  0% {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.35;
+  }
+  100% {
+    transform: translateY(500%);
+    opacity: 0;
+  }
+}
+
+@keyframes flights-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.flights-scanline::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    rgba(56, 189, 248, 0.06),
+    transparent
+  );
+  animation: flights-scan 6s linear infinite;
+  pointer-events: none;
+}
+
+.flights-skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.03) 0%,
+    rgba(255, 255, 255, 0.08) 50%,
+    rgba(255, 255, 255, 0.03) 100%
+  );
+  background-size: 200% 100%;
+  animation: flights-shimmer 1.4s ease-in-out infinite;
+}
