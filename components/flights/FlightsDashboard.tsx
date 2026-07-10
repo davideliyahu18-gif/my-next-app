@@ -1,9 +1,16 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { FlightDetailDrawer } from "@/components/flights/FlightDetailDrawer";
+import { useTrackedFlights } from "@/hooks/useTrackedFlights";
 import type { FlightDayScope, FlightRecord, FlightsSnapshot } from "@/lib/flights/types";
-import { FLIGHTS_STREAM_INTERVAL_MS, FLIGHTS_TIMEZONE } from "@/lib/flights/constants";
+import {
+  FLIGHTS_RUNWAY_IMAGE,
+  FLIGHTS_STREAM_INTERVAL_MS,
+  FLIGHTS_TIMEZONE,
+} from "@/lib/flights/constants";
 import {
   dayScopeLabel,
   formatDelay,
@@ -154,10 +161,16 @@ function FlightRow({
   flight,
   showDate,
   direction,
+  onSelect,
+  isTracked,
+  isSelected,
 }: {
   flight: FlightRecord;
   showDate?: boolean;
   direction: DirectionTab;
+  onSelect: (flight: FlightRecord) => void;
+  isTracked?: boolean;
+  isSelected?: boolean;
 }) {
   const tone = statusTone(flight);
   const styles = toneStyles(tone);
@@ -167,7 +180,13 @@ function FlightRow({
   const isArrival = direction === "arrivals";
 
   return (
-    <article className="group relative border-b border-white/[0.05] transition-colors hover:bg-white/[0.025]">
+    <button
+      type="button"
+      onClick={() => onSelect(flight)}
+      className={`group relative w-full border-b border-white/[0.05] text-right transition-colors hover:bg-white/[0.04] ${
+        isSelected ? "bg-sky-500/10" : ""
+      } ${isTracked ? "ring-1 ring-inset ring-amber-400/20" : ""}`}
+    >
       <div className={`absolute inset-y-3 right-0 w-1 rounded-full ${styles.rail} opacity-80`} />
       <div className="grid gap-4 px-4 py-4 md:grid-cols-[1.2fr_1.3fr_0.7fr_0.7fr_1fr] md:items-center md:gap-5 md:px-6 md:py-5">
         <div className="flex items-center gap-3">
@@ -183,6 +202,9 @@ function FlightRow({
           <div className="min-w-0">
             <p className="truncate text-lg font-black tracking-wide text-white">
               {flight.flightCode}
+              {isTracked ? (
+                <span className="mr-2 text-[10px] font-bold text-amber-300">★</span>
+              ) : null}
             </p>
             <p className="truncate text-xs text-slate-400">
               {flight.airlineName}
@@ -236,9 +258,42 @@ function FlightRow({
               דלפק {flight.checkInCounters}
             </span>
           ) : null}
+          <span className="text-[10px] text-sky-400/80 opacity-0 transition group-hover:opacity-100">
+            פרטים ←
+          </span>
         </div>
       </div>
-    </article>
+    </button>
+  );
+}
+
+function TrackedFlightChip({
+  flight,
+  onSelect,
+}: {
+  flight: FlightRecord;
+  onSelect: (flight: FlightRecord) => void;
+}) {
+  const delay = formatDelay(flight.delayMinutes);
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(flight)}
+      className="flights-glass min-w-[220px] flex-1 rounded-2xl p-4 text-right transition hover:-translate-y-0.5"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-lg font-black text-white">{flight.flightCode}</span>
+        <span className="text-[10px] font-bold text-amber-300">במעקב</span>
+      </div>
+      <p className="mt-1 truncate text-xs text-slate-400">
+        {flight.airportNameHe || flight.airportNameEn}
+      </p>
+      <div className="mt-3 flex items-center justify-between text-xs">
+        <span className="font-mono text-white">{formatFlightTime(flight.actualAt || flight.scheduledAt)}</span>
+        <span className="font-bold text-sky-200">{flight.statusHe}</span>
+      </div>
+      {delay ? <p className="mt-1 text-[11px] font-bold text-amber-300">{delay}</p> : null}
+    </button>
   );
 }
 
@@ -296,6 +351,24 @@ export function FlightsDashboard() {
   const [tab, setTab] = useState<DirectionTab>("arrivals");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [query, setQuery] = useState("");
+  const [selectedFlight, setSelectedFlight] = useState<FlightRecord | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+
+  const {
+    trackedFlights,
+    isTracked,
+    toggleTrack,
+    refreshTracked,
+  } = useTrackedFlights();
+
+  const openFlightDetail = useCallback((flight: FlightRecord) => {
+    setSelectedFlight(flight);
+    setDetailOpen(true);
+  }, []);
+
+  const closeFlightDetail = useCallback(() => {
+    setDetailOpen(false);
+  }, []);
 
   const loadFlights = useCallback(async () => {
     try {
@@ -306,12 +379,13 @@ export function FlightsDashboard() {
       const next = (await response.json()) as FlightsSnapshot;
       setSnapshot(next);
       setConnected(true);
+      await refreshTracked();
     } catch {
       setConnected(false);
     } finally {
       setLoading(false);
     }
-  }, [dayScope]);
+  }, [dayScope, refreshTracked]);
 
   useEffect(() => {
     setLoading(true);
@@ -321,6 +395,25 @@ export function FlightsDashboard() {
     }, FLIGHTS_STREAM_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [loadFlights]);
+
+  useEffect(() => {
+    if (!selectedFlight) return;
+    const updated =
+      snapshot.flights.find((flight) => flight.id === selectedFlight.id) ??
+      trackedFlights.find((flight) => flight.id === selectedFlight.id) ??
+      snapshot.flights.find(
+        (flight) => flight.flightCode === selectedFlight.flightCode,
+      );
+    if (updated && updated.id !== selectedFlight.id) {
+      setSelectedFlight(updated);
+    } else if (
+      updated &&
+      (updated.statusHe !== selectedFlight.statusHe ||
+        updated.actualAt !== selectedFlight.actualAt)
+    ) {
+      setSelectedFlight(updated);
+    }
+  }, [snapshot.flights, trackedFlights, selectedFlight]);
 
   const visibleFlights = useMemo(() => {
     const base = tab === "arrivals" ? snapshot.arrivals : snapshot.departures;
@@ -392,25 +485,36 @@ export function FlightsDashboard() {
         </div>
       </header>
 
-      <section className="relative z-10 border-b border-white/[0.06]">
-        <div className="mx-auto max-w-7xl px-4 py-8 md:px-8">
-          <div className="flights-glass flights-scanline relative overflow-hidden rounded-3xl p-6 md:p-8">
-            <div className="relative max-w-2xl">
-              <p className="inline-flex items-center gap-2 rounded-full border border-sky-400/25 bg-sky-500/10 px-3 py-1 text-[11px] font-bold tracking-[0.18em] text-sky-200">
-                <span className="h-1.5 w-1.5 animate-live-pulse rounded-full bg-sky-300" />
-                OFFICIAL FEED · DATA.GOV.IL
-              </p>
-              <h2 className="mt-4 text-3xl font-black leading-tight text-white md:text-4xl">
-                נתב״ג בזמן אמת
-              </h2>
-              <p className="mt-3 max-w-xl text-sm leading-relaxed text-slate-400 md:text-base">
-                נחיתות והמראות, עיכובים, טרמינלים ודלפקים — ישירות מרשות שדות
-                התעופה. מעודכן אוטומטית כל 30 שניות.
-              </p>
-              <p className="mt-3 text-xs text-slate-500">
-                היום: {formatFlightDate(`${todayKey}T12:00:00`)} · מקור רשמי
-              </p>
-            </div>
+      <section className="relative z-10 overflow-hidden border-b border-white/[0.06]">
+        <div className="relative min-h-[42vh] md:min-h-[48vh]">
+          <Image
+            src={FLIGHTS_RUNWAY_IMAGE}
+            alt="מסלול נחיתה בלילה"
+            fill
+            priority
+            className="object-cover object-center scale-105"
+            sizes="100vw"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#060d18] via-[#060d18]/75 to-[#060d18]/35" />
+          <div className="absolute inset-0 bg-gradient-to-l from-[#060d18]/90 via-transparent to-[#060d18]/50" />
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_70%_20%,rgba(56,189,248,0.18),transparent_55%)]" />
+
+          <div className="relative mx-auto flex min-h-[42vh] max-w-7xl flex-col justify-end px-4 pb-10 pt-24 md:min-h-[48vh] md:px-8 md:pb-12">
+            <p className="inline-flex w-fit items-center gap-2 rounded-full border border-sky-400/25 bg-sky-500/10 px-3 py-1 text-[11px] font-bold tracking-[0.18em] text-sky-200">
+              <span className="h-1.5 w-1.5 animate-live-pulse rounded-full bg-sky-300" />
+              OFFICIAL FEED · DATA.GOV.IL
+            </p>
+            <h2 className="mt-4 text-4xl font-black leading-tight text-white md:text-5xl">
+              נתב״ג בזמן אמת
+            </h2>
+            <p className="mt-3 max-w-2xl text-sm leading-relaxed text-slate-300 md:text-base">
+              לחצו על טיסה למעקב מלא — נחיתות, המראות, עיכובים וטרמינלים ישירות
+              מרשות שדות התעופה.
+            </p>
+            <p className="mt-3 text-xs text-slate-500">
+              היום: {formatFlightDate(`${todayKey}T12:00:00`)} · לחיצה על שורה =
+              מעקב טיסה
+            </p>
           </div>
         </div>
       </section>
@@ -455,6 +559,24 @@ export function FlightsDashboard() {
           <div className="mt-5 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
             שגיאה זמנית: {snapshot.error}
           </div>
+        ) : null}
+
+        {trackedFlights.length > 0 ? (
+          <section className="mt-8">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h3 className="text-sm font-black text-white">טיסות במעקב</h3>
+              <span className="text-xs text-slate-500">מתעדכן אוטומטית</span>
+            </div>
+            <div className="flex gap-3 overflow-x-auto pb-1 scrollbar-hide">
+              {trackedFlights.map((flight) => (
+                <TrackedFlightChip
+                  key={flight.id}
+                  flight={flight}
+                  onSelect={openFlightDetail}
+                />
+              ))}
+            </div>
+          </section>
         ) : null}
 
         <section className="flights-glass sticky top-0 z-30 mt-8 rounded-3xl p-4 md:p-5">
@@ -592,6 +714,9 @@ export function FlightsDashboard() {
                   flight={flight}
                   direction={tab}
                   showDate={dayScope === "all"}
+                  onSelect={openFlightDetail}
+                  isTracked={isTracked(flight.flightCode)}
+                  isSelected={selectedFlight?.id === flight.id && detailOpen}
                 />
               ))
             )}
@@ -615,6 +740,14 @@ export function FlightsDashboard() {
           </p>
         </footer>
       </main>
+
+      <FlightDetailDrawer
+        flight={selectedFlight}
+        open={detailOpen}
+        tracked={selectedFlight ? isTracked(selectedFlight.flightCode) : false}
+        onClose={closeFlightDetail}
+        onToggleTrack={toggleTrack}
+      />
     </div>
   );
 }

@@ -147,3 +147,20 @@ export async function getFlightsSnapshot(
     return buildSnapshot([], null, dayScope, false, message);
   }
 }
+
+export async function findTrackedFlights(
+  codes: string[],
+  force = false,
+): Promise<FlightRecord[]> {
+  const normalized = [
+    ...new Set(codes.map((code) => code.trim().toUpperCase()).filter(Boolean)),
+  ];
+  if (!normalized.length) return [];
+
+  const catalog = await refreshCatalog(force);
+  return sortFlightsForBoard(
+    catalog.flights.filter((flight) =>
+      normalized.includes(flight.flightCode.toUpperCase()),
+    ),
+  );
+}
