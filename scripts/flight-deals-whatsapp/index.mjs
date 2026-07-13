@@ -90,8 +90,65 @@ const COUNTRY_LABELS = {
   VIE: "אוסטריה", BER: "גרמניה", AMS: "הולנד", CDG: "צרפת", DXB: "איחוד האמירויות",
 };
 
-function airportLabel(code) {
-  return AIRPORT_LABELS[code] ?? code;
+function hasHebrew(value) {
+  return /[\u0590-\u05FF]/.test(value);
+}
+
+function isAirportCode(value) {
+  return /^[A-Za-z]{3}$/.test(String(value).trim());
+}
+
+const ENGLISH_CITY_TO_HEBREW = {
+  athens: "אתונה",
+  budapest: "בודפשט",
+  rome: "רומא",
+  milan: "מילאנו",
+  venice: "ונציה",
+  barcelona: "ברצלונה",
+  madrid: "מדריד",
+  london: "לונדון",
+  paris: "פריז",
+  prague: "פראג",
+  vienna: "וינה",
+  warsaw: "ורשה",
+  krakow: "קרקוב",
+  sofia: "סופיה",
+  bucharest: "בוקרשט",
+  istanbul: "איסטנבול",
+  larnaca: "לרנקה",
+  paphos: "פאפוס",
+  dubai: "דובאי",
+  naples: "נאפולי",
+  berlin: "ברלין",
+  amsterdam: "אמסטרדם",
+};
+
+function hebrewDestination(deal) {
+  const candidates = [
+    deal.destinationNameHe,
+    AIRPORT_LABELS[deal.destination],
+    deal.destination,
+  ];
+  for (const raw of candidates) {
+    if (!raw) continue;
+    const value = String(raw).trim();
+    if (!value) continue;
+    if (isAirportCode(value)) {
+      const mapped = AIRPORT_LABELS[value.toUpperCase()];
+      if (mapped) return mapped;
+      continue;
+    }
+    if (hasHebrew(value)) return value;
+    const mappedEnglish = ENGLISH_CITY_TO_HEBREW[value.toLowerCase()];
+    if (mappedEnglish) return mappedEnglish;
+  }
+  return AIRPORT_LABELS[deal.destination] || "יעד לא ידוע";
+}
+
+function hebrewCountry(deal) {
+  const fromDeal = String(deal.countryNameHe || "").trim();
+  if (fromDeal && hasHebrew(fromDeal)) return fromDeal;
+  return COUNTRY_LABELS[deal.destination] || "";
 }
 
 function formatDate(iso) {
@@ -100,12 +157,8 @@ function formatDate(iso) {
 }
 
 function formatDealMessage(deal) {
-  const dest =
-    deal.destinationNameHe ||
-    AIRPORT_LABELS[deal.destination] ||
-    deal.destination;
-  const country =
-    deal.countryNameHe || COUNTRY_LABELS[deal.destination] || "";
+  const dest = hebrewDestination(deal);
+  const country = hebrewCountry(deal);
   const ils = Math.round(deal.priceUsd * 3.7);
   return [
     "🔥 *מכירה מצוינת!*",
@@ -113,9 +166,9 @@ function formatDealMessage(deal) {
     country ? `*${dest}, ${country}*` : `*${dest}*`,
     `📅 יציאה: ${formatDate(deal.departureDate)}`,
     `📅 חזרה: ${formatDate(deal.returnDate)}`,
-    `💰 ₪${ils} (~$${deal.priceUsd.toFixed(0)}) *הלוך ושוב*`,
-    `✈️ מ-תל אביב`,
-    deal.bookingUrl ? `\n🔗 ${deal.bookingUrl}` : "",
+    `💰 ₪${ils} (כ־$${deal.priceUsd.toFixed(0)}) *הלוך ושוב*`,
+    `✈️ מתל אביב · עד ${cfg.maxPrice} דולר`,
+    deal.bookingUrl ? `\n🔗 קישור להזמנה:\n${deal.bookingUrl}` : "",
   ]
     .filter(Boolean)
     .join("\n");
