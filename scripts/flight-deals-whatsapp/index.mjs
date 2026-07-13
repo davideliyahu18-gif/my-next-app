@@ -161,6 +161,54 @@ async function sendToGroup(text) {
   return true;
 }
 
+function normalizeHebrewCommand(text) {
+  return String(text ?? "")
+    .replace(/[\u200e\u200f\u202a-\u202e]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function isStatusCheckCommand(text) {
+  const t = normalizeHebrewCommand(text);
+  return (
+    t === "בוט מחפש טיסות" ||
+    t === "בוט מחפש?" ||
+    t === "בוט?" ||
+    t.includes("בוט מחפש טיסות")
+  );
+}
+
+async function handleIncomingMessage(msg) {
+  try {
+    if (!msg?.message || msg.key?.fromMe) return;
+
+    const chatId = msg.key.remoteJid;
+    if (!chatId) return;
+    if (groupJid && chatId !== groupJid) return;
+
+    const body =
+      msg.message.conversation ||
+      msg.message.extendedTextMessage?.text ||
+      msg.message.imageMessage?.caption ||
+      "";
+
+    if (!isStatusCheckCommand(body)) return;
+
+    const reply = [
+      "כן ✅ *מחפש*",
+      "",
+      `סורק כל 10 דקות טיסות הלוך-חזור מ-TLV עד $${cfg.maxPrice}.`,
+      "כשיימצא דיל — אשלח לכאן.",
+    ].join("\n");
+
+    await sock.sendMessage(chatId, { text: reply }, { quoted: msg });
+    log.info({ from: chatId }, "Replied to status check command");
+  } catch (error) {
+    log.warn({ error }, "Failed to handle incoming message");
+  }
+}
+
 async function resolveGroupByName() {
   if (!sock || !cfg.groupName || groupJid) return groupJid;
 
@@ -277,6 +325,12 @@ async function connectWhatsApp() {
   });
 
   sock.ev.on("creds.update", saveCreds);
+  sock.ev.on("messages.upsert", async ({ messages, type }) => {
+    if (type !== "notify") return;
+    for (const msg of messages) {
+      await handleIncomingMessage(msg);
+    }
+  });
 
   let pairingRequested = false;
 
