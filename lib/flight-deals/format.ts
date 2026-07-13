@@ -3,11 +3,13 @@ import type { FlightDeal } from "./types";
 
 const USD_TO_ILS = Number(process.env.FLIGHT_DEALS_USD_ILS_RATE ?? "3.7");
 
-function airportLabel(code: string): string {
+function airportLabel(code: string, nameHe?: string | null): string {
+  if (nameHe?.trim()) return nameHe.trim();
   return AIRPORT_LABELS[code] ?? code;
 }
 
-function countryLabel(code: string): string {
+function countryLabel(code: string, countryHe?: string | null): string {
+  if (countryHe?.trim()) return countryHe.trim();
   return COUNTRY_LABELS[code] ?? "";
 }
 
@@ -26,8 +28,8 @@ function formatPrice(deal: FlightDeal): string {
 }
 
 export function formatDealMessage(deal: FlightDeal): string {
-  const destLabel = airportLabel(deal.destination);
-  const country = countryLabel(deal.destination);
+  const destLabel = airportLabel(deal.destination, deal.destinationNameHe);
+  const country = countryLabel(deal.destination, deal.countryNameHe);
   const depart = formatIsraeliDate(deal.departureDate);
   const ret = formatIsraeliDate(deal.returnDate);
   const priceLine = formatPrice(deal);
@@ -39,7 +41,7 @@ export function formatDealMessage(deal: FlightDeal): string {
     `📅 יציאה: ${depart}`,
     `📅 חזרה: ${ret}`,
     `💰 ${priceLine} *הלוך ושוב*`,
-    `✈️ מ-TLV · עד $${FLIGHT_DEALS_MAX_PRICE_USD}`,
+    `✈️ מ-תל אביב · עד $${FLIGHT_DEALS_MAX_PRICE_USD}`,
   ];
 
   if (deal.bookingUrl) {

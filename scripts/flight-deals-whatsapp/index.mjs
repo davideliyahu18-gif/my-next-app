@@ -63,24 +63,6 @@ function envConfig() {
 
 const log = pino({ level: process.env.LOG_LEVEL ?? "info" });
 
-const AIRPORT_LABELS = {
-  TLV: "תל אביב",
-  ATH: "אתונה",
-  LCA: "לרנקה",
-  PFO: "פאפוס",
-  BUD: "בודפשט",
-  OTP: "בוקרשט",
-  SOF: "סופיה",
-  IST: "איסטנבול",
-  AYT: "אנטליה",
-  DXB: "דובאי",
-  BCN: "ברצלונה",
-  FCO: "רומא",
-  PRG: "פראג",
-  RAK: "מרקש",
-  WAW: "ורשה",
-};
-
 let sock = null;
 let seenDeals = new Set();
 let scanRunning = false;
@@ -88,8 +70,25 @@ let groupJid = "";
 let groupPollTimer = null;
 let welcomeSent = false;
 let cfg = envConfig();
-
 const GROUP_POLL_MS = 10_000;
+
+const AIRPORT_LABELS = {
+  TLV: "תל אביב", ATH: "אתונה", LCA: "לרנקה", PFO: "פאפוס", BUD: "בודפשט",
+  OTP: "בוקרשט", SOF: "סופיה", IST: "איסטנבול", AYT: "אנטליה", DXB: "דובאי",
+  BCN: "ברצלונה", FCO: "רומא", CIA: "רומא", MXP: "מילאנו", LIN: "מילאנו",
+  PRG: "פראג", RAK: "מרקש", WAW: "ורשה", KRK: "קרקוב", VCE: "ונציה",
+  NAP: "נאפולי", LGW: "לונדון", LHR: "לונדון", STN: "לונדון", VIE: "וינה",
+  BER: "ברלין", AMS: "אמסטרדם", CDG: "פריז", MAD: "מדריד", SKG: "סלוניקי",
+};
+
+const COUNTRY_LABELS = {
+  ATH: "יוון", SKG: "יוון", LCA: "קפריסין", PFO: "קפריסין", BUD: "הונגריה",
+  OTP: "רומניה", SOF: "בולגריה", IST: "טורקיה", AYT: "טורקיה",
+  RAK: "מרוקו", RBA: "מרוקו", CMN: "מרוקו", VCE: "איטליה", FCO: "איטליה",
+  CIA: "איטליה", MXP: "איטליה", NAP: "איטליה", BCN: "ספרד", MAD: "ספרד",
+  PRG: "צ׳כיה", WAW: "פולין", KRK: "פולין", LGW: "בריטניה", LHR: "בריטניה",
+  VIE: "אוסטריה", BER: "גרמניה", AMS: "הולנד", CDG: "צרפת", DXB: "איחוד האמירויות",
+};
 
 function airportLabel(code) {
   return AIRPORT_LABELS[code] ?? code;
@@ -100,15 +99,13 @@ function formatDate(iso) {
   return d && m && y ? `${d}/${m}/${y}` : iso;
 }
 
-const COUNTRY_LABELS = {
-  ATH: "יוון", LCA: "קפריסין", PFO: "קפריסין", BUD: "הונגריה",
-  OTP: "רומניה", SOF: "בולגריה", IST: "טורקיה", AYT: "טורקיה",
-  RAK: "מרוקו", RBA: "מרוקו", CMN: "מרוקו",
-};
-
 function formatDealMessage(deal) {
-  const dest = airportLabel(deal.destination);
-  const country = COUNTRY_LABELS[deal.destination] ?? "";
+  const dest =
+    deal.destinationNameHe ||
+    AIRPORT_LABELS[deal.destination] ||
+    deal.destination;
+  const country =
+    deal.countryNameHe || COUNTRY_LABELS[deal.destination] || "";
   const ils = Math.round(deal.priceUsd * 3.7);
   return [
     "🔥 *מכירה מצוינת!*",
@@ -117,7 +114,7 @@ function formatDealMessage(deal) {
     `📅 יציאה: ${formatDate(deal.departureDate)}`,
     `📅 חזרה: ${formatDate(deal.returnDate)}`,
     `💰 ₪${ils} (~$${deal.priceUsd.toFixed(0)}) *הלוך ושוב*`,
-    `✈️ מ-TLV`,
+    `✈️ מ-תל אביב`,
     deal.bookingUrl ? `\n🔗 ${deal.bookingUrl}` : "",
   ]
     .filter(Boolean)

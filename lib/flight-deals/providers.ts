@@ -35,6 +35,8 @@ export function demoDeals(): FlightDeal[] {
       id: buildDealId(FLIGHT_DEALS_ORIGIN, "ATH", fmt(depart), fmt(ret), 49.9),
       origin: FLIGHT_DEALS_ORIGIN,
       destination: "ATH",
+      destinationNameHe: "אתונה",
+      countryNameHe: "יוון",
       departureDate: fmt(depart),
       returnDate: fmt(ret),
       priceUsd: 49.9,
@@ -105,6 +107,8 @@ export async function searchViaTravelpayouts(): Promise<FlightDeal[]> {
       id: buildDealId(FLIGHT_DEALS_ORIGIN, destination, departureDate, returnDate, priceUsd),
       origin: row.origin ?? FLIGHT_DEALS_ORIGIN,
       destination,
+      destinationNameHe: null,
+      countryNameHe: null,
       departureDate,
       returnDate,
       priceUsd,
@@ -170,9 +174,10 @@ export async function searchViaSerpApi(): Promise<FlightDeal[]> {
   const deals: FlightDeal[] = [];
 
   for (const row of payload.destinations ?? []) {
-    const destination = String(
-      row.destination_airport?.code ?? row.name ?? "",
-    ).trim();
+    const destinationCode = String(row.destination_airport?.code ?? "").trim();
+    const destinationNameHe = String(row.name ?? "").trim() || null;
+    const countryNameHe = String(row.country ?? "").trim() || null;
+    const destination = destinationCode || destinationNameHe || "";
     const departureDate = String(row.start_date ?? "").trim();
     const returnDate = String(row.end_date ?? "").trim();
     const priceUsd = Number(row.flight_price);
@@ -186,6 +191,8 @@ export async function searchViaSerpApi(): Promise<FlightDeal[]> {
       id: buildDealId(FLIGHT_DEALS_ORIGIN, destination, departureDate, returnDate, priceUsd),
       origin: FLIGHT_DEALS_ORIGIN,
       destination,
+      destinationNameHe,
+      countryNameHe,
       departureDate,
       returnDate,
       priceUsd,
@@ -226,6 +233,9 @@ function mergeDeals(lists: FlightDeal[][]): FlightDeal[] {
           ...deal,
           imageUrl: deal.imageUrl || existing?.imageUrl || null,
           bookingUrl: deal.bookingUrl || existing?.bookingUrl || null,
+          destinationNameHe:
+            deal.destinationNameHe || existing?.destinationNameHe || null,
+          countryNameHe: deal.countryNameHe || existing?.countryNameHe || null,
         });
       } else if (existing && !existing.imageUrl && deal.imageUrl) {
         byKey.set(key, { ...existing, imageUrl: deal.imageUrl });

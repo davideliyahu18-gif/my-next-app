@@ -156,6 +156,8 @@ export async function searchCheapRoundTripsFromTlv(): Promise<FlightDeal[]> {
       currency: FLIGHT_DEALS_CURRENCY,
       bookingUrl: row.links?.flightOffers ?? null,
       imageUrl: null,
+      destinationNameHe: null,
+      countryNameHe: null,
       foundAt,
     });
   }

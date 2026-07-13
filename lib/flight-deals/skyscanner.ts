@@ -1,5 +1,5 @@
 import type { FlightDeal } from "./types";
-import { FLIGHT_DEALS_MAX_PRICE_USD, FLIGHT_DEALS_ORIGIN } from "./constants";
+import { AIRPORT_LABELS, COUNTRY_LABELS, FLIGHT_DEALS_MAX_PRICE_USD, FLIGHT_DEALS_ORIGIN } from "./constants";
 
 const RAPIDAPI_HOST = "sky-scrapper.p.rapidapi.com";
 
@@ -219,6 +219,8 @@ export async function searchViaSkyscanner(): Promise<FlightDeal[]> {
           id: buildDealId(FLIGHT_DEALS_ORIGIN, destCode, outDate, inDate, priceUsd),
           origin: FLIGHT_DEALS_ORIGIN,
           destination: destCode,
+          destinationNameHe: AIRPORT_LABELS[destCode] ?? null,
+          countryNameHe: COUNTRY_LABELS[destCode] ?? null,
           departureDate: outDate,
           returnDate: inDate,
           priceUsd,

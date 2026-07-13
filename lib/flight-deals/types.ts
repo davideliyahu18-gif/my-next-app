@@ -2,6 +2,8 @@ export type FlightDeal = {
   id: string;
   origin: string;
   destination: string;
+  destinationNameHe: string | null;
+  countryNameHe: string | null;
   departureDate: string;
   returnDate: string;
   priceUsd: number;
