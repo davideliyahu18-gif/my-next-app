@@ -10,8 +10,8 @@ const DEST_QUERIES = [
 ];
 
 let rotateIndex = 0;
-/** Start near early November windows (known cheap TLV shoulder season). */
-let weekendRotate = 16;
+/** Rotate through July→December weekend windows from the start. */
+let weekendRotate = 0;
 let skyCooldownUntil = 0;
 const placeCache = new Map();
 let serpCache = { at: 0, deals: null };
@@ -68,53 +68,86 @@ function toIso(d) {
 }
 
 /**
- * Upcoming fixed windows: Wed→Mon (+5d) and Thu→Sun (+3d).
- * Skips the next few days so the bot targets bookable trips.
+ * Fixed windows רביעי→שני / חמישי→ראשון from July through December.
+ * Uses the current calendar year (or next year if we're already past Dec).
+ * Skips dates that are already in the past (+ minLeadDays).
  */
-export function preferredDateWindows({ weeks = 16, minLeadDays = 50 } = {}) {
+export function preferredDateWindows({
+  minLeadDays = 3,
+  startMonth = Number(process.env.FLIGHT_DEALS_START_MONTH ?? "7"),
+  endMonth = Number(process.env.FLIGHT_DEALS_END_MONTH ?? "12"),
+} = {}) {
+  const now = new Date();
+  now.setUTCHours(0, 0, 0, 0);
+
+  let year = now.getUTCFullYear();
+  // If we're past the end month, roll to next year's Jul–Dec range.
+  if (now.getUTCMonth() + 1 > endMonth) year += 1;
+
+  const rangeStart = new Date(Date.UTC(year, startMonth - 1, 1));
+  const rangeEnd = new Date(Date.UTC(year, endMonth, 0)); // last day of endMonth
+
+  const earliest = new Date(now);
+  earliest.setUTCDate(earliest.getUTCDate() + minLeadDays);
+  const cursorStart = rangeStart > earliest ? rangeStart : earliest;
+
   const windows = [];
-  const start = new Date();
-  start.setUTCHours(0, 0, 0, 0);
-  start.setUTCDate(start.getUTCDate() + minLeadDays);
-
-  for (let w = 0; w < weeks; w += 1) {
-    const base = new Date(start);
-    base.setUTCDate(base.getUTCDate() + w * 7);
-
-    const wed = new Date(base);
-    while (wed.getUTCDay() !== DOW.wed) wed.setUTCDate(wed.getUTCDate() + 1);
-    const mon = new Date(wed);
-    mon.setUTCDate(mon.getUTCDate() + 5);
-    windows.push({
-      label: "wed-mon",
-      outbound_date: toIso(wed),
-      return_date: toIso(mon),
-    });
-
-    const thu = new Date(base);
-    while (thu.getUTCDay() !== DOW.thu) thu.setUTCDate(thu.getUTCDate() + 1);
-    const sun = new Date(thu);
-    sun.setUTCDate(sun.getUTCDate() + 3);
-    windows.push({
-      label: "thu-sun",
-      outbound_date: toIso(thu),
-      return_date: toIso(sun),
-    });
+  const cursor = new Date(cursorStart);
+  // walk day-by-day and collect matching outbound days
+  while (cursor <= rangeEnd) {
+    const dow = cursor.getUTCDay();
+    if (dow === DOW.wed) {
+      const mon = new Date(cursor);
+      mon.setUTCDate(mon.getUTCDate() + 5);
+      if (mon <= rangeEnd || mon.getUTCMonth() + 1 <= endMonth + 1) {
+        windows.push({
+          label: "wed-mon",
+          outbound_date: toIso(cursor),
+          return_date: toIso(mon),
+        });
+      }
+    } else if (dow === DOW.thu) {
+      const sun = new Date(cursor);
+      sun.setUTCDate(sun.getUTCDate() + 3);
+      windows.push({
+        label: "thu-sun",
+        outbound_date: toIso(cursor),
+        return_date: toIso(sun),
+      });
+    }
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
   }
 
-  // unique by dates
   const seen = new Set();
   return windows.filter((win) => {
     const key = `${win.outbound_date}_${win.return_date}`;
     if (seen.has(key)) return false;
     seen.add(key);
+    // Keep outbound inside Jul–Dec of the search year.
+    const [y, m] = win.outbound_date.split("-").map(Number);
+    if (y !== year) return false;
+    if (m < startMonth || m > endMonth) return false;
     return true;
   });
 }
 
+/** Departure must be in the configured Jul–Dec search season. */
+export function matchesSearchSeason(departureDate) {
+  const startMonth = Number(process.env.FLIGHT_DEALS_START_MONTH ?? "7");
+  const endMonth = Number(process.env.FLIGHT_DEALS_END_MONTH ?? "12");
+  const [y, m] = String(departureDate).split("-").map(Number);
+  if (!y || !m) return false;
+  const now = new Date();
+  let year = now.getUTCFullYear();
+  if (now.getUTCMonth() + 1 > endMonth) year += 1;
+  return y === year && m >= startMonth && m <= endMonth;
+}
+
 function filterPreferredDeals(deals) {
-  return deals.filter((deal) =>
-    matchesPreferredTripDays(deal.departureDate, deal.returnDate),
+  return deals.filter(
+    (deal) =>
+      matchesPreferredTripDays(deal.departureDate, deal.returnDate) &&
+      matchesSearchSeason(deal.departureDate),
   );
 }
 
@@ -131,7 +164,8 @@ export function resolveProvider() {
 }
 
 function demoDeals() {
-  const win = preferredDateWindows({ weeks: 4, minLeadDays: 14 })[0];
+  const win = preferredDateWindows({ minLeadDays: 7 })[0];
+  if (!win) return [];
   return [
     {
       id: buildDealId(ORIGIN, "ATH", win.outbound_date, win.return_date, 49.9),
@@ -269,40 +303,47 @@ async function searchSerpApi({ forceRefresh = false } = {}) {
     return filterPreferredDeals(serpCache.deals);
   }
 
-  const windows = preferredDateWindows();
-  const w1 = windows[weekendRotate % windows.length];
-  const w2 = windows[(weekendRotate + 1) % windows.length];
-  weekendRotate = (weekendRotate + 2) % Math.max(windows.length, 1);
+  async function fetchNextPair() {
+    const windows = preferredDateWindows();
+    const w1 = windows[weekendRotate % windows.length];
+    const w2 = windows[(weekendRotate + 1) % windows.length];
+    weekendRotate = (weekendRotate + 2) % Math.max(windows.length, 1);
 
-  const queries = [
-    fetchExplore({
-      outbound_date: w1.outbound_date,
-      return_date: w1.return_date,
-      arrival_area_id: EUROPE_AREA_ID,
-    }),
-    fetchExplore({
-      outbound_date: w2.outbound_date,
-      return_date: w2.return_date,
-    }),
-  ];
-
-  const results = await Promise.allSettled(queries);
-  const lists = [];
-  for (const r of results) {
-    if (r.status === "fulfilled") lists.push(r.value);
-    else console.warn("[serpapi]", r.reason);
+    const results = await Promise.allSettled([
+      fetchExplore({
+        outbound_date: w1.outbound_date,
+        return_date: w1.return_date,
+        arrival_area_id: EUROPE_AREA_ID,
+      }),
+      fetchExplore({
+        outbound_date: w2.outbound_date,
+        return_date: w2.return_date,
+      }),
+    ]);
+    const lists = [];
+    for (const r of results) {
+      if (r.status === "fulfilled") lists.push(r.value);
+      else console.warn("[serpapi]", r.reason);
+    }
+    console.log(
+      `[serpapi] ${w1.label} ${w1.outbound_date}→${w1.return_date}` +
+        ` + ${w2.label} ${w2.outbound_date}→${w2.return_date}`,
+    );
+    return lists;
   }
 
-  // Keep previous preferred deals so coverage accumulates across window rotations.
+  const lists = await fetchNextPair();
+  // If this pair is empty under budget, try one more nearby pair immediately.
+  const firstBatch = filterPreferredDeals(mergeDeals(lists));
+  if (firstBatch.length === 0) {
+    lists.push(...(await fetchNextPair()));
+  }
+
   if (serpCache.deals?.length) lists.push(serpCache.deals);
 
   const deals = filterPreferredDeals(mergeDeals(lists));
   serpCache = { at: Date.now(), deals };
-  console.log(
-    `[serpapi] ${w1.label} ${w1.outbound_date}→${w1.return_date}` +
-      ` + ${w2.label} ${w2.outbound_date}→${w2.return_date}` +
-      ` → ${deals.length} deals ≤$${maxPrice()}`,
-  );
+  console.log(`[serpapi] total preferred ≤$${maxPrice()}: ${deals.length}`);
   return deals;
 }
 
@@ -360,7 +401,7 @@ async function searchSkyscanner() {
   }
   rotateIndex = (rotateIndex + batchSize) % DEST_QUERIES.length;
 
-  const windows = preferredDateWindows({ weeks: 12, minLeadDays: 14 });
+  const windows = preferredDateWindows({ minLeadDays: 7 });
   const win = windows[weekendRotate % Math.max(windows.length, 1)] ?? windows[0];
   const departureDate = win?.outbound_date;
   const returnDate = win?.return_date;

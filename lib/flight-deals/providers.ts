@@ -55,43 +55,59 @@ function toIso(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** July→December preferred weekend windows for the active search year. */
 export function preferredDateWindows({
-  weeks = 16,
-  minLeadDays = 50,
-}: { weeks?: number; minLeadDays?: number } = {}): Array<{
+  minLeadDays = 3,
+  startMonth = Number(process.env.FLIGHT_DEALS_START_MONTH ?? "7"),
+  endMonth = Number(process.env.FLIGHT_DEALS_END_MONTH ?? "12"),
+}: {
+  minLeadDays?: number;
+  startMonth?: number;
+  endMonth?: number;
+} = {}): Array<{
   label: string;
   outbound_date: string;
   return_date: string;
 }> {
-  const windows: Array<{ label: string; outbound_date: string; return_date: string }> =
-    [];
-  const start = new Date();
-  start.setUTCHours(0, 0, 0, 0);
-  start.setUTCDate(start.getUTCDate() + minLeadDays);
+  const now = new Date();
+  now.setUTCHours(0, 0, 0, 0);
 
-  for (let w = 0; w < weeks; w += 1) {
-    const base = new Date(start);
-    base.setUTCDate(base.getUTCDate() + w * 7);
+  let year = now.getUTCFullYear();
+  if (now.getUTCMonth() + 1 > endMonth) year += 1;
 
-    const wed = new Date(base);
-    while (wed.getUTCDay() !== DOW.wed) wed.setUTCDate(wed.getUTCDate() + 1);
-    const mon = new Date(wed);
-    mon.setUTCDate(mon.getUTCDate() + 5);
-    windows.push({
-      label: "wed-mon",
-      outbound_date: toIso(wed),
-      return_date: toIso(mon),
-    });
+  const rangeStart = new Date(Date.UTC(year, startMonth - 1, 1));
+  const rangeEnd = new Date(Date.UTC(year, endMonth, 0));
 
-    const thu = new Date(base);
-    while (thu.getUTCDay() !== DOW.thu) thu.setUTCDate(thu.getUTCDate() + 1);
-    const sun = new Date(thu);
-    sun.setUTCDate(sun.getUTCDate() + 3);
-    windows.push({
-      label: "thu-sun",
-      outbound_date: toIso(thu),
-      return_date: toIso(sun),
-    });
+  const earliest = new Date(now);
+  earliest.setUTCDate(earliest.getUTCDate() + minLeadDays);
+  const cursorStart = rangeStart > earliest ? rangeStart : earliest;
+
+  const windows: Array<{
+    label: string;
+    outbound_date: string;
+    return_date: string;
+  }> = [];
+  const cursor = new Date(cursorStart);
+  while (cursor <= rangeEnd) {
+    const dow = cursor.getUTCDay();
+    if (dow === DOW.wed) {
+      const mon = new Date(cursor);
+      mon.setUTCDate(mon.getUTCDate() + 5);
+      windows.push({
+        label: "wed-mon",
+        outbound_date: toIso(cursor),
+        return_date: toIso(mon),
+      });
+    } else if (dow === DOW.thu) {
+      const sun = new Date(cursor);
+      sun.setUTCDate(sun.getUTCDate() + 3);
+      windows.push({
+        label: "thu-sun",
+        outbound_date: toIso(cursor),
+        return_date: toIso(sun),
+      });
+    }
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
   }
 
   const seen = new Set<string>();
@@ -99,19 +115,36 @@ export function preferredDateWindows({
     const key = `${win.outbound_date}_${win.return_date}`;
     if (seen.has(key)) return false;
     seen.add(key);
+    const [y, m] = win.outbound_date.split("-").map(Number);
+    if (y !== year) return false;
+    if (m < startMonth || m > endMonth) return false;
     return true;
   });
 }
 
+export function matchesSearchSeason(departureDate: string): boolean {
+  const startMonth = Number(process.env.FLIGHT_DEALS_START_MONTH ?? "7");
+  const endMonth = Number(process.env.FLIGHT_DEALS_END_MONTH ?? "12");
+  const [y, m] = String(departureDate).split("-").map(Number);
+  if (!y || !m) return false;
+  const now = new Date();
+  let year = now.getUTCFullYear();
+  if (now.getUTCMonth() + 1 > endMonth) year += 1;
+  return y === year && m >= startMonth && m <= endMonth;
+}
+
 function filterPreferredDeals(deals: FlightDeal[]): FlightDeal[] {
-  return deals.filter((deal) =>
-    matchesPreferredTripDays(deal.departureDate, deal.returnDate),
+  return deals.filter(
+    (deal) =>
+      matchesPreferredTripDays(deal.departureDate, deal.returnDate) &&
+      matchesSearchSeason(deal.departureDate),
   );
 }
 
 export function demoDeals(): FlightDeal[] {
   const foundAt = new Date().toISOString();
-  const win = preferredDateWindows({ weeks: 4, minLeadDays: 14 })[0];
+  const win = preferredDateWindows({ minLeadDays: 7 })[0];
+  if (!win) return [];
 
   return [
     {

@@ -108,7 +108,7 @@ export function formatDealMessage(deal: FlightDeal): string {
     `📅 יציאה ${outDay}: ${depart}`,
     `📅 חזרה ${backDay}: ${ret}`,
     `💰 ${priceLine} *הלוך ושוב*`,
-    `✈️ מתל אביב · רביעי→שני / חמישי→ראשון · עד ${max}$`,
+    `✈️ מתל אביב · רביעי→שני / חמישי→ראשון · יולי–דצמבר · עד ${max}$`,
   ];
 
   if (deal.bookingUrl) {

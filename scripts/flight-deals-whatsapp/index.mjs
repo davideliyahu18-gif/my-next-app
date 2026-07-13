@@ -187,7 +187,7 @@ function formatDealMessage(deal) {
     `📅 יציאה ${outDay}: ${formatDate(deal.departureDate)}`,
     `📅 חזרה ${backDay}: ${formatDate(deal.returnDate)}`,
     `💰 ₪${ils} (כ־$${deal.priceUsd.toFixed(0)}) *הלוך ושוב*`,
-    `✈️ מתל אביב · רביעי→שני / חמישי→ראשון · עד ${cfg.maxPrice}$`,
+    `✈️ מתל אביב · רביעי→שני / חמישי→ראשון · יולי–דצמבר · עד ${cfg.maxPrice}$`,
     deal.bookingUrl ? `\n🔗 קישור להזמנה:\n${deal.bookingUrl}` : "",
   ]
     .filter(Boolean)
@@ -345,6 +345,7 @@ function buildStatusReply() {
     "",
     `סורק כל 10 דקות · TLV הלוך-חזור עד $${cfg.maxPrice}`,
     "רק *רביעי→שני* או *חמישי→ראשון*",
+    "טווח חיפוש: *יולי–דצמבר*",
     `סריקה אחרונה: ${ago} | נמצאו ${lastScanFound} | נשלחו חדשים ${lastScanSent}`,
     `במאגר כרגע: ${status.cachedDeals} דילים`,
     status.nextWindow ? `חלון הבא: ${status.nextWindow}` : "",
@@ -447,7 +448,7 @@ async function onGroupReady() {
         "✅ *הבוט מחובר!*",
         "",
         `אני סורק כל 10 דקות טיסות הלוך-חזור מ-TLV עד $${cfg.maxPrice}.`,
-        "רק רביעי→שני או חמישי→ראשון.",
+        "רק רביעי→שני או חמישי→ראשון · יולי עד דצמבר.",
         "כתבו *בוט מחפש?* לבדיקת סטטוס.",
         "כשאמצא דיל חדש — אשלח לכאן תאריכים ומחיר.",
         cfg.demoMode ? "\n_מצב דמו פעיל — הודעת בדיקה תישלח בסריקה הראשונה._" : "",
