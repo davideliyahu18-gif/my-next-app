@@ -14,7 +14,7 @@ export type FlightDeal = {
 export type FlightDealSearchResult = {
   deals: FlightDeal[];
   searchedAt: string;
-  source: "travelpayouts" | "serpapi" | "amadeus" | "demo";
+  source: "travelpayouts" | "serpapi" | "skyscanner" | "amadeus" | "demo" | "merged";
 };
 
 export type FlightDealScanSummary = {

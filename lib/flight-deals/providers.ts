@@ -1,7 +1,13 @@
 import type { FlightDeal } from "./types";
 import { FLIGHT_DEALS_MAX_PRICE_USD, FLIGHT_DEALS_ORIGIN } from "./constants";
 
-export type FlightDealProvider = "travelpayouts" | "serpapi" | "amadeus" | "demo";
+export type FlightDealProvider =
+  | "travelpayouts"
+  | "serpapi"
+  | "skyscanner"
+  | "amadeus"
+  | "demo"
+  | "merged";
 
 function buildDealId(
   origin: string,
@@ -196,11 +202,37 @@ export async function searchViaSerpApi(): Promise<FlightDeal[]> {
 export function resolveFlightProvider(): FlightDealProvider | null {
   if (process.env.FLIGHT_DEALS_DEMO === "true") return "demo";
   if (process.env.TRAVELPAYOUTS_TOKEN) return "travelpayouts";
-  if (process.env.SERPAPI_API_KEY) return "serpapi";
+  const hasSerp = Boolean(process.env.SERPAPI_API_KEY);
+  const hasSky = Boolean(
+    process.env.SKYSCANNER_RAPIDAPI_KEY ?? process.env.RAPIDAPI_KEY,
+  );
+  if (hasSerp && hasSky) return "merged";
+  if (hasSerp) return "serpapi";
+  if (hasSky) return "skyscanner";
   if (process.env.AMADEUS_CLIENT_ID && process.env.AMADEUS_CLIENT_SECRET) {
     return "amadeus";
   }
   return null;
+}
+
+function mergeDeals(lists: FlightDeal[][]): FlightDeal[] {
+  const byKey = new Map<string, FlightDeal>();
+  for (const list of lists) {
+    for (const deal of list) {
+      const key = `${deal.origin}-${deal.destination}-${deal.departureDate}-${deal.returnDate}`;
+      const existing = byKey.get(key);
+      if (!existing || deal.priceUsd < existing.priceUsd) {
+        byKey.set(key, {
+          ...deal,
+          imageUrl: deal.imageUrl || existing?.imageUrl || null,
+          bookingUrl: deal.bookingUrl || existing?.bookingUrl || null,
+        });
+      } else if (existing && !existing.imageUrl && deal.imageUrl) {
+        byKey.set(key, { ...existing, imageUrl: deal.imageUrl });
+      }
+    }
+  }
+  return [...byKey.values()].sort((a, b) => a.priceUsd - b.priceUsd);
 }
 
 export async function searchCheapRoundTripsFromTlv(): Promise<{
@@ -211,7 +243,7 @@ export async function searchCheapRoundTripsFromTlv(): Promise<{
 
   if (!provider) {
     throw new Error(
-      "No flight price provider configured. Set TRAVELPAYOUTS_TOKEN (easiest), SERPAPI_API_KEY, AMADEUS credentials, or FLIGHT_DEALS_DEMO=true.",
+      "No flight price provider configured. Set SERPAPI_API_KEY and/or SKYSCANNER_RAPIDAPI_KEY (RapidAPI), TRAVELPAYOUTS_TOKEN, Amadeus, or FLIGHT_DEALS_DEMO=true.",
     );
   }
 
@@ -223,8 +255,30 @@ export async function searchCheapRoundTripsFromTlv(): Promise<{
     return { deals: await searchViaTravelpayouts(), provider };
   }
 
+  if (provider === "merged") {
+    const { searchViaSkyscanner } = await import("./skyscanner");
+    const results = await Promise.allSettled([
+      searchViaSerpApi(),
+      searchViaSkyscanner(),
+    ]);
+    const lists = results
+      .filter((r): r is PromiseFulfilledResult<FlightDeal[]> => r.status === "fulfilled")
+      .map((r) => r.value);
+    for (const r of results) {
+      if (r.status === "rejected") {
+        console.warn("[flight-deals] provider failed:", r.reason);
+      }
+    }
+    return { deals: mergeDeals(lists), provider: "merged" };
+  }
+
   if (provider === "serpapi") {
     return { deals: await searchViaSerpApi(), provider };
+  }
+
+  if (provider === "skyscanner") {
+    const { searchViaSkyscanner } = await import("./skyscanner");
+    return { deals: await searchViaSkyscanner(), provider };
   }
 
   const { searchCheapRoundTripsFromTlv: amadeusSearch } = await import("./amadeus");
