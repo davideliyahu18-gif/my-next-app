@@ -57,7 +57,12 @@ function envConfig() {
     amadeusBase: process.env.AMADEUS_API_BASE ?? "https://test.api.amadeus.com",
     amadeusId: process.env.AMADEUS_CLIENT_ID ?? "",
     amadeusSecret: process.env.AMADEUS_CLIENT_SECRET ?? "",
-    cronExpr: process.env.FLIGHT_DEALS_SCAN_CRON ?? "*/30 * * * *",
+    // SerpAPI free = 250 searches/month → default every 3 hours (not every 30 min)
+    cronExpr:
+      process.env.FLIGHT_DEALS_SCAN_CRON ??
+      (process.env.SERPAPI_API_KEY && !process.env.TRAVELPAYOUTS_TOKEN
+        ? "0 */3 * * *"
+        : "*/30 * * * *"),
   };
 }
 

@@ -119,15 +119,21 @@ type SerpExploreDestination = {
   link?: string;
 };
 
+type SerpExploreDestinationExtended = SerpExploreDestination & {
+  destination_id?: string;
+  country?: string;
+};
+
 export async function searchViaSerpApi(): Promise<FlightDeal[]> {
   const apiKey = process.env.SERPAPI_API_KEY ?? "";
   if (!apiKey) throw new Error("SERPAPI_API_KEY is not set");
 
+  // Do NOT send max_price to Google Explore — it strips flight_price from
+  // destinations when the cap is too low. Filter client-side instead.
   const params = new URLSearchParams({
     engine: "google_travel_explore",
     departure_id: FLIGHT_DEALS_ORIGIN,
     type: "1",
-    max_price: String(FLIGHT_DEALS_MAX_PRICE_USD),
     currency: "USD",
     gl: "il",
     hl: "he",
@@ -144,7 +150,7 @@ export async function searchViaSerpApi(): Promise<FlightDeal[]> {
 
   const payload = (await response.json()) as {
     error?: string;
-    destinations?: SerpExploreDestination[];
+    destinations?: SerpExploreDestinationExtended[];
   };
 
   if (payload.error) {
@@ -155,7 +161,9 @@ export async function searchViaSerpApi(): Promise<FlightDeal[]> {
   const deals: FlightDeal[] = [];
 
   for (const row of payload.destinations ?? []) {
-    const destination = String(row.destination_airport?.code ?? "").trim();
+    const destination = String(
+      row.destination_airport?.code ?? row.name ?? "",
+    ).trim();
     const departureDate = String(row.start_date ?? "").trim();
     const returnDate = String(row.end_date ?? "").trim();
     const priceUsd = Number(row.flight_price);

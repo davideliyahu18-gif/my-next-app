@@ -68,11 +68,11 @@ async function searchTravelpayouts() {
 }
 
 async function searchSerpApi() {
+  // Don't send max_price to Google — it omits flight_price when the cap is too low.
   const params = new URLSearchParams({
     engine: "google_travel_explore",
     departure_id: ORIGIN,
     type: "1",
-    max_price: String(MAX_PRICE),
     currency: "USD",
     gl: "il",
     hl: "he",
@@ -85,7 +85,7 @@ async function searchSerpApi() {
 
   const deals = [];
   for (const row of payload.destinations ?? []) {
-    const destination = String(row.destination_airport?.code ?? "").trim();
+    const destination = String(row.destination_airport?.code ?? row.name ?? "").trim();
     const departureDate = String(row.start_date ?? "").trim();
     const returnDate = String(row.end_date ?? "").trim();
     const priceUsd = Number(row.flight_price);
