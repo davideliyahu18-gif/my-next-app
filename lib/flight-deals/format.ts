@@ -75,6 +75,14 @@ function formatIsraeliDate(isoDate: string): string {
   return `${day}/${month}/${year}`;
 }
 
+const DAY_HE = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
+
+function hebrewDay(isoDate: string): string {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  if (!y || !m || !d) return "";
+  return DAY_HE[new Date(Date.UTC(y, m - 1, d)).getUTCDay()] ?? "";
+}
+
 function formatPrice(deal: FlightDeal): string {
   if (deal.currency === "ILS" || deal.currency === "ils") {
     return `₪${Math.round(deal.priceUsd)}`;
@@ -90,15 +98,17 @@ export function formatDealMessage(deal: FlightDeal): string {
   const ret = formatIsraeliDate(deal.returnDate);
   const priceLine = formatPrice(deal);
   const max = FLIGHT_DEALS_MAX_PRICE_USD;
+  const outDay = hebrewDay(deal.departureDate);
+  const backDay = hebrewDay(deal.returnDate);
 
   const lines = [
     "🔥 *מכירה מצוינת!*",
     "",
     country ? `*${destLabel}, ${country}*` : `*${destLabel}*`,
-    `📅 יציאה: ${depart}`,
-    `📅 חזרה: ${ret}`,
+    `📅 יציאה ${outDay}: ${depart}`,
+    `📅 חזרה ${backDay}: ${ret}`,
     `💰 ${priceLine} *הלוך ושוב*`,
-    `✈️ מתל אביב · עד ${max} דולר`,
+    `✈️ מתל אביב · רביעי→שני / חמישי→ראשון · עד ${max}$`,
   ];
 
   if (deal.bookingUrl) {

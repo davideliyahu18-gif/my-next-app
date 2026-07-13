@@ -10,10 +10,13 @@ const DEST_QUERIES = [
 ];
 
 let rotateIndex = 0;
-let monthRotate = 0;
+let weekendRotate = 0;
 let skyCooldownUntil = 0;
 const placeCache = new Map();
 let serpCache = { at: 0, deals: null };
+
+/** JS getUTCDay(): Sun=0 … Sat=6 */
+const DOW = { sun: 0, mon: 1, wed: 3, thu: 4 };
 
 function maxPrice() {
   return Number(process.env.FLIGHT_DEALS_MAX_PRICE_USD ?? "150");
@@ -44,6 +47,76 @@ function isoDateOnly(value) {
   return value.slice(0, 10);
 }
 
+function utcDay(isoDate) {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  if (!y || !m || !d) return -1;
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+}
+
+/** רביעי→שני או חמישי→ראשון בלבד */
+export function matchesPreferredTripDays(departureDate, returnDate) {
+  const out = utcDay(departureDate);
+  const back = utcDay(returnDate);
+  if (out === DOW.wed && back === DOW.mon) return true;
+  if (out === DOW.thu && back === DOW.sun) return true;
+  return false;
+}
+
+function toIso(d) {
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Upcoming fixed windows: Wed→Mon (+5d) and Thu→Sun (+3d).
+ * Skips the next few days so the bot targets bookable trips.
+ */
+export function preferredDateWindows({ weeks = 16, minLeadDays = 50 } = {}) {
+  const windows = [];
+  const start = new Date();
+  start.setUTCHours(0, 0, 0, 0);
+  start.setUTCDate(start.getUTCDate() + minLeadDays);
+
+  for (let w = 0; w < weeks; w += 1) {
+    const base = new Date(start);
+    base.setUTCDate(base.getUTCDate() + w * 7);
+
+    const wed = new Date(base);
+    while (wed.getUTCDay() !== DOW.wed) wed.setUTCDate(wed.getUTCDate() + 1);
+    const mon = new Date(wed);
+    mon.setUTCDate(mon.getUTCDate() + 5);
+    windows.push({
+      label: "wed-mon",
+      outbound_date: toIso(wed),
+      return_date: toIso(mon),
+    });
+
+    const thu = new Date(base);
+    while (thu.getUTCDay() !== DOW.thu) thu.setUTCDate(thu.getUTCDate() + 1);
+    const sun = new Date(thu);
+    sun.setUTCDate(sun.getUTCDate() + 3);
+    windows.push({
+      label: "thu-sun",
+      outbound_date: toIso(thu),
+      return_date: toIso(sun),
+    });
+  }
+
+  // unique by dates
+  const seen = new Set();
+  return windows.filter((win) => {
+    const key = `${win.outbound_date}_${win.return_date}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function filterPreferredDeals(deals) {
+  return deals.filter((deal) =>
+    matchesPreferredTripDays(deal.departureDate, deal.returnDate),
+  );
+}
+
 export function resolveProvider() {
   if (process.env.FLIGHT_DEALS_DEMO === "true") return "demo";
   if (process.env.TRAVELPAYOUTS_TOKEN) return "travelpayouts";
@@ -57,18 +130,16 @@ export function resolveProvider() {
 }
 
 function demoDeals() {
-  const depart = new Date(Date.now() + 14 * 86_400_000);
-  const ret = new Date(depart.getTime() + 5 * 86_400_000);
-  const fmt = (d) => d.toISOString().slice(0, 10);
+  const win = preferredDateWindows({ weeks: 4, minLeadDays: 14 })[0];
   return [
     {
-      id: buildDealId(ORIGIN, "ATH", fmt(depart), fmt(ret), 49.9),
+      id: buildDealId(ORIGIN, "ATH", win.outbound_date, win.return_date, 49.9),
       origin: ORIGIN,
       destination: "ATH",
       destinationNameHe: "אתונה",
       countryNameHe: "יוון",
-      departureDate: fmt(depart),
-      returnDate: fmt(ret),
+      departureDate: win.outbound_date,
+      returnDate: win.return_date,
       priceUsd: 49.9,
       bookingUrl: null,
       imageUrl: null,
@@ -108,16 +179,6 @@ async function searchTravelpayouts() {
     });
   }
   return deals.sort((a, b) => a.priceUsd - b.priceUsd);
-}
-
-function upcomingMonths(count = 6) {
-  const now = new Date();
-  const months = [];
-  for (let i = 0; i < count; i += 1) {
-    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + i, 1));
-    months.push(d.getUTCMonth() + 1);
-  }
-  return months;
 }
 
 function parseExploreDestinations(payload) {
@@ -194,29 +255,30 @@ function mergeDeals(lists) {
 }
 
 /**
- * Broader Google Explore coverage (quota-aware):
- * Each refresh (cache miss) runs 2 windows:
- *   1) default snapshot OR Europe area (alternating)
- *   2) one rotating month window
- * Cached for hours so a 10-min cron stays within SerpAPI free tier.
+ * Search fixed רביעי→שני / חמישי→ראשון date windows via Google Explore.
+ * Rotates 2 windows per cache miss to stay within SerpAPI free quota.
  */
 async function searchSerpApi() {
   const cacheMs = Number(process.env.SERPAPI_CACHE_MS ?? String(6 * 60 * 60_000));
   if (serpCache.deals && Date.now() - serpCache.at < cacheMs) {
-    return serpCache.deals;
+    return filterPreferredDeals(serpCache.deals);
   }
 
-  const months = upcomingMonths(6);
-  const month = months[monthRotate % months.length];
-  const useEurope = monthRotate % 2 === 0;
-  const duration = monthRotate % 3 === 0 ? "1" : "2"; // weekend vs 1 week
-  monthRotate = (monthRotate + 1) % Math.max(months.length, 1);
+  const windows = preferredDateWindows();
+  const w1 = windows[weekendRotate % windows.length];
+  const w2 = windows[(weekendRotate + 1) % windows.length];
+  weekendRotate = (weekendRotate + 2) % Math.max(windows.length, 1);
 
   const queries = [
-    useEurope
-      ? fetchExplore({ arrival_area_id: EUROPE_AREA_ID })
-      : fetchExplore(),
-    fetchExplore({ month: String(month), travel_duration: duration }),
+    fetchExplore({
+      outbound_date: w1.outbound_date,
+      return_date: w1.return_date,
+      arrival_area_id: EUROPE_AREA_ID,
+    }),
+    fetchExplore({
+      outbound_date: w2.outbound_date,
+      return_date: w2.return_date,
+    }),
   ];
 
   const results = await Promise.allSettled(queries);
@@ -226,14 +288,14 @@ async function searchSerpApi() {
     else console.warn("[serpapi]", r.reason);
   }
 
-  // Keep previously cached deals so rotating windows accumulate coverage.
   if (serpCache.deals?.length) lists.push(serpCache.deals);
 
-  const deals = mergeDeals(lists);
+  const deals = filterPreferredDeals(mergeDeals(lists));
   serpCache = { at: Date.now(), deals };
   console.log(
-    `[serpapi] windows=${lists.length} (+accum) deals≤$${maxPrice()}: ${deals.length}` +
-      ` (${useEurope ? "Europe" : "default"} + month ${month}/${duration})`,
+    `[serpapi] ${w1.label} ${w1.outbound_date}→${w1.return_date}` +
+      ` + ${w2.label} ${w2.outbound_date}→${w2.return_date}` +
+      ` → ${deals.length} deals ≤$${maxPrice()}`,
   );
   return deals;
 }
@@ -273,10 +335,11 @@ async function searchSkyscanner() {
   }
   rotateIndex = (rotateIndex + batchSize) % DEST_QUERIES.length;
 
-  const depart = new Date(Date.now() + 21 * 86_400_000);
-  const ret = new Date(depart.getTime() + 7 * 86_400_000);
-  const departureDate = depart.toISOString().slice(0, 10);
-  const returnDate = ret.toISOString().slice(0, 10);
+  const windows = preferredDateWindows({ weeks: 12, minLeadDays: 14 });
+  const win = windows[weekendRotate % Math.max(windows.length, 1)] ?? windows[0];
+  const departureDate = win?.outbound_date;
+  const returnDate = win?.return_date;
+  if (!departureDate || !returnDate) return [];
   const deals = [];
 
   for (const query of batch) {
@@ -340,7 +403,7 @@ async function searchSkyscanner() {
     }
   }
 
-  return deals.sort((a, b) => a.priceUsd - b.priceUsd);
+  return filterPreferredDeals(deals).sort((a, b) => a.priceUsd - b.priceUsd);
 }
 
 async function searchAmadeus() {
@@ -388,7 +451,7 @@ async function searchAmadeus() {
       imageUrl: null,
     });
   }
-  return deals.sort((a, b) => a.priceUsd - b.priceUsd);
+  return filterPreferredDeals(deals).sort((a, b) => a.priceUsd - b.priceUsd);
 }
 
 export async function searchDeals() {
@@ -399,17 +462,19 @@ export async function searchDeals() {
     );
   }
 
-  if (provider === "demo") return demoDeals();
-  if (provider === "travelpayouts") return searchTravelpayouts();
-  if (provider === "merged") {
+  let deals;
+  if (provider === "demo") deals = demoDeals();
+  else if (provider === "travelpayouts") deals = await searchTravelpayouts();
+  else if (provider === "merged") {
     const results = await Promise.allSettled([searchSerpApi(), searchSkyscanner()]);
     const lists = results.filter((r) => r.status === "fulfilled").map((r) => r.value);
     for (const r of results) {
       if (r.status === "rejected") console.warn("[providers]", r.reason);
     }
-    return mergeDeals(lists);
-  }
-  if (provider === "serpapi") return searchSerpApi();
-  if (provider === "skyscanner") return searchSkyscanner();
-  return searchAmadeus();
+    deals = mergeDeals(lists);
+  } else if (provider === "serpapi") deals = await searchSerpApi();
+  else if (provider === "skyscanner") deals = await searchSkyscanner();
+  else deals = await searchAmadeus();
+
+  return filterPreferredDeals(deals);
 }

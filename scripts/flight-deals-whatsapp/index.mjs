@@ -161,18 +161,28 @@ function formatDate(iso) {
   return d && m && y ? `${d}/${m}/${y}` : iso;
 }
 
+const DAY_HE = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
+
+function hebrewDay(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return "";
+  return DAY_HE[new Date(Date.UTC(y, m - 1, d)).getUTCDay()] ?? "";
+}
+
 function formatDealMessage(deal) {
   const dest = hebrewDestination(deal);
   const country = hebrewCountry(deal);
   const ils = Math.round(deal.priceUsd * 3.7);
+  const outDay = hebrewDay(deal.departureDate);
+  const backDay = hebrewDay(deal.returnDate);
   return [
     "🔥 *מכירה מצוינת!*",
     "",
     country ? `*${dest}, ${country}*` : `*${dest}*`,
-    `📅 יציאה: ${formatDate(deal.departureDate)}`,
-    `📅 חזרה: ${formatDate(deal.returnDate)}`,
+    `📅 יציאה ${outDay}: ${formatDate(deal.departureDate)}`,
+    `📅 חזרה ${backDay}: ${formatDate(deal.returnDate)}`,
     `💰 ₪${ils} (כ־$${deal.priceUsd.toFixed(0)}) *הלוך ושוב*`,
-    `✈️ מתל אביב · עד ${cfg.maxPrice} דולר`,
+    `✈️ מתל אביב · רביעי→שני / חמישי→ראשון · עד ${cfg.maxPrice}$`,
     deal.bookingUrl ? `\n🔗 קישור להזמנה:\n${deal.bookingUrl}` : "",
   ]
     .filter(Boolean)
@@ -254,15 +264,8 @@ async function saveSeen() {
 }
 
 function shouldNotifyDeal(deal) {
-  const fp = dealFingerprint(deal);
-  const prev = seenDeals.get(fp);
-  const ttlMs = Number(process.env.FLIGHT_DEALS_SEEN_TTL_MS ?? String(72 * 60 * 60_000));
-  const dropUsd = Number(process.env.FLIGHT_DEALS_PRICE_DROP_USD ?? "8");
-
-  if (!prev) return true;
-  if (Date.now() - prev.at > ttlMs) return true;
-  if (deal.priceUsd <= prev.priceUsd - dropUsd) return true;
-  return false;
+  // Only brand-new deals — never re-send what was already sent.
+  return !seenDeals.has(dealFingerprint(deal));
 }
 
 function markDealSeen(deal) {
