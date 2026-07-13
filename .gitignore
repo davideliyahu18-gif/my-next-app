@@ -40,3 +40,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# WhatsApp bot local session / state (never commit)
+scripts/flight-deals-whatsapp/auth/
+scripts/flight-deals-whatsapp/seen-deals.json
+scripts/flight-deals-whatsapp/bot-state.json
+scripts/flight-deals-whatsapp/node_modules/
