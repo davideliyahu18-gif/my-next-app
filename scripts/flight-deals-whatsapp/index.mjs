@@ -18,6 +18,7 @@ import {
   resolveProvider,
   searchDeals as fetchDeals,
   dealFingerprint,
+  getSearchStatus,
 } from "./providers.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -71,6 +72,10 @@ let sock = null;
 /** @type {Map<string, { priceUsd: number, at: number, id: string }>} */
 let seenDeals = new Map();
 let scanRunning = false;
+let lastScanAt = 0;
+let lastScanFound = 0;
+let lastScanSent = 0;
+let lastForceRefreshAt = 0;
 let groupJid = "";
 let groupPollTimer = null;
 let welcomeSent = false;
@@ -292,6 +297,7 @@ async function saveState() {
 function normalizeHebrewCommand(text) {
   return String(text ?? "")
     .replace(/[\u200e\u200f\u202a-\u202e]/g, "")
+    .replace(/[?؟！!.,，、~`'"]/g, "")
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
@@ -299,12 +305,53 @@ function normalizeHebrewCommand(text) {
 
 function isStatusCheckCommand(text) {
   const t = normalizeHebrewCommand(text);
+  if (!t) return false;
+  if (t === "בוט") return true;
+  if (t.includes("בוט מחפש")) return true;
+  if (t.includes("הבוט מחפש")) return true;
+  if (t.startsWith("בוט ") && (t.includes("מחפש") || t.includes("טיסות"))) return true;
+  return false;
+}
+
+function sameChatId(a, b) {
+  if (!a || !b) return false;
+  const left = String(a).split(":")[0];
+  const right = String(b).split(":")[0];
+  return left === right || left.split("@")[0] === right.split("@")[0];
+}
+
+function extractMessageText(msg) {
+  const m = msg?.message;
+  if (!m) return "";
   return (
-    t === "בוט מחפש טיסות" ||
-    t === "בוט מחפש?" ||
-    t === "בוט?" ||
-    t.includes("בוט מחפש טיסות")
+    m.conversation ||
+    m.extendedTextMessage?.text ||
+    m.imageMessage?.caption ||
+    m.videoMessage?.caption ||
+    m.buttonsResponseMessage?.selectedDisplayText ||
+    m.listResponseMessage?.title ||
+    m.templateButtonReplyMessage?.selectedDisplayText ||
+    ""
   );
+}
+
+function buildStatusReply() {
+  const status = getSearchStatus();
+  const ago = lastScanAt
+    ? `${Math.max(1, Math.round((Date.now() - lastScanAt) / 60_000))} דק׳`
+    : "עדיין לא";
+  return [
+    "כן ✅ *מחפש*",
+    "",
+    `סורק כל 10 דקות · TLV הלוך-חזור עד $${cfg.maxPrice}`,
+    "רק *רביעי→שני* או *חמישי→ראשון*",
+    `סריקה אחרונה: ${ago} | נמצאו ${lastScanFound} | נשלחו חדשים ${lastScanSent}`,
+    `במאגר כרגע: ${status.cachedDeals} דילים`,
+    status.nextWindow ? `חלון הבא: ${status.nextWindow}` : "",
+    "כשיימצא דיל חדש — אשלח לכאן.",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 async function handleIncomingMessage(msg) {
@@ -313,25 +360,42 @@ async function handleIncomingMessage(msg) {
 
     const chatId = msg.key.remoteJid;
     if (!chatId) return;
-    if (groupJid && chatId !== groupJid) return;
 
-    const body =
-      msg.message.conversation ||
-      msg.message.extendedTextMessage?.text ||
-      msg.message.imageMessage?.caption ||
-      "";
+    // Accept the configured group, and also learn group JID if missing.
+    const isGroup = chatId.endsWith("@g.us");
+    if (groupJid && isGroup && !sameChatId(chatId, groupJid)) {
+      // Ignore other groups silently.
+      return;
+    }
+    if (!isGroup && groupJid) {
+      // Ignore DMs when we are bound to a group.
+      return;
+    }
 
-    if (!isStatusCheckCommand(body)) return;
+    const body = extractMessageText(msg);
+    if (!body) return;
 
-    const reply = [
-      "כן ✅ *מחפש*",
-      "",
-      `סורק כל 10 דקות טיסות הלוך-חזור מ-TLV עד $${cfg.maxPrice}.`,
-      "כשיימצא דיל — אשלח לכאן.",
-    ].join("\n");
+    if (!isStatusCheckCommand(body)) {
+      // Help debug silent command issues without spamming logs.
+      if (/בוט/.test(body)) {
+        log.info({ body, chatId }, "Ignored bot-like message (no command match)");
+      }
+      return;
+    }
 
+    if (!groupJid && isGroup) {
+      groupJid = chatId;
+      await saveState();
+    }
+
+    const reply = buildStatusReply();
     await sock.sendMessage(chatId, { text: reply }, { quoted: msg });
-    log.info({ from: chatId }, "Replied to status check command");
+    log.info({ from: chatId, body }, "Replied to status check command");
+
+    // Kick a refresh scan so status checks can surface new windows/deals.
+    runScan({ forceRefresh: true, reason: "status-command" }).catch((error) => {
+      log.warn({ error }, "Status-triggered scan failed");
+    });
   } catch (error) {
     log.warn({ error }, "Failed to handle incoming message");
   }
@@ -382,8 +446,10 @@ async function onGroupReady() {
       [
         "✅ *הבוט מחובר!*",
         "",
-        `אני סורק כל 30 דקות טיסות הלוך-חזור מ-TLV עד $${cfg.maxPrice}.`,
-        "כשאמצא דיל — אשלח לכאן תאריכים ומחיר.",
+        `אני סורק כל 10 דקות טיסות הלוך-חזור מ-TLV עד $${cfg.maxPrice}.`,
+        "רק רביעי→שני או חמישי→ראשון.",
+        "כתבו *בוט מחפש?* לבדיקת סטטוס.",
+        "כשאמצא דיל חדש — אשלח לכאן תאריכים ומחיר.",
         cfg.demoMode ? "\n_מצב דמו פעיל — הודעת בדיקה תישלח בסריקה הראשונה._" : "",
       ]
         .filter(Boolean)
@@ -393,10 +459,10 @@ async function onGroupReady() {
     await saveState();
   }
 
-  await runScan();
+  await runScan({ forceRefresh: false, reason: "group-ready" });
 }
 
-async function runScan() {
+async function runScan({ forceRefresh = false, reason = "cron" } = {}) {
   if (!groupJid) {
     log.info("No group yet — skipping scan");
     return;
@@ -415,8 +481,24 @@ async function runScan() {
   scanRunning = true;
 
   try {
-    log.info("Scanning for TLV deals ≤ $%d", cfg.maxPrice);
-    const deals = await fetchDeals();
+    // If everything in cache was already sent, force the next date windows.
+    const shouldForce =
+      forceRefresh ||
+      (Date.now() - lastForceRefreshAt > 90 * 60_000 &&
+        lastScanFound > 0 &&
+        lastScanSent === 0 &&
+        Date.now() - lastScanAt > 8 * 60_000);
+
+    if (shouldForce) lastForceRefreshAt = Date.now();
+
+    log.info(
+      "Scanning for TLV deals ≤ $%d (%s%s)",
+      cfg.maxPrice,
+      reason,
+      shouldForce ? ", force-refresh" : "",
+    );
+    const deals = await fetchDeals({ forceRefresh: shouldForce });
+    lastScanFound = deals.length;
     log.info("Found %d deals at or below max price", deals.length);
 
     let sent = 0;
@@ -430,8 +512,13 @@ async function runScan() {
       }
     }
 
+    lastScanSent = sent;
+    lastScanAt = Date.now();
     await saveSeen();
     log.info("Scan done — %d new messages sent", sent);
+
+    // If forced refresh still found nothing new, try one more nearby window pair soon
+    // (rate-limited by lastForceRefreshAt / cache accumulation).
   } catch (error) {
     log.error({ error }, "Scan failed");
   } finally {
@@ -454,7 +541,8 @@ async function connectWhatsApp() {
 
   sock.ev.on("creds.update", saveCreds);
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
-    if (type !== "notify") return;
+    // Baileys may deliver live group texts as "notify" or "append".
+    if (type !== "notify" && type !== "append") return;
     for (const msg of messages) {
       await handleIncomingMessage(msg);
     }
@@ -538,7 +626,7 @@ async function main() {
 
   cron.schedule(cfg.cronExpr, () => {
     log.info("Cron triggered (%s)", cfg.cronExpr);
-    runScan();
+    runScan({ reason: "cron" });
   });
 
   log.info("Flight deals bot started — cron: %s", cfg.cronExpr);

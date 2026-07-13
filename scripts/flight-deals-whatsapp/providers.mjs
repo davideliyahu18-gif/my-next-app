@@ -10,7 +10,8 @@ const DEST_QUERIES = [
 ];
 
 let rotateIndex = 0;
-let weekendRotate = 0;
+/** Start near Oct/Nov windows (higher chance of ≤$150). */
+let weekendRotate = 8;
 let skyCooldownUntil = 0;
 const placeCache = new Map();
 let serpCache = { at: 0, deals: null };
@@ -258,9 +259,13 @@ function mergeDeals(lists) {
  * Search fixed רביעי→שני / חמישי→ראשון date windows via Google Explore.
  * Rotates 2 windows per cache miss to stay within SerpAPI free quota.
  */
-async function searchSerpApi() {
+async function searchSerpApi({ forceRefresh = false } = {}) {
   const cacheMs = Number(process.env.SERPAPI_CACHE_MS ?? String(6 * 60 * 60_000));
-  if (serpCache.deals && Date.now() - serpCache.at < cacheMs) {
+  if (
+    !forceRefresh &&
+    serpCache.deals &&
+    Date.now() - serpCache.at < cacheMs
+  ) {
     return filterPreferredDeals(serpCache.deals);
   }
 
@@ -288,6 +293,7 @@ async function searchSerpApi() {
     else console.warn("[serpapi]", r.reason);
   }
 
+  // Keep previous preferred deals so coverage accumulates across window rotations.
   if (serpCache.deals?.length) lists.push(serpCache.deals);
 
   const deals = filterPreferredDeals(mergeDeals(lists));
@@ -298,6 +304,25 @@ async function searchSerpApi() {
       ` → ${deals.length} deals ≤$${maxPrice()}`,
   );
   return deals;
+}
+
+export function getCachedDealCount() {
+  return serpCache.deals?.length ?? 0;
+}
+
+export function getSearchStatus() {
+  const windows = preferredDateWindows();
+  const next = windows[weekendRotate % Math.max(windows.length, 1)];
+  return {
+    cachedDeals: serpCache.deals?.length ?? 0,
+    cacheAgeMin: serpCache.at
+      ? Math.round((Date.now() - serpCache.at) / 60_000)
+      : null,
+    nextWindow: next
+      ? `${next.label} ${next.outbound_date}→${next.return_date}`
+      : null,
+    skyCooldown: Date.now() < skyCooldownUntil,
+  };
 }
 
 async function resolvePlace(query) {
@@ -454,7 +479,7 @@ async function searchAmadeus() {
   return filterPreferredDeals(deals).sort((a, b) => a.priceUsd - b.priceUsd);
 }
 
-export async function searchDeals() {
+export async function searchDeals({ forceRefresh = false } = {}) {
   const provider = resolveProvider();
   if (!provider) {
     throw new Error(
@@ -466,13 +491,16 @@ export async function searchDeals() {
   if (provider === "demo") deals = demoDeals();
   else if (provider === "travelpayouts") deals = await searchTravelpayouts();
   else if (provider === "merged") {
-    const results = await Promise.allSettled([searchSerpApi(), searchSkyscanner()]);
+    const results = await Promise.allSettled([
+      searchSerpApi({ forceRefresh }),
+      searchSkyscanner(),
+    ]);
     const lists = results.filter((r) => r.status === "fulfilled").map((r) => r.value);
     for (const r of results) {
       if (r.status === "rejected") console.warn("[providers]", r.reason);
     }
     deals = mergeDeals(lists);
-  } else if (provider === "serpapi") deals = await searchSerpApi();
+  } else if (provider === "serpapi") deals = await searchSerpApi({ forceRefresh });
   else if (provider === "skyscanner") deals = await searchSkyscanner();
   else deals = await searchAmadeus();
 
