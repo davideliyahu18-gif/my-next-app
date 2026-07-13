@@ -7,7 +7,7 @@ import {
   getCalendarRowsById,
   getLiveMatchesNow,
   getMatchById,
-  getMatchesByIds,
+  getMatchScoringFromCalendarRows,
   getNextScheduledKickoffMatches,
   isPlaceholderScorer,
   latestMatchMinuteLabel,
@@ -235,22 +235,39 @@ function playerPhoto(name: string): string {
   return `https://ui-avatars.com/api/?name=${safe}&background=d4af37&color=111&size=200&bold=true`;
 }
 
-export async function fetchTopScorers(limit = 10, fresh = false): Promise<ScorerView[]> {
-  const now = new Date();
-  const candidateIds: string[] = [];
-  const seen = new Set<string>();
+type ScorersCacheEntry = {
+  at: number;
+  rows: ScorerView[];
+};
 
-  const rows = await getCalendarRowsById(-14, 2, fresh);
-  for (const row of rows.values()) {
-    const matchId = String(row.IdMatch);
-    if (seen.has(matchId)) continue;
-    const kickoff = parseDatetime(row.Date as string | undefined);
-    if (kickoff > now && row.HomeTeamScore == null) continue;
-    seen.add(matchId);
-    candidateIds.push(matchId);
+let scorersCache: ScorersCacheEntry | null = null;
+/** Coalesce golden-boot rebuilds across live dashboard polls. */
+const SCORERS_CACHE_TTL_MS = 45_000;
+const SCORERS_CACHE_FRESH_TTL_MS = 15_000;
+const SCORERS_CACHE_LIMIT = 40;
+
+export async function fetchTopScorers(limit = 10, fresh = false): Promise<ScorerView[]> {
+  const now = Date.now();
+  const ttl = fresh ? SCORERS_CACHE_FRESH_TTL_MS : SCORERS_CACHE_TTL_MS;
+  if (scorersCache && now - scorersCache.at < ttl) {
+    return scorersCache.rows.slice(0, limit).map((scorer, index) => ({
+      ...scorer,
+      rank: index + 1,
+    }));
   }
 
-  const matches = await getMatchesByIds(candidateIds.slice(0, 30), fresh);
+  const fromOffset = dayOffsetFromIsoDate(TOURNAMENT_META.startDate);
+  const toOffset = Math.max(dayOffsetFromIsoDate(TOURNAMENT_META.endDate), 0);
+  const rows = await getCalendarRowsById(fromOffset, toOffset, fresh);
+
+  const playedRows: Record<string, unknown>[] = [];
+  for (const row of rows.values()) {
+    // Skip fixtures that have not kicked off yet (no scoreline).
+    if (row.HomeTeamScore == null && row.AwayTeamScore == null) continue;
+    playedRows.push(row);
+  }
+
+  const matches = await getMatchScoringFromCalendarRows(playedRows, fresh);
   const scorers = new Map<
     string,
     {
@@ -263,46 +280,82 @@ export async function fetchTopScorers(limit = 10, fresh = false): Promise<Scorer
     }
   >();
 
+  const ensurePlayer = (
+    name: string,
+    team: string,
+    teamCode: string,
+  ) => {
+    const key = name.trim().toUpperCase();
+    const flag = countryFlag(teamCode);
+    const current = scorers.get(key) ?? {
+      name: name.trim(),
+      team,
+      teamCode,
+      flag,
+      goals: 0,
+      assists: 0,
+    };
+    if (team && !current.team) current.team = team;
+    if (teamCode && !current.teamCode) {
+      current.teamCode = teamCode;
+      current.flag = flag || current.flag;
+    }
+    scorers.set(key, current);
+    return current;
+  };
+
   for (const match of matches) {
     for (const goal of match.goals) {
+      if (goal.ownGoal) continue;
       if (isPlaceholderScorer(goal.scorer)) continue;
-      const key = goal.scorer.trim().toUpperCase();
+
       const team = goal.teamName || match.homeTeam;
       const teamCode =
-        goal.teamName === match.homeTeam
-          ? match.homeTeamCode
-          : match.awayTeamCode;
-      const flag = countryFlag(teamCode);
+        goal.teamName === match.awayTeam
+          ? match.awayTeamCode
+          : goal.teamName === match.homeTeam
+            ? match.homeTeamCode
+            : match.homeTeamCode;
+      ensurePlayer(goal.scorer, team, teamCode).goals += 1;
+    }
 
-      const current = scorers.get(key) ?? {
-        name: goal.scorer.trim(),
-        team,
-        teamCode,
-        flag,
-        goals: 0,
-        assists: 0,
-      };
-      if (team && !current.team) current.team = team;
-      if (teamCode && !current.teamCode) current.teamCode = teamCode;
-      if (flag && !current.flag) current.flag = flag;
-      current.goals += 1;
-      scorers.set(key, current);
+    for (const assist of match.assists) {
+      if (isPlaceholderScorer(assist.player)) continue;
+      const team = assist.teamName || match.homeTeam;
+      const teamCode =
+        assist.teamName === match.awayTeam
+          ? match.awayTeamCode
+          : assist.teamName === match.homeTeam
+            ? match.homeTeamCode
+            : match.homeTeamCode;
+      ensurePlayer(assist.player, team, teamCode).assists += 1;
     }
   }
 
-  const ranked = [...scorers.values()].sort(
-    (a, b) => b.goals - a.goals || a.name.localeCompare(b.name),
-  );
+  const ranked = [...scorers.values()]
+    .sort(
+      (a, b) =>
+        b.goals - a.goals ||
+        b.assists - a.assists ||
+        a.name.localeCompare(b.name),
+    )
+    .slice(0, SCORERS_CACHE_LIMIT)
+    .map((scorer, index) => ({
+      rank: index + 1,
+      name: scorer.name,
+      team: scorer.team,
+      teamCode: scorer.teamCode,
+      flag: scorer.flag,
+      goals: scorer.goals,
+      assists: scorer.assists,
+      photo: playerPhoto(scorer.name),
+    }));
+
+  scorersCache = { at: Date.now(), rows: ranked };
 
   return ranked.slice(0, limit).map((scorer, index) => ({
+    ...scorer,
     rank: index + 1,
-    name: scorer.name,
-    team: scorer.team,
-    teamCode: scorer.teamCode,
-    flag: scorer.flag,
-    goals: scorer.goals,
-    assists: scorer.assists,
-    photo: playerPhoto(scorer.name),
   }));
 }
 

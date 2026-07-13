@@ -56,11 +56,9 @@ export default function FifaDashboard({ initial }: { initial: FifaDashboardView 
       </div>
 
       <div className="grid gap-6 lg:grid-cols-12">
-        <aside className="space-y-6 lg:col-span-3">
+        <aside className="space-y-6 lg:col-span-3" id="scorers">
+          <CompactScorersPanel scorers={data.scorers} />
           <NextMatch match={data.nextMatch} />
-          <div id="scorers">
-            <CompactScorersPanel scorers={data.scorers} />
-          </div>
           <SocialBar />
         </aside>
 

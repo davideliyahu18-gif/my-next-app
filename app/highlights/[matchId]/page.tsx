@@ -19,6 +19,7 @@ function GoalRow({ goal }: { goal: FifaGoal }) {
       <span className="text-sm font-semibold text-white">
         {goal.teamName ? `${goal.teamName} · ` : ""}
         {goal.scorer}
+        {goal.ownGoal ? " (שער עצמי)" : ""}
       </span>
       <span className="shrink-0 rounded-full bg-[#d4af37]/15 px-2.5 py-0.5 text-xs font-bold text-[#d4af37]">
         {goal.minute}
