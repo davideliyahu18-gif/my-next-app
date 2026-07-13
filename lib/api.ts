@@ -9,12 +9,14 @@ import {
   fetchTopScorers,
   fetchTournament,
 } from "./fifa-data";
+import { fetchSemiFinalLineups } from "./fifa-lineups";
 import type {
   FifaDashboardView,
   GroupStandingView,
   LiveMatchView,
   ScheduleMatchView,
   ScorerView,
+  SemiFinalLineupMatchView,
   StatCardView,
 } from "./types";
 
@@ -75,6 +77,17 @@ export function getStatCards(): Promise<StatCardView[]> {
 
 export function getFullSchedule(): Promise<ScheduleMatchView[]> {
   return cachedFetch("full_schedule", () => fetchFullSchedule(false), []);
+}
+
+export function getSemiFinalLineups(): Promise<SemiFinalLineupMatchView[]> {
+  return cachedFetch(
+    "semi_final_lineups",
+    async () => {
+      const schedule = await fetchFullSchedule(false);
+      return fetchSemiFinalLineups(schedule, false);
+    },
+    [],
+  );
 }
 
 export function getTournament() {

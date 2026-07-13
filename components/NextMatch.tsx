@@ -1,54 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import type { LiveMatchView } from "@/lib/types";
 import DashboardCard from "./DashboardCard";
+import MatchCountdown from "./MatchCountdown";
 import ScrollLinkButton from "./ScrollLinkButton";
-
-function Countdown({ targetIso }: { targetIso: string }) {
-  const [parts, setParts] = useState({ days: 0, hours: 0, mins: 0, secs: 0 });
-
-  useEffect(() => {
-    const target = new Date(targetIso).getTime();
-
-    const tick = () => {
-      const diff = Math.max(0, target - Date.now());
-      setParts({
-        days: Math.floor(diff / 86400000),
-        hours: Math.floor((diff % 86400000) / 3600000),
-        mins: Math.floor((diff % 3600000) / 60000),
-        secs: Math.floor((diff % 60000) / 1000),
-      });
-    };
-
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [targetIso]);
-
-  const cells = [
-    { label: "ימים", value: parts.days },
-    { label: "שעות", value: parts.hours },
-    { label: "דקות", value: parts.mins },
-    { label: "שניות", value: parts.secs },
-  ];
-
-  return (
-    <div className="grid grid-cols-4 gap-2">
-      {cells.map((cell) => (
-        <div
-          key={cell.label}
-          className="rounded-xl border border-gold/20 bg-gradient-to-b from-gold/10 to-black/40 px-1.5 py-3 text-center"
-        >
-          <p className="text-xl font-black tabular-nums tracking-tight text-gold md:text-2xl">
-            {String(cell.value).padStart(2, "0")}
-          </p>
-          <p className="mt-1 text-[10px] font-medium text-zinc-500">{cell.label}</p>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 export default function NextMatch({ match }: { match: LiveMatchView | null }) {
   if (!match) {
@@ -101,7 +56,7 @@ export default function NextMatch({ match }: { match: LiveMatchView | null }) {
           <span>{kickoffLabel}</span>
         </div>
 
-        {showCountdown && <Countdown targetIso={match.kickoffAt} />}
+        {showCountdown && <MatchCountdown targetIso={match.kickoffAt} />}
 
         <ScrollLinkButton
           href="#matches"
