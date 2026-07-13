@@ -219,6 +219,45 @@ export interface FifaDashboardView {
   fetchedAt: string;
 }
 
+export interface LineupPlayerView {
+  id: string;
+  name: string;
+  shirtNumber: number | null;
+  position: number;
+  positionLabel: string;
+  captain: boolean;
+  starter: boolean;
+}
+
+export interface TeamLineupView {
+  team: string;
+  teamCode: string;
+  flag: string;
+  formation: string | null;
+  coach: string | null;
+  starters: LineupPlayerView[];
+  substitutes: LineupPlayerView[];
+  source: "official" | "last";
+  sourceLabel: string;
+}
+
+export interface SemiFinalLineupMatchView {
+  id: string;
+  home: string;
+  homeFlag: string;
+  homeCode: string;
+  away: string;
+  awayFlag: string;
+  awayCode: string;
+  kickoffAt: string;
+  dateLabel: string;
+  timeLabel: string;
+  venue: string;
+  status: ScheduleMatchView["status"];
+  homeLineup: TeamLineupView | null;
+  awayLineup: TeamLineupView | null;
+}
+
 /** One outbound WhatsApp message mirrored to the website feed. */
 export interface WhatsAppFeedMessage {
   id: string;

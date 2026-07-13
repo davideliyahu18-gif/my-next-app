@@ -220,6 +220,13 @@ async function getLiveMatch(
   );
 }
 
+export async function getLiveFootballMatch(
+  matchId: string,
+  fresh = false,
+): Promise<Record<string, unknown>> {
+  return getLiveMatch(matchId, fresh);
+}
+
 async function getTimeline(
   matchId: string,
   fresh = false,

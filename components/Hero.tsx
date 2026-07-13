@@ -1,7 +1,9 @@
 import Image from "next/image";
 import Link from "next/link";
 import HeroKnockoutPreview from "@/components/HeroKnockoutPreview";
+import HeroMatchCountdown from "@/components/HeroMatchCountdown";
 import { getFullSchedule, getTournament } from "@/lib/api";
+import { filterKnockoutUpcoming } from "@/lib/knockout-stages";
 import { TOURNAMENT_META, WHATSAPP_INVITE_LINK } from "@/lib/constants";
 
 const WHATSAPP_GROUP_URL =
@@ -12,6 +14,8 @@ export default async function Hero() {
     getTournament(),
     getFullSchedule(),
   ]);
+  const { semiFinals } = filterKnockoutUpcoming(schedule);
+  const nextSemi = semiFinals[0] ?? null;
 
   return (
     <section id="home" className="relative overflow-hidden">
@@ -59,9 +63,16 @@ export default async function Hero() {
               >
                 התראות WhatsApp
               </a>
+              <Link
+                href="#lineups"
+                className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/5 px-6 py-3.5 text-sm font-bold text-white transition-all hover:scale-[1.03] hover:border-gold/40 hover:text-gold"
+              >
+                הרכבים לחצי גמר
+              </Link>
             </div>
           </div>
 
+          <HeroMatchCountdown match={nextSemi} />
           <HeroKnockoutPreview matches={schedule} />
         </div>
       </div>
