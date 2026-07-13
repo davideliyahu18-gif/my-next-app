@@ -1,13 +1,17 @@
 import Image from "next/image";
 import Link from "next/link";
-import { getTournament } from "@/lib/api";
+import HeroKnockoutPreview from "@/components/HeroKnockoutPreview";
+import { getFullSchedule, getTournament } from "@/lib/api";
 import { TOURNAMENT_META, WHATSAPP_INVITE_LINK } from "@/lib/constants";
 
 const WHATSAPP_GROUP_URL =
   WHATSAPP_INVITE_LINK || "https://chat.whatsapp.com/L47SyZIjYAR0k8qZ0C2Fcl";
 
 export default async function Hero() {
-  const tournament = await getTournament();
+  const [tournament, schedule] = await Promise.all([
+    getTournament(),
+    getFullSchedule(),
+  ]);
 
   return (
     <section id="home" className="relative overflow-hidden">
@@ -24,7 +28,7 @@ export default async function Hero() {
         <div className="absolute inset-0 bg-gradient-to-l from-background via-black/55 to-transparent" />
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_30%_40%,rgba(212,175,55,0.22),transparent_55%)]" />
 
-        <div className="relative mx-auto flex min-h-[72vh] max-w-[1440px] flex-col justify-end px-4 pb-14 pt-28 md:min-h-[78vh] md:justify-center md:px-8 md:pb-20 md:pt-24">
+        <div className="relative mx-auto flex min-h-[72vh] max-w-[1440px] flex-col justify-end px-4 pb-10 pt-28 md:min-h-[78vh] md:justify-center md:px-8 md:pb-14 md:pt-24">
           <div className="max-w-2xl animate-fade-up text-center md:text-right">
             <p className="mb-4 inline-flex items-center gap-2 rounded-full border border-gold/30 bg-gold/10 px-3 py-1 text-[11px] font-bold tracking-[0.2em] text-gold">
               <span className="h-1.5 w-1.5 animate-live-pulse rounded-full bg-live" />
@@ -57,6 +61,8 @@ export default async function Hero() {
               </a>
             </div>
           </div>
+
+          <HeroKnockoutPreview matches={schedule} />
         </div>
       </div>
     </section>
