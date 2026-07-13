@@ -1,6 +1,7 @@
 import type { ScheduleMatchView } from "@/lib/types";
 import DashboardCard from "./DashboardCard";
 import HighlightButton from "./HighlightButton";
+import UpcomingKnockoutPanel from "./UpcomingKnockoutPanel";
 import { buildInternalHighlightPath } from "@/lib/fifa-match-centre";
 
 function statusBadge(status: ScheduleMatchView["status"]) {
@@ -131,6 +132,8 @@ export default function FullScheduleTable({
           </div>
         </DashboardCard>
       ))}
+
+      <UpcomingKnockoutPanel matches={matches} />
     </div>
   );
 }
