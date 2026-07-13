@@ -1,51 +1,57 @@
-# Flight Deals WhatsApp Bot
+# בוט דילי טיסות — מדריך מהיר
 
-בוט שבודק כל **30 דקות** טיסות **הלוך-חזור** מ-**תל אביב (TLV)** לכל יעד במחיר עד **$50**, ושולח לקבוצת WhatsApp את **תאריכי היציאה והחזרה** של כל דיל.
+## מה אני עושה / מה אתה עושה
 
-## שתי דרכי הפעלה
+| מי | מה |
+|----|-----|
+| **הבוט (אוטומטי)** | סורק כל 30 דקות, שולח דילים, מונע כפילויות |
+| **אתה — פעם אחת** | מפתחות Amadeus (2 דקות) + סריקת QR |
+| **אתה — כשאגיד** | פתיחת קבוצת WhatsApp + שליחת השם |
 
-### אופציה A — Vercel Cron + Green API (מומלץ לפרודקשן)
+---
 
-1. הירשם ב-[Amadeus for Developers](https://developers.amadeus.com/) (חינם לבדיקות).
-2. הירשם ב-[Green API](https://green-api.com/) וסרוק QR לחיבור WhatsApp.
-3. צור קבוצת WhatsApp חדשה והעתק את ה-`chatId` (פורמט: `972...@g.us`).
-4. הגדר ב-Vercel את משתני הסביבה מ-`.env.example`.
-5. פרוס — ה-cron ב-`vercel.json` ירוץ אוטומטית כל 30 דקות.
+## שלב 1 — Amadeus (2 דקות, חינם)
 
-### אופציה B — סקריפט מקומי עם Baileys (חינם, דורש מחשב/VPS דלוק)
+1. היכנס ל-[developers.amadeus.com](https://developers.amadeus.com/register)
+2. צור אפליקציה → העתק **API Key** ו-**API Secret**
+3. הדבק ב-`.env.local`:
+   ```
+   AMADEUS_CLIENT_ID=המפתח
+   AMADEUS_CLIENT_SECRET=הסוד
+   ```
+
+> **בדיקה בלי Amadeus:** הוסף `FLIGHT_DEALS_DEMO=true` ל-`.env.local`
+
+---
+
+## שלב 2 — הפעלת הבוט
 
 ```bash
-cd scripts/flight-deals-whatsapp
-npm install
-# העתק משתני סביבה ל-.env בשורש הפרויקט או לקובץ מקומי
-export AMADEUS_CLIENT_ID=...
-export AMADEUS_CLIENT_SECRET=...
-export WHATSAPP_GROUP_CHAT_ID=120363...@g.us
-npm start
+npm run flight-deals:setup   # פעם אחת — יוצר סודות
+npm run flight-deals:start
 ```
 
-בהפעלה ראשונה — סרוק QR ב-WhatsApp → **מכשירים מקושרים**.
+סרוק את ה-QR: **WhatsApp → הגדרות → מכשירים מקושרים → קשר מכשיר**
 
-## משתני סביבה
+---
 
-| משתנה | תיאור |
-|--------|--------|
-| `AMADEUS_CLIENT_ID` | מפתח API מ-Amadeus |
-| `AMADEUS_CLIENT_SECRET` | סוד API מ-Amadeus |
-| `FLIGHT_DEALS_MAX_PRICE_USD` | מקסימום מחיר (ברירת מחדל: 50) |
-| `WHATSAPP_GROUP_CHAT_ID` | מזהה קבוצה (Green API או Baileys) |
-| `GREEN_API_INSTANCE` | מספר instance ב-Green API |
-| `GREEN_API_TOKEN` | טוקן Green API |
-| `CRON_SECRET` | אבטחת endpoint ה-cron ב-Vercel |
-| `TELEGRAM_BOT_TOKEN` | חלופה לטלגרם במקום WhatsApp |
-| `TELEGRAM_CHAT_ID` | מזהה קבוצת טלגרם |
+## שלב 3 — פתיחת הקבוצה (רק כשאגיד לך)
 
-## API
+כשהבוט מחובר, אגיד לך **"עכשיו פתח קבוצה"**.
 
-- `GET /api/flight-deals` — דילים אחרונים שנמצאו
-- `GET /api/cron/flight-deals` — סריקה ידנית (דורש `Authorization: Bearer <CRON_SECRET>`)
+1. פתח קבוצה חדשה ב-WhatsApp
+2. תן לה **בדיוק** את השם שתגיד לי
+3. הוסף למקבץ את המספר שקישרת ב-QR
+4. הבוט יזהה את הקבוצה לבד לפי השם וישלח הודעת אישור
 
-## דוגמת הודעה
+השם נכנס ב-`.env.local`:
+```
+WHATSAPP_GROUP_NAME=השם שבחרת
+```
+
+---
+
+## דוגמת הודעה בקבוצה
 
 ```
 🛫 דיל טיסה עד $50!
@@ -56,8 +62,9 @@ npm start
 💰 מחיר: $48.50 (הלוך-חזור)
 ```
 
-## הערות
+---
 
-- מחירים מגיעים מ-**Amadeus** (מאגר רשמי של חברות תעופה) — לא scraping ישיר של אתרים.
-- דילים ב-$50 מישראל **נדירים**; הבוט ישלח רק כשיש תוצאות אמיתיות.
-- לפרודקשן עם מחירים אמיתיים, החלף ל-`AMADEUS_API_BASE=https://api.amadeus.com`.
+## פרודקשן 24/7 (Vercel)
+
+אם האתר על Vercel + Redis + Green API — הבוט רץ בענן בלי מחשב דלוק.
+ראה `.env.example` לפרטים.

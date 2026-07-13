@@ -1,17 +1,9 @@
 #!/usr/bin/env node
 /**
- * Standalone WhatsApp flight-deals bot.
+ * WhatsApp flight-deals bot — TLV round-trip ≤ $50, every 30 min.
  *
- * Runs locally / on a VPS (Baileys needs a persistent session).
- * Scans Amadeus every 30 minutes for TLV round-trips ≤ $50 and posts to a group.
- *
- * Setup:
- *   cd scripts/flight-deals-whatsapp
- *   npm install
- *   cp ../../.env.example .env   # fill AMADEUS_* and WHATSAPP_GROUP_CHAT_ID
- *   npm start
- *
- * On first run, scan the QR code with WhatsApp → Linked Devices.
+ * The bot finds the WhatsApp group automatically by WHATSAPP_GROUP_NAME.
+ * You only need to create the group with that name and add this linked number.
  */
 
 import { createRequire } from "node:module";
@@ -23,9 +15,14 @@ import cron from "node-cron";
 import pino from "pino";
 import qrcode from "qrcode-terminal";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.join(__dirname, "../..");
+const AUTH_DIR = path.join(__dirname, "auth");
+const SEEN_FILE = path.join(__dirname, "seen-deals.json");
+const STATE_FILE = path.join(__dirname, "bot-state.json");
+
 const require = createRequire(import.meta.url);
 const baileys = require("@whiskeysockets/baileys");
-
 const {
   default: makeWASocket,
   useMultiFileAuthState,
@@ -33,20 +30,37 @@ const {
   fetchLatestBaileysVersion,
 } = baileys;
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const AUTH_DIR = path.join(__dirname, "auth");
-const SEEN_FILE = path.join(__dirname, "seen-deals.json");
+async function loadEnvFile() {
+  const envPath = path.join(ROOT, ".env.local");
+  if (!existsSync(envPath)) return;
+  const text = await readFile(envPath, "utf8");
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const idx = trimmed.indexOf("=");
+    if (idx === -1) continue;
+    const key = trimmed.slice(0, idx);
+    const value = trimmed.slice(idx + 1);
+    if (!process.env[key]) process.env[key] = value;
+  }
+}
+
+function envConfig() {
+  return {
+    origin: process.env.FLIGHT_DEALS_ORIGIN ?? "TLV",
+    maxPrice: Number(process.env.FLIGHT_DEALS_MAX_PRICE_USD ?? "50"),
+    currency: process.env.FLIGHT_DEALS_CURRENCY ?? "USD",
+    groupJidEnv: process.env.WHATSAPP_GROUP_CHAT_ID ?? "",
+    groupName: process.env.WHATSAPP_GROUP_NAME ?? "",
+    demoMode: process.env.FLIGHT_DEALS_DEMO === "true",
+    amadeusBase: process.env.AMADEUS_API_BASE ?? "https://test.api.amadeus.com",
+    amadeusId: process.env.AMADEUS_CLIENT_ID ?? "",
+    amadeusSecret: process.env.AMADEUS_CLIENT_SECRET ?? "",
+    cronExpr: process.env.FLIGHT_DEALS_SCAN_CRON ?? "*/30 * * * *",
+  };
+}
 
 const log = pino({ level: process.env.LOG_LEVEL ?? "info" });
-
-const ORIGIN = process.env.FLIGHT_DEALS_ORIGIN ?? "TLV";
-const MAX_PRICE = Number(process.env.FLIGHT_DEALS_MAX_PRICE_USD ?? "50");
-const CURRENCY = process.env.FLIGHT_DEALS_CURRENCY ?? "USD";
-const GROUP_JID = process.env.WHATSAPP_GROUP_CHAT_ID ?? "";
-const AMADEUS_BASE = process.env.AMADEUS_API_BASE ?? "https://test.api.amadeus.com";
-const AMADEUS_ID = process.env.AMADEUS_CLIENT_ID ?? "";
-const AMADEUS_SECRET = process.env.AMADEUS_CLIENT_SECRET ?? "";
-const CRON_EXPR = process.env.FLIGHT_DEALS_SCAN_CRON ?? "*/30 * * * *";
 
 const AIRPORT_LABELS = {
   TLV: "תל אביב",
@@ -69,6 +83,12 @@ let sock = null;
 let tokenCache = null;
 let seenDeals = new Set();
 let scanRunning = false;
+let groupJid = "";
+let groupPollTimer = null;
+let welcomeSent = false;
+let cfg = envConfig();
+
+const GROUP_POLL_MS = 10_000;
 
 function airportLabel(code) {
   return AIRPORT_LABELS[code] ?? code;
@@ -93,19 +113,35 @@ function formatDealMessage(deal) {
     .join("\n");
 }
 
-async function loadSeen() {
-  if (!existsSync(SEEN_FILE)) return;
+async function loadJson(file, fallback) {
+  if (!existsSync(file)) return fallback;
   try {
-    const raw = await readFile(SEEN_FILE, "utf8");
-    const ids = JSON.parse(raw);
-    if (Array.isArray(ids)) seenDeals = new Set(ids);
-  } catch (error) {
-    log.warn({ error }, "Could not load seen-deals.json");
+    return JSON.parse(await readFile(file, "utf8"));
+  } catch {
+    return fallback;
   }
+}
+
+async function loadSeen() {
+  const ids = await loadJson(SEEN_FILE, []);
+  if (Array.isArray(ids)) seenDeals = new Set(ids);
 }
 
 async function saveSeen() {
   await writeFile(SEEN_FILE, JSON.stringify([...seenDeals], null, 2));
+}
+
+async function loadState() {
+  const state = await loadJson(STATE_FILE, {});
+  if (state.groupJid && !groupJid) groupJid = state.groupJid;
+  welcomeSent = Boolean(state.welcomeSent);
+}
+
+async function saveState() {
+  await writeFile(
+    STATE_FILE,
+    JSON.stringify({ groupJid, welcomeSent, groupName: cfg.groupName }, null, 2),
+  );
 }
 
 async function getAmadeusToken() {
@@ -115,11 +151,11 @@ async function getAmadeusToken() {
 
   const body = new URLSearchParams({
     grant_type: "client_credentials",
-    client_id: AMADEUS_ID,
-    client_secret: AMADEUS_SECRET,
+    client_id: cfg.amadeusId,
+    client_secret: cfg.amadeusSecret,
   });
 
-  const res = await fetch(`${AMADEUS_BASE}/v1/security/oauth2/token`, {
+  const res = await fetch(`${cfg.amadeusBase}/v1/security/oauth2/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
@@ -135,16 +171,34 @@ async function getAmadeusToken() {
 }
 
 async function searchDeals() {
+  if (cfg.demoMode) {
+    const today = new Date();
+    const depart = new Date(today.getTime() + 14 * 86_400_000);
+    const ret = new Date(depart.getTime() + 5 * 86_400_000);
+    const fmt = (d) => d.toISOString().slice(0, 10);
+    return [
+      {
+        id: `demo-${fmt(depart)}`,
+        origin: "TLV",
+        destination: "ATH",
+        departureDate: fmt(depart),
+        returnDate: fmt(ret),
+        priceUsd: 49.9,
+        bookingUrl: null,
+      },
+    ];
+  }
+
   const token = await getAmadeusToken();
   const params = new URLSearchParams({
-    origin: ORIGIN,
-    maxPrice: String(MAX_PRICE),
-    currency: CURRENCY,
+    origin: cfg.origin,
+    maxPrice: String(cfg.maxPrice),
+    currency: cfg.currency,
     oneWay: "false",
   });
 
   const res = await fetch(
-    `${AMADEUS_BASE}/v1/shopping/flight-destinations?${params}`,
+    `${cfg.amadeusBase}/v1/shopping/flight-destinations?${params}`,
     { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } },
   );
 
@@ -159,12 +213,12 @@ async function searchDeals() {
   for (const row of payload.data ?? []) {
     const priceUsd = Number(row.price?.total);
     if (!row.destination || !row.departureDate || !row.returnDate) continue;
-    if (!Number.isFinite(priceUsd) || priceUsd > MAX_PRICE) continue;
+    if (!Number.isFinite(priceUsd) || priceUsd > cfg.maxPrice) continue;
 
     const id = `${row.origin}-${row.destination}-${row.departureDate}-${row.returnDate}-${priceUsd.toFixed(2)}`;
     deals.push({
       id,
-      origin: row.origin ?? ORIGIN,
+      origin: row.origin ?? cfg.origin,
       destination: row.destination,
       departureDate: row.departureDate,
       returnDate: row.returnDate,
@@ -177,25 +231,90 @@ async function searchDeals() {
 }
 
 async function sendToGroup(text) {
-  if (!sock || !GROUP_JID) {
-    log.warn("Socket or WHATSAPP_GROUP_CHAT_ID not ready");
-    return false;
-  }
-
-  await sock.sendMessage(GROUP_JID, { text });
+  if (!sock || !groupJid) return false;
+  await sock.sendMessage(groupJid, { text });
   return true;
 }
 
+async function resolveGroupByName() {
+  if (!sock || !cfg.groupName || groupJid) return groupJid;
+
+  try {
+    const participating = await sock.groupFetchAllParticipating();
+    const groups = Object.values(participating ?? {});
+    const match = groups.find(
+      (g) => String(g.subject ?? "").trim() === cfg.groupName.trim(),
+    );
+
+    if (match?.id) {
+      groupJid = match.id;
+      await saveState();
+      console.log(`\n✅ נמצאה קבוצה: "${cfg.groupName}" → ${groupJid}\n`);
+      return groupJid;
+    }
+  } catch (error) {
+    log.warn({ error }, "Group lookup failed");
+  }
+
+  return null;
+}
+
+function startGroupPolling() {
+  if (groupJid || !cfg.groupName) return;
+
+  console.log(`\n⏳ מחכה לקבוצה בשם: "${cfg.groupName}"`);
+  console.log("   פתח את הקבוצה, הוסף את המספר המקושר, ואז הבוט יתחבר אוטומטית.\n");
+
+  groupPollTimer = setInterval(async () => {
+    const found = await resolveGroupByName();
+    if (found) {
+      clearInterval(groupPollTimer);
+      groupPollTimer = null;
+      await onGroupReady();
+    }
+  }, GROUP_POLL_MS);
+}
+
+async function onGroupReady() {
+  if (!welcomeSent) {
+    await sendToGroup(
+      [
+        "✅ *הבוט מחובר!*",
+        "",
+        `אני סורק כל 30 דקות טיסות הלוך-חזור מ-TLV עד $${cfg.maxPrice}.`,
+        "כשאמצא דיל — אשלח לכאן תאריכים ומחיר.",
+        cfg.demoMode ? "\n_מצב דמו פעיל — הודעת בדיקה תישלח בסריקה הראשונה._" : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    );
+    welcomeSent = true;
+    await saveState();
+  }
+
+  await runScan();
+}
+
 async function runScan() {
+  if (!groupJid) {
+    log.info("No group yet — skipping scan");
+    return;
+  }
+
   if (scanRunning) {
     log.info("Scan already running, skipping");
+    return;
+  }
+
+  if (!cfg.demoMode && (!cfg.amadeusId || !cfg.amadeusSecret)) {
+    log.warn("Amadeus keys missing — set AMADEUS_CLIENT_ID/SECRET or FLIGHT_DEALS_DEMO=true");
     return;
   }
 
   scanRunning = true;
 
   try {
-    log.info("Scanning Amadeus for TLV deals ≤ $%d", MAX_PRICE);
+    log.info("Scanning for TLV deals ≤ $%d", cfg.maxPrice);
     const deals = await searchDeals();
     log.info("Found %d deals at or below max price", deals.length);
 
@@ -237,46 +356,59 @@ async function connectWhatsApp() {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
-      console.log("\n📱 סרוק את קוד ה-QR עם WhatsApp → מכשירים מקושרים:\n");
+      console.log("\n📱 סרוק QR: WhatsApp → הגדרות → מכשירים מקושרים → קשר מכשיר\n");
       qrcode.generate(qr, { small: true });
     }
 
     if (connection === "open") {
-      log.info("WhatsApp connected — group: %s", GROUP_JID || "(not set)");
-      runScan();
+      log.info("WhatsApp connected");
+      if (groupJid) {
+        onGroupReady();
+      } else if (cfg.groupName) {
+        resolveGroupByName().then((found) => {
+          if (found) onGroupReady();
+          else startGroupPolling();
+        });
+      } else {
+        console.error("❌ הגדר WHATSAPP_GROUP_NAME או WHATSAPP_GROUP_CHAT_ID");
+      }
     }
 
     if (connection === "close") {
       const status = lastDisconnect?.error?.output?.statusCode;
       const shouldReconnect = status !== DisconnectReason.loggedOut;
       log.warn({ status }, "WhatsApp disconnected");
-      if (shouldReconnect) {
-        setTimeout(connectWhatsApp, 5_000);
-      }
+      if (shouldReconnect) setTimeout(connectWhatsApp, 5_000);
     }
   });
 }
 
 async function main() {
-  if (!AMADEUS_ID || !AMADEUS_SECRET) {
-    console.error("❌ Set AMADEUS_CLIENT_ID and AMADEUS_CLIENT_SECRET in .env");
+  await loadEnvFile();
+  cfg = envConfig();
+  groupJid = cfg.groupJidEnv;
+
+  if (!cfg.groupJidEnv && !cfg.groupName) {
+    console.error("❌ הגדר WHATSAPP_GROUP_NAME (שם הקבוצה) או WHATSAPP_GROUP_CHAT_ID");
     process.exit(1);
   }
 
-  if (!GROUP_JID) {
-    console.error("❌ Set WHATSAPP_GROUP_CHAT_ID (group JID, e.g. 120363...@g.us)");
+  if (!cfg.demoMode && (!cfg.amadeusId || !cfg.amadeusSecret)) {
+    console.error("❌ חסרים מפתחות Amadeus — הדבק ב-.env.local");
+    console.error("   או הפעל מצב בדיקה: FLIGHT_DEALS_DEMO=true");
     process.exit(1);
   }
 
   await loadSeen();
+  await loadState();
   await connectWhatsApp();
 
-  cron.schedule(CRON_EXPR, () => {
-    log.info("Cron triggered (%s)", CRON_EXPR);
+  cron.schedule(cfg.cronExpr, () => {
+    log.info("Cron triggered (%s)", cfg.cronExpr);
     runScan();
   });
 
-  log.info("Flight deals bot started — cron: %s", CRON_EXPR);
+  log.info("Flight deals bot started — cron: %s", cfg.cronExpr);
 }
 
 main().catch((error) => {
