@@ -3,10 +3,28 @@ import { FLIGHT_DEALS_MAX_PRICE_USD, FLIGHT_DEALS_ORIGIN } from "./constants";
 
 const RAPIDAPI_HOST = "sky-scrapper.p.rapidapi.com";
 
+/** Popular low-cost style destinations from TLV — Everywhere API is captcha-blocked. */
+const SKYSCANNER_DESTINATION_QUERIES = [
+  "Athens",
+  "Larnaca",
+  "Budapest",
+  "Sofia",
+  "Bucharest",
+  "Krakow",
+  "Warsaw",
+  "Rome",
+  "Milan",
+  "Barcelona",
+  "Venice",
+  "Prague",
+  "Vienna",
+  "Paphos",
+  "Istanbul",
+];
+
 declare global {
-  var __skyscannerTlvCache:
-    | { skyId: string; entityId: string; expiresAt: number }
-    | undefined;
+  var __skyscannerPlaceCache: Map<string, { skyId: string; entityId: string }> | undefined;
+  var __skyscannerRotateIndex: number | undefined;
 }
 
 function rapidApiKey(): string {
@@ -28,6 +46,13 @@ function headers(): HeadersInit {
   };
 }
 
+function placeCache(): Map<string, { skyId: string; entityId: string }> {
+  if (!globalThis.__skyscannerPlaceCache) {
+    globalThis.__skyscannerPlaceCache = new Map();
+  }
+  return globalThis.__skyscannerPlaceCache;
+}
+
 function buildDealId(
   origin: string,
   destination: string,
@@ -36,11 +61,6 @@ function buildDealId(
   priceUsd: number,
 ): string {
   return `sky-${origin}-${destination}-${departureDate}-${returnDate}-${priceUsd.toFixed(2)}`;
-}
-
-function isoDateOnly(value: string | null | undefined): string {
-  if (!value) return "";
-  return String(value).slice(0, 10);
 }
 
 function skyscannerBookingUrl(
@@ -53,147 +73,91 @@ function skyscannerBookingUrl(
   return `https://www.skyscanner.co.il/transport/flights/${FLIGHT_DEALS_ORIGIN.toLowerCase()}/${destination.toLowerCase()}/${out}/${ret}/`;
 }
 
-async function resolveTlvPlace(): Promise<{ skyId: string; entityId: string }> {
-  const cached = globalThis.__skyscannerTlvCache;
-  if (cached && cached.expiresAt > Date.now()) {
-    return { skyId: cached.skyId, entityId: cached.entityId };
+async function rapidGet<T>(path: string, params: Record<string, string>): Promise<T> {
+  const url = new URL(`https://${RAPIDAPI_HOST}${path}`);
+  for (const [key, value] of Object.entries(params)) {
+    url.searchParams.set(key, value);
   }
 
-  const params = new URLSearchParams({
-    query: "Tel Aviv",
-    locale: "en-US",
+  const response = await fetch(url, {
+    headers: headers(),
+    cache: "no-store",
   });
-  const response = await fetch(
-    `https://${RAPIDAPI_HOST}/api/v1/flights/searchAirport?${params}`,
-    { headers: headers(), cache: "no-store" },
-  );
 
   if (!response.ok) {
-    throw new Error(`Skyscanner searchAirport HTTP ${response.status}`);
+    const text = await response.text().catch(() => "");
+    throw new Error(`Skyscanner ${path} HTTP ${response.status}: ${text}`);
   }
 
-  const payload = (await response.json()) as {
-    data?: Array<{ skyId?: string; entityId?: string; presentation?: { title?: string } }>;
-  };
-
-  const match =
-    payload.data?.find((row) =>
-      /tel aviv|tlv/i.test(
-        `${row.skyId ?? ""} ${row.presentation?.title ?? ""} ${row.entityId ?? ""}`,
-      ),
-    ) ?? payload.data?.[0];
-
-  if (!match?.skyId || !match?.entityId) {
-    throw new Error("Skyscanner could not resolve Tel Aviv / TLV");
-  }
-
-  globalThis.__skyscannerTlvCache = {
-    skyId: match.skyId,
-    entityId: match.entityId,
-    expiresAt: Date.now() + 24 * 60 * 60 * 1000,
-  };
-
-  return { skyId: match.skyId, entityId: match.entityId };
+  return (await response.json()) as T;
 }
 
-type SkyEverywhereRow = {
-  price?: number | { raw?: number; formatted?: string };
-  flightQuotes?: { cheapestDirect?: { rawPrice?: number }; cheapestWithStops?: { rawPrice?: number } };
-  content?: {
-    location?: { skyCode?: string; name?: string; image?: string };
-    flightQuotes?: {
-      cheapest?: { price?: number | string; rawPrice?: number };
-      direct?: { price?: number | string; rawPrice?: number };
+type AirportSearchResponse = {
+  status?: boolean;
+  data?: Array<{
+    presentation?: { title?: string };
+    navigation?: {
+      relevantFlightParams?: {
+        skyId?: string;
+        entityId?: string;
+      };
     };
-    image?: { url?: string };
-  };
-  skyId?: string;
-  destination?: { skyId?: string; iata?: string; name?: string };
-  departureDate?: string;
-  returnDate?: string;
-  outboundDate?: string;
-  inboundDate?: string;
-  imageUrl?: string;
-  image?: string;
+  }>;
 };
 
-function extractPrice(row: SkyEverywhereRow): number | null {
-  const candidates = [
-    typeof row.price === "number" ? row.price : row.price?.raw,
-    row.flightQuotes?.cheapestDirect?.rawPrice,
-    row.flightQuotes?.cheapestWithStops?.rawPrice,
-    row.content?.flightQuotes?.cheapest?.rawPrice,
-    typeof row.content?.flightQuotes?.cheapest?.price === "number"
-      ? row.content.flightQuotes.cheapest.price
-      : Number(row.content?.flightQuotes?.cheapest?.price),
-  ];
+async function resolvePlace(query: string): Promise<{ skyId: string; entityId: string } | null> {
+  const cache = placeCache();
+  const cached = cache.get(query);
+  if (cached) return cached;
 
-  for (const value of candidates) {
-    const n = Number(value);
-    if (Number.isFinite(n) && n > 0) return n;
-  }
-  return null;
-}
-
-function extractDestination(row: SkyEverywhereRow): string {
-  return String(
-    row.content?.location?.skyCode ??
-      row.destination?.iata ??
-      row.destination?.skyId ??
-      row.skyId ??
-      "",
-  )
-    .trim()
-    .toUpperCase()
-    .replace(/A$/, "") // sometimes city codes like ATHA — keep first 3 if length 4?
-    .slice(0, 3);
-}
-
-function extractDates(row: SkyEverywhereRow): { departureDate: string; returnDate: string } {
-  const departureDate = isoDateOnly(
-    row.departureDate ?? row.outboundDate ?? undefined,
+  const payload = await rapidGet<AirportSearchResponse>(
+    "/api/v1/flights/searchAirport",
+    { query, locale: "en-US" },
   );
-  const returnDate = isoDateOnly(row.returnDate ?? row.inboundDate ?? undefined);
-  return { departureDate, returnDate };
+
+  const row = payload.data?.[0];
+  const params = row?.navigation?.relevantFlightParams;
+  if (!params?.skyId || !params?.entityId) return null;
+
+  const place = { skyId: params.skyId, entityId: params.entityId };
+  cache.set(query, place);
+  return place;
 }
 
-function extractImage(row: SkyEverywhereRow): string | null {
-  return (
-    row.content?.location?.image ??
-    row.content?.image?.url ??
-    row.imageUrl ??
-    row.image ??
-    null
-  );
-}
+type SearchFlightsResponse = {
+  status?: boolean;
+  data?: {
+    itineraries?: Array<{
+      price?: { raw?: number };
+      legs?: Array<{
+        origin?: { id?: string; displayCode?: string };
+        destination?: { id?: string; displayCode?: string };
+        departure?: string;
+        arrival?: string;
+      }>;
+    }>;
+  };
+  message?: unknown;
+};
 
-function normalizeEverywherePayload(payload: unknown): SkyEverywhereRow[] {
-  const root = payload as Record<string, unknown>;
-  const data = (root.data ?? root) as Record<string, unknown>;
-
-  const buckets = [
-    data.everywhereDestination,
-    data.destinations,
-    data.results,
-    data.Quotes,
-    data.quotes,
-    Array.isArray(data) ? data : null,
-  ];
-
-  for (const bucket of buckets) {
-    if (Array.isArray(bucket) && bucket.length) {
-      return bucket as SkyEverywhereRow[];
-    }
-    if (bucket && typeof bucket === "object") {
-      const nested = bucket as Record<string, unknown>;
-      if (Array.isArray(nested.results)) return nested.results as SkyEverywhereRow[];
-      if (Array.isArray(nested.destinations)) {
-        return nested.destinations as SkyEverywhereRow[];
-      }
-    }
+function nextDestinationBatch(size: number): string[] {
+  const all = SKYSCANNER_DESTINATION_QUERIES;
+  const start = globalThis.__skyscannerRotateIndex ?? 0;
+  const batch: string[] = [];
+  for (let i = 0; i < Math.min(size, all.length); i += 1) {
+    batch.push(all[(start + i) % all.length]!);
   }
+  globalThis.__skyscannerRotateIndex = (start + size) % all.length;
+  return batch;
+}
 
-  return [];
+function defaultTripDates(): { departureDate: string; returnDate: string } {
+  const depart = new Date(Date.now() + 21 * 86_400_000);
+  const ret = new Date(depart.getTime() + 7 * 86_400_000);
+  return {
+    departureDate: depart.toISOString().slice(0, 10),
+    returnDate: ret.toISOString().slice(0, 10),
+  };
 }
 
 export async function searchViaSkyscanner(): Promise<FlightDeal[]> {
@@ -201,60 +165,72 @@ export async function searchViaSkyscanner(): Promise<FlightDeal[]> {
     throw new Error("SKYSCANNER_RAPIDAPI_KEY / RAPIDAPI_KEY is not set");
   }
 
-  const place = await resolveTlvPlace();
-  const params = new URLSearchParams({
-    originSkyId: place.skyId,
-    originEntityId: place.entityId,
-    cabinClass: "economy",
-    journeyType: "round_trip",
-    currency: "USD",
-    countryCode: "IL",
-    market: "he-IL",
-  });
+  const origin = await resolvePlace("Tel Aviv");
+  if (!origin) throw new Error("Skyscanner could not resolve TLV");
 
-  const response = await fetch(
-    `https://${RAPIDAPI_HOST}/api/v2/flights/searchFlightEverywhere?${params}`,
-    { headers: headers(), cache: "no-store" },
-  );
-
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(`Skyscanner everywhere HTTP ${response.status}: ${text}`);
-  }
-
-  const payload = await response.json();
-  const rows = normalizeEverywherePayload(payload);
+  const batchSize = Number(process.env.SKYSCANNER_DEST_BATCH ?? "4");
+  const destinations = nextDestinationBatch(batchSize);
+  const { departureDate, returnDate } = defaultTripDates();
   const foundAt = new Date().toISOString();
   const deals: FlightDeal[] = [];
 
-  for (const row of rows) {
-    const destination = extractDestination(row);
-    const priceUsd = extractPrice(row);
-    let { departureDate, returnDate } = extractDates(row);
+  for (const query of destinations) {
+    try {
+      const dest = await resolvePlace(query);
+      if (!dest) continue;
 
-    // Everywhere results sometimes omit exact dates — use a flexible placeholder window
-    if (!departureDate || !returnDate) {
-      const depart = new Date(Date.now() + 21 * 86_400_000);
-      const ret = new Date(depart.getTime() + 7 * 86_400_000);
-      departureDate = departureDate || depart.toISOString().slice(0, 10);
-      returnDate = returnDate || ret.toISOString().slice(0, 10);
+      const payload = await rapidGet<SearchFlightsResponse>(
+        "/api/v1/flights/searchFlights",
+        {
+          originSkyId: origin.skyId,
+          destinationSkyId: dest.skyId,
+          originEntityId: origin.entityId,
+          destinationEntityId: dest.entityId,
+          date: departureDate,
+          returnDate,
+          adults: "1",
+          currency: "USD",
+          market: "en-US",
+          countryCode: "IL",
+        },
+      );
+
+      const itineraries = payload.data?.itineraries ?? [];
+      for (const item of itineraries.slice(0, 3)) {
+        const priceUsd = Number(item.price?.raw);
+        if (!Number.isFinite(priceUsd) || priceUsd > FLIGHT_DEALS_MAX_PRICE_USD) {
+          continue;
+        }
+
+        const outLeg = item.legs?.[0];
+        const retLeg = item.legs?.[1];
+        const outDate = outLeg?.departure?.slice(0, 10) || departureDate;
+        const inDate = retLeg?.departure?.slice(0, 10) || returnDate;
+        const destCode = String(
+          outLeg?.destination?.displayCode ??
+            outLeg?.destination?.id ??
+            dest.skyId,
+        )
+          .trim()
+          .toUpperCase()
+          .slice(0, 3);
+
+        deals.push({
+          id: buildDealId(FLIGHT_DEALS_ORIGIN, destCode, outDate, inDate, priceUsd),
+          origin: FLIGHT_DEALS_ORIGIN,
+          destination: destCode,
+          departureDate: outDate,
+          returnDate: inDate,
+          priceUsd,
+          currency: "USD",
+          bookingUrl: skyscannerBookingUrl(destCode, outDate, inDate),
+          imageUrl: null,
+          foundAt,
+        });
+      }
+    } catch (error) {
+      console.warn(`[skyscanner] ${query} failed:`, error);
     }
-
-    if (!destination || !priceUsd || !Number.isFinite(priceUsd)) continue;
-    if (priceUsd > FLIGHT_DEALS_MAX_PRICE_USD) continue;
-
-    deals.push({
-      id: buildDealId(FLIGHT_DEALS_ORIGIN, destination, departureDate, returnDate, priceUsd),
-      origin: FLIGHT_DEALS_ORIGIN,
-      destination,
-      departureDate,
-      returnDate,
-      priceUsd,
-      currency: "USD",
-      bookingUrl: skyscannerBookingUrl(destination, departureDate, returnDate),
-      imageUrl: extractImage(row),
-      foundAt,
-    });
   }
 
   return deals.sort((a, b) => a.priceUsd - b.priceUsd);
