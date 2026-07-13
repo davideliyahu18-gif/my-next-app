@@ -7,6 +7,7 @@ export type FlightDeal = {
   priceUsd: number;
   currency: string;
   bookingUrl: string | null;
+  imageUrl: string | null;
   foundAt: string;
 };
 

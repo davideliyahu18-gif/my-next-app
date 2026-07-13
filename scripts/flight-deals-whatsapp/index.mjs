@@ -124,6 +124,31 @@ function formatDealMessage(deal) {
     .join("\n");
 }
 
+async function sendToGroup(content) {
+  if (!sock || !groupJid) return false;
+
+  if (typeof content === "string") {
+    await sock.sendMessage(groupJid, { text: content });
+    return true;
+  }
+
+  const caption = formatDealMessage(content);
+  if (content.imageUrl) {
+    try {
+      await sock.sendMessage(groupJid, {
+        image: { url: content.imageUrl },
+        caption,
+      });
+      return true;
+    } catch (error) {
+      log.warn({ error }, "Image send failed — falling back to text");
+    }
+  }
+
+  await sock.sendMessage(groupJid, { text: caption });
+  return true;
+}
+
 async function loadJson(file, fallback) {
   if (!existsSync(file)) return fallback;
   try {
@@ -153,12 +178,6 @@ async function saveState() {
     STATE_FILE,
     JSON.stringify({ groupJid, welcomeSent, groupName: cfg.groupName }, null, 2),
   );
-}
-
-async function sendToGroup(text) {
-  if (!sock || !groupJid) return false;
-  await sock.sendMessage(groupJid, { text });
-  return true;
 }
 
 function normalizeHebrewCommand(text) {
@@ -295,7 +314,7 @@ async function runScan() {
     for (const deal of deals) {
       if (seenDeals.has(deal.id)) continue;
       seenDeals.add(deal.id);
-      const ok = await sendToGroup(formatDealMessage(deal));
+      const ok = await sendToGroup(deal);
       if (ok) {
         sent += 1;
         log.info({ deal: deal.id }, "Sent deal to group");

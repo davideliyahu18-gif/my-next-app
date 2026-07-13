@@ -30,11 +30,12 @@ function demoDeals() {
       destination: "ATH",
       departureDate: fmt(depart),
       returnDate: fmt(ret),
-      priceUsd: 49.9,
-      bookingUrl: null,
-    },
-  ];
-}
+        priceUsd: 49.9,
+        bookingUrl: null,
+        imageUrl: null,
+      },
+    ];
+  }
 
 async function searchTravelpayouts() {
   const token = process.env.TRAVELPAYOUTS_TOKEN;
@@ -62,6 +63,7 @@ async function searchTravelpayouts() {
       returnDate,
       priceUsd,
       bookingUrl: `https://www.aviasales.com/search/${ORIGIN}${departureDate}${destination}${returnDate}1`,
+      imageUrl: null,
     });
   }
   return deals.sort((a, b) => a.priceUsd - b.priceUsd);
@@ -99,6 +101,7 @@ async function searchSerpApi() {
       returnDate,
       priceUsd,
       bookingUrl: row.link ?? null,
+      imageUrl: row.thumbnail ?? null,
     });
   }
   return deals.sort((a, b) => a.priceUsd - b.priceUsd);
@@ -144,6 +147,7 @@ async function searchAmadeus() {
       returnDate: row.returnDate,
       priceUsd,
       bookingUrl: row.links?.flightOffers ?? null,
+      imageUrl: null,
     });
   }
   return deals.sort((a, b) => a.priceUsd - b.priceUsd);

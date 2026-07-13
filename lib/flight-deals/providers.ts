@@ -34,6 +34,7 @@ export function demoDeals(): FlightDeal[] {
       priceUsd: 49.9,
       currency: "USD",
       bookingUrl: null,
+      imageUrl: null,
       foundAt,
     },
   ];
@@ -103,6 +104,7 @@ export async function searchViaTravelpayouts(): Promise<FlightDeal[]> {
       priceUsd,
       currency: "USD",
       bookingUrl: `https://www.aviasales.com/search/${FLIGHT_DEALS_ORIGIN}${departureDate}${destination}${returnDate}1`,
+      imageUrl: null,
       foundAt,
     });
   }
@@ -117,6 +119,7 @@ type SerpExploreDestination = {
   end_date?: string;
   flight_price?: number;
   link?: string;
+  thumbnail?: string;
 };
 
 type SerpExploreDestinationExtended = SerpExploreDestination & {
@@ -182,6 +185,7 @@ export async function searchViaSerpApi(): Promise<FlightDeal[]> {
       priceUsd,
       currency: "USD",
       bookingUrl: row.link ?? null,
+      imageUrl: row.thumbnail ?? null,
       foundAt,
     });
   }

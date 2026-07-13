@@ -8,8 +8,24 @@ const GREEN_API_INSTANCE = process.env.GREEN_API_INSTANCE ?? "";
 const GREEN_API_TOKEN = process.env.GREEN_API_TOKEN ?? "";
 const WHATSAPP_GROUP_CHAT_ID = process.env.WHATSAPP_GROUP_CHAT_ID ?? "";
 
-async function sendTelegram(text: string): Promise<boolean> {
+async function sendTelegram(deal: FlightDeal, text: string): Promise<boolean> {
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return false;
+
+  if (deal.imageUrl) {
+    const photoRes = await fetch(
+      `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: TELEGRAM_CHAT_ID,
+          photo: deal.imageUrl,
+          caption: text.slice(0, 1024),
+        }),
+      },
+    );
+    if (photoRes.ok) return true;
+  }
 
   const response = await fetch(
     `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
@@ -33,9 +49,26 @@ async function sendTelegram(text: string): Promise<boolean> {
   return true;
 }
 
-async function sendGreenApiWhatsApp(text: string): Promise<boolean> {
+async function sendGreenApiWhatsApp(deal: FlightDeal, text: string): Promise<boolean> {
   if (!GREEN_API_INSTANCE || !GREEN_API_TOKEN || !WHATSAPP_GROUP_CHAT_ID) {
     return false;
+  }
+
+  if (deal.imageUrl) {
+    const fileRes = await fetch(
+      `https://api.green-api.com/waInstance${GREEN_API_INSTANCE}/sendFileByUrl/${GREEN_API_TOKEN}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chatId: WHATSAPP_GROUP_CHAT_ID,
+          urlFile: deal.imageUrl,
+          fileName: `${deal.destination}.jpg`,
+          caption: text,
+        }),
+      },
+    );
+    if (fileRes.ok) return true;
   }
 
   const response = await fetch(
@@ -94,8 +127,8 @@ export function isNotificationConfigured(): boolean {
 export async function notifyDeal(deal: FlightDeal): Promise<boolean> {
   const text = formatDealMessage(deal);
 
-  const sentTelegram = await sendTelegram(text);
-  const sentWhatsApp = await sendGreenApiWhatsApp(text);
+  const sentTelegram = await sendTelegram(deal, text);
+  const sentWhatsApp = await sendGreenApiWhatsApp(deal, text);
 
   if (sentTelegram || sentWhatsApp) {
     await mirrorToWebsiteFeed(text, deal.id);
