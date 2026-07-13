@@ -5,6 +5,7 @@ import SectionHeader from "./SectionHeader";
 
 export default async function TopScorers() {
   const topScorers = await getTopScorers();
+  const leadGoals = Math.max(topScorers[0]?.goals ?? 1, 1);
 
   return (
     <section id="scorers" className="py-4">
@@ -65,7 +66,9 @@ export default async function TopScorers() {
                   <div className="h-2 w-24 overflow-hidden rounded-full bg-zinc-800">
                     <div
                       className="h-full rounded-full bg-gradient-to-l from-amber-400 to-amber-600 transition-all duration-500 group-hover:w-full"
-                      style={{ width: `${(scorer.goals / 5) * 100}%` }}
+                      style={{
+                        width: `${Math.min(100, (scorer.goals / leadGoals) * 100)}%`,
+                      }}
                     />
                   </div>
                 </div>

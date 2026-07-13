@@ -41,6 +41,7 @@ export default function CompactScorersPanel({ scorers }: { scorers: ScorerView[]
                     <p className="truncate text-sm font-semibold text-white">{scorer.name}</p>
                     <p className="text-[11px] text-zinc-500">
                       {scorer.flag} {scorer.team}
+                      {scorer.assists > 0 ? ` · ${scorer.assists} בישולים` : ""}
                     </p>
                   </div>
                   <span className="text-lg font-black tabular-nums text-gold">

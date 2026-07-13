@@ -5,14 +5,20 @@ const FIFA_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 const GOAL_EVENT_TYPES = new Set([0, 34, 39, 41]);
+const OWN_GOAL_EVENT_TYPE = 34;
+const ASSIST_EVENT_TYPE = 1;
 const PERIOD_IN_PLAY = new Set([3, 5, 7, 9]);
 const PERIOD_FINISHED = new Set([10, 11]);
 const UNKNOWN_SCORER = "Unknown scorer";
 
+/** Splits FIFA event text before the scoring verb / penalty conversion. */
 const SCORER_DESCRIPTION_SPLIT =
-  /\s+scores?(?:!!|!| an own goal\.?| from the penalty(?: spot)?!!?)/i;
+  /\s+(?:scores?(?:!!|!| an own goal\.?| from the penalty(?: spot)?!!?)|successfully converts the penalty!)/i;
 const PLACEHOLDER_SCORER =
   /^(?:assisted by\b|unknown\b|.+?\sscore!?)$/i;
+const OWN_GOAL_DESCRIPTION = /\bown goal\b/i;
+const ASSIST_DESCRIPTION = /^Assisted by\s+(.+?)\.?$/i;
+const TIMELINE_FETCH_CONCURRENCY = 12;
 
 export class FifaApiError extends Error {
   constructor(message: string) {
@@ -25,6 +31,14 @@ export interface FifaGoal {
   eventId: string;
   minute: string;
   scorer: string;
+  teamName: string;
+  teamId: string;
+  ownGoal: boolean;
+}
+
+export interface FifaAssist {
+  eventId: string;
+  player: string;
   teamName: string;
   teamId: string;
 }
@@ -43,6 +57,7 @@ export interface FifaMatch {
   homeScore: number | null;
   awayScore: number | null;
   goals: FifaGoal[];
+  assists: FifaAssist[];
   stage: string | null;
   group: string | null;
   period: number | null;
@@ -50,6 +65,17 @@ export interface FifaMatch {
   idCompetition: string;
   idSeason: string;
   idStage: string;
+}
+
+/** Lightweight scoring payload for golden-boot aggregation (timeline only). */
+export interface FifaMatchScoring {
+  id: string;
+  homeTeam: string;
+  awayTeam: string;
+  homeTeamCode: string;
+  awayTeamCode: string;
+  goals: FifaGoal[];
+  assists: FifaAssist[];
 }
 
 type LocalizedItem = { Locale?: string; Description?: string };
@@ -212,6 +238,18 @@ function parseScorer(description: string): string {
   return cleaned.replace(/\s*\([^)]+\)\s*$/, "").trim();
 }
 
+function parseAssistPlayer(description: string): string {
+  const match = description.trim().match(ASSIST_DESCRIPTION);
+  return match?.[1]?.trim() ?? "";
+}
+
+export function isOwnGoalEvent(
+  eventType: number,
+  description: string,
+): boolean {
+  return eventType === OWN_GOAL_EVENT_TYPE || OWN_GOAL_DESCRIPTION.test(description);
+}
+
 export function isPlaceholderScorer(scorer: string): boolean {
   const cleaned = scorer.trim();
   if (!cleaned || cleaned === UNKNOWN_SCORER) return true;
@@ -265,22 +303,40 @@ function teamSide(
   return "";
 }
 
-async function parseGoalsFromTimeline(
+async function parseScoringFromTimeline(
   timeline: Record<string, unknown>,
   homeTeamId: string,
   awayTeamId: string,
   homeTeam: string,
   awayTeam: string,
-): Promise<FifaGoal[]> {
+): Promise<{ goals: FifaGoal[]; assists: FifaAssist[] }> {
   const events = (timeline.Event as Record<string, unknown>[] | undefined) ?? [];
   const goals: FifaGoal[] = [];
+  const assists: FifaAssist[] = [];
 
   for (const event of events) {
-    if (!GOAL_EVENT_TYPES.has(Number(event.Type))) continue;
+    const eventType = Number(event.Type);
     const teamId = String(event.IdTeam ?? "");
     const side = teamSide(teamId, homeTeamId, awayTeamId);
     const teamName =
       side === "home" ? homeTeam : side === "away" ? awayTeam : "";
+    const description = localizedName(
+      event.EventDescription as LocalizedItem[] | undefined,
+    );
+
+    if (eventType === ASSIST_EVENT_TYPE) {
+      const player = parseAssistPlayer(description);
+      if (!player || isPlaceholderScorer(player)) continue;
+      assists.push({
+        eventId: String(event.EventId ?? ""),
+        player,
+        teamName,
+        teamId,
+      });
+      continue;
+    }
+
+    if (!GOAL_EVENT_TYPES.has(eventType)) continue;
 
     goals.push({
       eventId: String(event.EventId ?? ""),
@@ -288,10 +344,11 @@ async function parseGoalsFromTimeline(
       scorer: await scorerFromTimelineEvent(event),
       teamName,
       teamId,
+      ownGoal: isOwnGoalEvent(eventType, description),
     });
   }
 
-  return goals;
+  return { goals, assists };
 }
 
 export function calendarTeamLabels(side: Record<string, unknown>): {
@@ -394,7 +451,7 @@ async function buildMatch(
     }
   }
 
-  const goals = await parseGoalsFromTimeline(
+  const { goals, assists } = await parseScoringFromTimeline(
     timelineData,
     homeTeamId,
     awayTeamId,
@@ -426,6 +483,7 @@ async function buildMatch(
     homeScore,
     awayScore,
     goals,
+    assists,
     stage:
       localizedName(calendarRow.StageName as LocalizedItem[] | undefined) ||
       null,
@@ -488,6 +546,7 @@ export function calendarRowToMatch(calendarRow: CalendarRow): FifaMatch {
     homeScore,
     awayScore,
     goals: [],
+    assists: [],
     stage:
       localizedName(calendarRow.StageName as LocalizedItem[] | undefined) ||
       null,
@@ -556,6 +615,78 @@ export async function getMatchesByIds(
 
   matches.sort((a, b) => a.utcDate.getTime() - b.utcDate.getTime());
   return matches;
+}
+
+async function mapPool<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T) => Promise<R>,
+): Promise<PromiseSettledResult<R>[]> {
+  const results: PromiseSettledResult<R>[] = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const current = nextIndex;
+      nextIndex += 1;
+      try {
+        results[current] = {
+          status: "fulfilled",
+          value: await mapper(items[current]),
+        };
+      } catch (reason) {
+        results[current] = { status: "rejected", reason };
+      }
+    }
+  }
+
+  const workers = Array.from(
+    { length: Math.min(concurrency, Math.max(items.length, 1)) },
+    () => worker(),
+  );
+  await Promise.all(workers);
+  return results;
+}
+
+/**
+ * Timeline-only scoring for golden-boot tallies — skips live match payloads.
+ */
+export async function getMatchScoringFromCalendarRows(
+  rows: Record<string, unknown>[],
+  fresh = false,
+): Promise<FifaMatchScoring[]> {
+  if (!rows.length) return [];
+
+  const results = await mapPool(rows, TIMELINE_FETCH_CONCURRENCY, async (row) => {
+    const home = (row.Home as Record<string, unknown> | undefined) ?? {};
+    const away = (row.Away as Record<string, unknown> | undefined) ?? {};
+    const homeLabels = calendarTeamLabels(home);
+    const awayLabels = calendarTeamLabels(away);
+    const timelineData = await getTimeline(String(row.IdMatch), fresh);
+    const { goals, assists } = await parseScoringFromTimeline(
+      timelineData,
+      String(home.IdTeam ?? ""),
+      String(away.IdTeam ?? ""),
+      homeLabels.name,
+      awayLabels.name,
+    );
+
+    return {
+      id: String(row.IdMatch),
+      homeTeam: homeLabels.name,
+      awayTeam: awayLabels.name,
+      homeTeamCode: homeLabels.code,
+      awayTeamCode: awayLabels.code,
+      goals,
+      assists,
+    } satisfies FifaMatchScoring;
+  });
+
+  const scoring: FifaMatchScoring[] = [];
+  for (const result of results) {
+    if (result.status === "fulfilled") scoring.push(result.value);
+  }
+  return scoring;
 }
 
 export function latestMatchMinuteLabel(match: FifaMatch): string {
