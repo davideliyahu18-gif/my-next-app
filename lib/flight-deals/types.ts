@@ -13,11 +13,12 @@ export type FlightDeal = {
 export type FlightDealSearchResult = {
   deals: FlightDeal[];
   searchedAt: string;
-  source: "amadeus";
+  source: "travelpayouts" | "serpapi" | "amadeus" | "demo";
 };
 
 export type FlightDealScanSummary = {
   searchedAt: string;
+  provider: FlightDealSearchResult["source"];
   totalFound: number;
   newDeals: FlightDeal[];
   notified: number;

@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import cron from "node-cron";
 import pino from "pino";
 import qrcode from "qrcode-terminal";
+import { resolveProvider, searchDeals as fetchDeals } from "./providers.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "../..");
@@ -80,7 +81,6 @@ const AIRPORT_LABELS = {
 };
 
 let sock = null;
-let tokenCache = null;
 let seenDeals = new Set();
 let scanRunning = false;
 let groupJid = "";
@@ -142,92 +142,6 @@ async function saveState() {
     STATE_FILE,
     JSON.stringify({ groupJid, welcomeSent, groupName: cfg.groupName }, null, 2),
   );
-}
-
-async function getAmadeusToken() {
-  if (tokenCache && tokenCache.expiresAt > Date.now() + 60_000) {
-    return tokenCache.token;
-  }
-
-  const body = new URLSearchParams({
-    grant_type: "client_credentials",
-    client_id: cfg.amadeusId,
-    client_secret: cfg.amadeusSecret,
-  });
-
-  const res = await fetch(`${cfg.amadeusBase}/v1/security/oauth2/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-  });
-
-  if (!res.ok) throw new Error(`Amadeus auth HTTP ${res.status}`);
-  const data = await res.json();
-  tokenCache = {
-    token: data.access_token,
-    expiresAt: Date.now() + (data.expires_in ?? 1800) * 1000,
-  };
-  return tokenCache.token;
-}
-
-async function searchDeals() {
-  if (cfg.demoMode) {
-    const today = new Date();
-    const depart = new Date(today.getTime() + 14 * 86_400_000);
-    const ret = new Date(depart.getTime() + 5 * 86_400_000);
-    const fmt = (d) => d.toISOString().slice(0, 10);
-    return [
-      {
-        id: `demo-${fmt(depart)}`,
-        origin: "TLV",
-        destination: "ATH",
-        departureDate: fmt(depart),
-        returnDate: fmt(ret),
-        priceUsd: 49.9,
-        bookingUrl: null,
-      },
-    ];
-  }
-
-  const token = await getAmadeusToken();
-  const params = new URLSearchParams({
-    origin: cfg.origin,
-    maxPrice: String(cfg.maxPrice),
-    currency: cfg.currency,
-    oneWay: "false",
-  });
-
-  const res = await fetch(
-    `${cfg.amadeusBase}/v1/shopping/flight-destinations?${params}`,
-    { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } },
-  );
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Amadeus search HTTP ${res.status}: ${text}`);
-  }
-
-  const payload = await res.json();
-  const deals = [];
-
-  for (const row of payload.data ?? []) {
-    const priceUsd = Number(row.price?.total);
-    if (!row.destination || !row.departureDate || !row.returnDate) continue;
-    if (!Number.isFinite(priceUsd) || priceUsd > cfg.maxPrice) continue;
-
-    const id = `${row.origin}-${row.destination}-${row.departureDate}-${row.returnDate}-${priceUsd.toFixed(2)}`;
-    deals.push({
-      id,
-      origin: row.origin ?? cfg.origin,
-      destination: row.destination,
-      departureDate: row.departureDate,
-      returnDate: row.returnDate,
-      priceUsd,
-      bookingUrl: row.links?.flightOffers ?? null,
-    });
-  }
-
-  return deals.sort((a, b) => a.priceUsd - b.priceUsd);
 }
 
 async function sendToGroup(text) {
@@ -306,8 +220,8 @@ async function runScan() {
     return;
   }
 
-  if (!cfg.demoMode && (!cfg.amadeusId || !cfg.amadeusSecret)) {
-    log.warn("Amadeus keys missing — set AMADEUS_CLIENT_ID/SECRET or FLIGHT_DEALS_DEMO=true");
+  if (!resolveProvider()) {
+    log.warn("No flight provider configured");
     return;
   }
 
@@ -315,7 +229,7 @@ async function runScan() {
 
   try {
     log.info("Scanning for TLV deals ≤ $%d", cfg.maxPrice);
-    const deals = await searchDeals();
+    const deals = await fetchDeals();
     log.info("Found %d deals at or below max price", deals.length);
 
     let sent = 0;
@@ -393,9 +307,11 @@ async function main() {
     process.exit(1);
   }
 
-  if (!cfg.demoMode && (!cfg.amadeusId || !cfg.amadeusSecret)) {
-    console.error("❌ חסרים מפתחות Amadeus — הדבק ב-.env.local");
-    console.error("   או הפעל מצב בדיקה: FLIGHT_DEALS_DEMO=true");
+  if (!resolveProvider()) {
+    console.error("❌ חסר מקור מחירים. בחר אחד:");
+    console.error("   TRAVELPAYOUTS_TOKEN=...  (הכי קל — travelpayouts.com)");
+    console.error("   SERPAPI_API_KEY=...       (serpapi.com — עם Google)");
+    console.error("   FLIGHT_DEALS_DEMO=true    (בדיקה בלי הרשמה)");
     process.exit(1);
   }
 

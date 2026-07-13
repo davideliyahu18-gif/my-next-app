@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { amadeusConfigured } from "@/lib/flight-deals/amadeus";
 import { FLIGHT_DEALS_MAX_PRICE_USD, FLIGHT_DEALS_ORIGIN } from "@/lib/flight-deals/constants";
 import { isNotificationConfigured } from "@/lib/flight-deals/notify";
+import { resolveFlightProvider } from "@/lib/flight-deals/providers";
 import { listRecentDeals } from "@/lib/flight-deals/store";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +15,7 @@ export async function GET() {
     ok: true,
     origin: FLIGHT_DEALS_ORIGIN,
     maxPriceUsd: FLIGHT_DEALS_MAX_PRICE_USD,
+    provider: resolveFlightProvider(),
     amadeusConfigured: amadeusConfigured(),
     notificationConfigured: isNotificationConfigured(),
     deals,

@@ -1,70 +1,58 @@
 # בוט דילי טיסות — מדריך מהיר
 
-## מה אני עושה / מה אתה עושה
+## Amadeus לא עובד? יש חלופות קלות יותר
 
-| מי | מה |
-|----|-----|
-| **הבוט (אוטומטי)** | סורק כל 30 דקות, שולח דילים, מונע כפילויות |
-| **אתה — פעם אחת** | מפתחות Amadeus (2 דקות) + סריקת QR |
-| **אתה — כשאגיד** | פתיחת קבוצת WhatsApp + שליחת השם |
+| אופציה | קושי | הרשמה |
+|--------|------|--------|
+| **Travelpayouts** ⭐ | הכי קל | [travelpayouts.com](https://www.travelpayouts.com/) → Developers → API Token |
+| **SerpAPI** | קל | [serpapi.com](https://serpapi.com/users/sign_up) — עם חשבון Google |
+| **Demo** | אפס | `FLIGHT_DEALS_DEMO=true` ב-`.env.local` — בלי הרשמה |
+| Amadeus | קשה | רק אם הצלחת להירשם |
 
 ---
 
-## שלב 1 — Amadeus (2 דקות, חינם)
+## Travelpayouts — 3 דקות (מומלץ)
 
-1. היכנס ל-[developers.amadeus.com](https://developers.amadeus.com/register)
-2. צור אפליקציה → העתק **API Key** ו-**API Secret**
+1. היכנס ל-[travelpayouts.com](https://www.travelpayouts.com/)
+2. הירשם (אימייל + סיסמה, בעברית)
+3. לך ל-**Developers → API** או [קישור ישיר](https://www.travelpayouts.com/developers/api)
+4. העתק את ה-**Token**
+5. הדבק ב-`.env.local`:
+   ```
+   TRAVELPAYOUTS_TOKEN=הטוקן_שלך
+   ```
+
+---
+
+## SerpAPI — עם Google
+
+1. [serpapi.com/users/sign_up](https://serpapi.com/users/sign_up) → **Sign up with Google**
+2. העתק API Key מהדשבורד
 3. הדבק ב-`.env.local`:
    ```
-   AMADEUS_CLIENT_ID=המפתח
-   AMADEUS_CLIENT_SECRET=הסוד
+   SERPAPI_API_KEY=המפתח_שלך
    ```
 
-> **בדיקה בלי Amadeus:** הוסף `FLIGHT_DEALS_DEMO=true` ל-`.env.local`
+> 250 חיפושים חינם בחודש — מספיק לבדיקות. לסריקה כל 30 דקות עדיף Travelpayouts.
 
 ---
 
-## שלב 2 — הפעלת הבוט
+## הפעלה
 
 ```bash
-npm run flight-deals:setup   # פעם אחת — יוצר סודות
+npm run flight-deals:setup
 npm run flight-deals:start
 ```
 
-סרוק את ה-QR: **WhatsApp → הגדרות → מכשירים מקושרים → קשר מכשיר**
+סרוק QR → כשאגיד לך, פתח קבוצה ותגיד את השם.
 
 ---
 
-## שלב 3 — פתיחת הקבוצה (רק כשאגיד לך)
+## בדיקה מיידית (בלי שום הרשמה)
 
-כשהבוט מחובר, אגיד לך **"עכשיו פתח קבוצה"**.
-
-1. פתח קבוצה חדשה ב-WhatsApp
-2. תן לה **בדיוק** את השם שתגיד לי
-3. הוסף למקבץ את המספר שקישרת ב-QR
-4. הבוט יזהה את הקבוצה לבד לפי השם וישלח הודעת אישור
-
-השם נכנס ב-`.env.local`:
+הוסף ל-`.env.local`:
 ```
-WHATSAPP_GROUP_NAME=השם שבחרת
+FLIGHT_DEALS_DEMO=true
 ```
 
----
-
-## דוגמת הודעה בקבוצה
-
-```
-🛫 דיל טיסה עד $50!
-
-✈️ מסלול: תל אביב (TLV) ↔ אתונה (ATH)
-📅 יציאה: 15/08/2026
-📅 חזרה: 22/08/2026
-💰 מחיר: $48.50 (הלוך-חזור)
-```
-
----
-
-## פרודקשן 24/7 (Vercel)
-
-אם האתר על Vercel + Redis + Green API — הבוט רץ בענן בלי מחשב דלוק.
-ראה `.env.example` לפרטים.
+ישלח דיל דמו אחד לקבוצה לבדיקה.
