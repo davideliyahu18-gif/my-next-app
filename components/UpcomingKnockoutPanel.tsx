@@ -2,29 +2,13 @@
 
 import { useState } from "react";
 import type { ScheduleMatchView } from "@/lib/types";
+import {
+  filterKnockoutUpcoming,
+  teamDisplayName,
+} from "@/lib/knockout-stages";
 import DashboardCard from "./DashboardCard";
 import HighlightButton from "./HighlightButton";
 import { buildInternalHighlightPath } from "@/lib/fifa-match-centre";
-
-const SEMI_KEYS = ["semi-final", "semi final", "semifinal"];
-const FINAL_KEYS = ["final"];
-
-function normalizeStage(stage: string): string {
-  return stage.trim().toLowerCase();
-}
-
-function isSemiFinal(stage: string): boolean {
-  const key = normalizeStage(stage);
-  return SEMI_KEYS.some((token) => key === token || key.includes("semi-final") || key.includes("semi final"));
-}
-
-function isFinal(stage: string): boolean {
-  const key = normalizeStage(stage);
-  if (key.includes("third") || key.includes("play-off") || key.includes("playoff")) {
-    return false;
-  }
-  return FINAL_KEYS.some((token) => key === token);
-}
 
 function statusBadge(status: ScheduleMatchView["status"]) {
   if (status === "live") {
@@ -55,11 +39,6 @@ function scoreLabel(match: ScheduleMatchView): string {
   return "VS";
 }
 
-function teamLabel(name: string, flag: string): string {
-  if (!name?.trim()) return "ייקבע";
-  return `${flag} ${name}`.trim();
-}
-
 function KnockoutMatchCard({ match }: { match: ScheduleMatchView }) {
   const highlightUrl =
     match.status === "upcoming" ? null : buildInternalHighlightPath(match.id);
@@ -75,11 +54,11 @@ function KnockoutMatchCard({ match }: { match: ScheduleMatchView }) {
 
       <div className="mt-3 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
         <p className="truncate text-sm font-bold text-white">
-          {teamLabel(match.home, match.homeFlag)}
+          {match.homeFlag} {teamDisplayName(match.home)}
         </p>
         <p className="text-lg font-black tabular-nums text-gold">{scoreLabel(match)}</p>
         <p className="truncate text-left text-sm font-bold text-white">
-          {teamLabel(match.away, match.awayFlag)}
+          {teamDisplayName(match.away)} {match.awayFlag}
         </p>
       </div>
 
@@ -117,17 +96,7 @@ export default function UpcomingKnockoutPanel({
   matches: ScheduleMatchView[];
 }) {
   const [open, setOpen] = useState(false);
-
-  const upcomingPool = matches.filter(
-    (match) => match.status === "upcoming" || match.status === "live",
-  );
-  const semiFinals = upcomingPool
-    .filter((match) => isSemiFinal(match.stage))
-    .sort((a, b) => a.kickoffAt.localeCompare(b.kickoffAt));
-  const finals = upcomingPool
-    .filter((match) => isFinal(match.stage))
-    .sort((a, b) => a.kickoffAt.localeCompare(b.kickoffAt));
-
+  const { semiFinals, finals } = filterKnockoutUpcoming(matches);
   const total = semiFinals.length + finals.length;
 
   return (
