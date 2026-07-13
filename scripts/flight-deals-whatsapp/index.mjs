@@ -272,6 +272,7 @@ async function connectWhatsApp() {
   await mkdir(AUTH_DIR, { recursive: true });
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
   const { version } = await fetchLatestBaileysVersion();
+  const phone = (process.env.WHATSAPP_PHONE ?? "").replace(/\D/g, "");
 
   sock = makeWASocket({
     version,
@@ -282,12 +283,35 @@ async function connectWhatsApp() {
 
   sock.ev.on("creds.update", saveCreds);
 
-  sock.ev.on("connection.update", (update) => {
+  let pairingRequested = false;
+
+  sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
-      console.log("\n📱 סרוק QR: WhatsApp → הגדרות → מכשירים מקושרים → קשר מכשיר\n");
+      const qrLink = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(qr)}`;
+      const pairLink = `https://wa.me/`;
+      console.log("\n════════════════════════════════════════");
+      console.log("📱 קישור ל-QR (פתח במחשב / טאב אחר וסרוק מהטלפון):");
+      console.log(qrLink);
+      console.log("════════════════════════════════════════\n");
+      console.log("או בטלפון: WhatsApp → הגדרות → מכשירים מקושרים → קשר מכשיר\n");
       qrcode.generate(qr, { small: true });
+
+      // Pairing code alternative (no QR scan) when phone is set
+      if (phone && !pairingRequested && !sock.authState?.creds?.registered) {
+        pairingRequested = true;
+        try {
+          const code = await sock.requestPairingCode(phone);
+          console.log("\n════════════════════════════════════════");
+          console.log("🔑 קוד חיבור (בלי QR):");
+          console.log(`   WhatsApp → מכשירים מקושרים → קשר מכשיר → קישור עם מספר טלפון`);
+          console.log(`   הזן את הקוד: ${code}`);
+          console.log("════════════════════════════════════════\n");
+        } catch (error) {
+          log.warn({ error }, "Pairing code failed — use QR link above");
+        }
+      }
     }
 
     if (connection === "open") {
