@@ -53,6 +53,27 @@ export const AIRPORT_LABELS: Record<string, string> = {
   TLL: "טאלין",
   CAI: "קהיר",
   AMM: "עמאן",
-  ETH: "אילת",
-  ETM: "אילת (רמון)",
+  RAK: "מרקש",
+  RBA: "רבאט",
+  CMN: "קזבלנקה",
+};
+
+/** IATA → country (Hebrew) for message formatting. */
+export const COUNTRY_LABELS: Record<string, string> = {
+  ATH: "יוון",
+  LCA: "קפריסין",
+  PFO: "קפריסין",
+  BUD: "הונגריה",
+  OTP: "רומניה",
+  SOF: "בולגריה",
+  IST: "טורקיה",
+  AYT: "טורקיה",
+  DXB: "איחוד האמירויות",
+  BCN: "ספרד",
+  FCO: "איטליה",
+  PRG: "צ׳כיה",
+  WAW: "פולין",
+  RAK: "מרוקו",
+  RBA: "מרוקו",
+  CMN: "מרוקו",
 };

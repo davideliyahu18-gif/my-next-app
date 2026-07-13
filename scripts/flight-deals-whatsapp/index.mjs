@@ -77,6 +77,7 @@ const AIRPORT_LABELS = {
   BCN: "ברצלונה",
   FCO: "רומא",
   PRG: "פראג",
+  RAK: "מרקש",
   WAW: "ורשה",
 };
 
@@ -99,14 +100,24 @@ function formatDate(iso) {
   return d && m && y ? `${d}/${m}/${y}` : iso;
 }
 
+const COUNTRY_LABELS = {
+  ATH: "יוון", LCA: "קפריסין", PFO: "קפריסין", BUD: "הונגריה",
+  OTP: "רומניה", SOF: "בולגריה", IST: "טורקיה", AYT: "טורקיה",
+  RAK: "מרוקו", RBA: "מרוקו", CMN: "מרוקו",
+};
+
 function formatDealMessage(deal) {
+  const dest = airportLabel(deal.destination);
+  const country = COUNTRY_LABELS[deal.destination] ?? "";
+  const ils = Math.round(deal.priceUsd * 3.7);
   return [
-    "🛫 *דיל טיסה עד $50!*",
+    "🔥 *מכירה מצוינת!*",
     "",
-    `✈️ מסלול: ${airportLabel(deal.origin)} (${deal.origin}) ↔ ${airportLabel(deal.destination)} (${deal.destination})`,
+    country ? `*${dest}, ${country}*` : `*${dest}*`,
     `📅 יציאה: ${formatDate(deal.departureDate)}`,
     `📅 חזרה: ${formatDate(deal.returnDate)}`,
-    `💰 מחיר: $${deal.priceUsd.toFixed(2)} (הלוך-חזור)`,
+    `💰 ₪${ils} (~$${deal.priceUsd.toFixed(0)}) *הלוך ושוב*`,
+    `✈️ מ-TLV`,
     deal.bookingUrl ? `\n🔗 ${deal.bookingUrl}` : "",
   ]
     .filter(Boolean)

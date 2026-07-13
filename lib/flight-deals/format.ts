@@ -1,8 +1,14 @@
-import { AIRPORT_LABELS } from "./constants";
+import { AIRPORT_LABELS, COUNTRY_LABELS, FLIGHT_DEALS_MAX_PRICE_USD } from "./constants";
 import type { FlightDeal } from "./types";
+
+const USD_TO_ILS = Number(process.env.FLIGHT_DEALS_USD_ILS_RATE ?? "3.7");
 
 function airportLabel(code: string): string {
   return AIRPORT_LABELS[code] ?? code;
+}
+
+function countryLabel(code: string): string {
+  return COUNTRY_LABELS[code] ?? "";
 }
 
 function formatIsraeliDate(isoDate: string): string {
@@ -11,20 +17,29 @@ function formatIsraeliDate(isoDate: string): string {
   return `${day}/${month}/${year}`;
 }
 
+function formatPrice(deal: FlightDeal): string {
+  if (deal.currency === "ILS" || deal.currency === "ils") {
+    return `₪${Math.round(deal.priceUsd)}`;
+  }
+  const ils = Math.round(deal.priceUsd * USD_TO_ILS);
+  return `₪${ils} (~$${deal.priceUsd.toFixed(0)})`;
+}
+
 export function formatDealMessage(deal: FlightDeal): string {
-  const originLabel = airportLabel(deal.origin);
   const destLabel = airportLabel(deal.destination);
+  const country = countryLabel(deal.destination);
   const depart = formatIsraeliDate(deal.departureDate);
   const ret = formatIsraeliDate(deal.returnDate);
-  const price = deal.priceUsd.toFixed(2);
+  const priceLine = formatPrice(deal);
 
   const lines = [
-    "🛫 *דיל טיסה עד $50!*",
+    "🔥 *מכירה מצוינת!*",
     "",
-    `✈️ מסלול: ${originLabel} (${deal.origin}) ↔ ${destLabel} (${deal.destination})`,
+    country ? `*${destLabel}, ${country}*` : `*${destLabel}*`,
     `📅 יציאה: ${depart}`,
     `📅 חזרה: ${ret}`,
-    `💰 מחיר: $${price} (הלוך-חזור)`,
+    `💰 ${priceLine} *הלוך ושוב*`,
+    `✈️ מ-TLV · עד $${FLIGHT_DEALS_MAX_PRICE_USD}`,
   ];
 
   if (deal.bookingUrl) {
