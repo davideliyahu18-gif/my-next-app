@@ -1,17 +1,22 @@
 const ORIGIN = process.env.FLIGHT_DEALS_ORIGIN ?? "TLV";
 const HOST = "sky-scrapper.p.rapidapi.com";
+/** Europe Knowledge Graph id — surfaces more cheap regional destinations. */
+const EUROPE_AREA_ID = "/m/02j9z";
 
 const DEST_QUERIES = [
-  "Athens", "Larnaca", "Budapest", "Sofia", "Bucharest", "Krakow",
+  "Athens", "Larnaca", "Paphos", "Budapest", "Sofia", "Bucharest", "Krakow",
   "Warsaw", "Rome", "Milan", "Barcelona", "Venice", "Prague",
-  "Vienna", "Paphos", "Istanbul",
+  "Vienna", "Istanbul", "Naples",
 ];
 
 let rotateIndex = 0;
+let monthRotate = 0;
+let skyCooldownUntil = 0;
 const placeCache = new Map();
+let serpCache = { at: 0, deals: null };
 
 function maxPrice() {
-  return Number(process.env.FLIGHT_DEALS_MAX_PRICE_USD ?? "100");
+  return Number(process.env.FLIGHT_DEALS_MAX_PRICE_USD ?? "150");
 }
 
 function rapidKey() {
@@ -27,6 +32,11 @@ function headers() {
 
 function buildDealId(origin, destination, departureDate, returnDate, priceUsd) {
   return `${origin}-${destination}-${departureDate}-${returnDate}-${priceUsd.toFixed(2)}`;
+}
+
+/** Fingerprint without price — used for soft dedup / price-drop alerts. */
+export function dealFingerprint(deal) {
+  return `${deal.origin}-${deal.destination}-${deal.departureDate}-${deal.returnDate}`;
 }
 
 function isoDateOnly(value) {
@@ -100,21 +110,17 @@ async function searchTravelpayouts() {
   return deals.sort((a, b) => a.priceUsd - b.priceUsd);
 }
 
-async function searchSerpApi() {
-  const params = new URLSearchParams({
-    engine: "google_travel_explore",
-    departure_id: ORIGIN,
-    type: "1",
-    currency: "USD",
-    gl: "il",
-    hl: "he",
-    api_key: process.env.SERPAPI_API_KEY,
-  });
-  const res = await fetch(`https://serpapi.com/search.json?${params}`);
-  if (!res.ok) throw new Error(`SerpAPI HTTP ${res.status}`);
-  const payload = await res.json();
-  if (payload.error) throw new Error(payload.error);
+function upcomingMonths(count = 6) {
+  const now = new Date();
+  const months = [];
+  for (let i = 0; i < count; i += 1) {
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + i, 1));
+    months.push(d.getUTCMonth() + 1);
+  }
+  return months;
+}
 
+function parseExploreDestinations(payload) {
   const deals = [];
   for (const row of payload.destinations ?? []) {
     const destination = String(row.destination_airport?.code ?? row.name ?? "").trim();
@@ -136,7 +142,100 @@ async function searchSerpApi() {
       imageUrl: row.thumbnail ?? null,
     });
   }
-  return deals.sort((a, b) => a.priceUsd - b.priceUsd);
+  return deals;
+}
+
+async function fetchExplore(extra = {}) {
+  const params = new URLSearchParams({
+    engine: "google_travel_explore",
+    departure_id: ORIGIN,
+    type: "1",
+    currency: "USD",
+    gl: "il",
+    hl: "he",
+    api_key: process.env.SERPAPI_API_KEY,
+    ...Object.fromEntries(
+      Object.entries(extra).filter(([, v]) => v !== undefined && v !== null && v !== ""),
+    ),
+  });
+  const res = await fetch(`https://serpapi.com/search.json?${params}`);
+  if (!res.ok) throw new Error(`SerpAPI HTTP ${res.status}`);
+  const payload = await res.json();
+  if (payload.error) throw new Error(payload.error);
+  return parseExploreDestinations(payload);
+}
+
+function mergeDeals(lists) {
+  const byKey = new Map();
+  for (const list of lists) {
+    for (const deal of list) {
+      const key = `${deal.origin}-${deal.destination}-${deal.departureDate}-${deal.returnDate}`;
+      const existing = byKey.get(key);
+      if (!existing || deal.priceUsd < existing.priceUsd) {
+        byKey.set(key, {
+          ...deal,
+          id: buildDealId(
+            deal.origin,
+            deal.destination,
+            deal.departureDate,
+            deal.returnDate,
+            Math.min(deal.priceUsd, existing?.priceUsd ?? deal.priceUsd),
+          ),
+          priceUsd: Math.min(deal.priceUsd, existing?.priceUsd ?? deal.priceUsd),
+          imageUrl: deal.imageUrl || existing?.imageUrl || null,
+          bookingUrl: deal.bookingUrl || existing?.bookingUrl || null,
+          destinationNameHe: deal.destinationNameHe || existing?.destinationNameHe || null,
+          countryNameHe: deal.countryNameHe || existing?.countryNameHe || null,
+        });
+      }
+    }
+  }
+  return [...byKey.values()].sort((a, b) => a.priceUsd - b.priceUsd);
+}
+
+/**
+ * Broader Google Explore coverage (quota-aware):
+ * Each refresh (cache miss) runs 2 windows:
+ *   1) default snapshot OR Europe area (alternating)
+ *   2) one rotating month window
+ * Cached for hours so a 10-min cron stays within SerpAPI free tier.
+ */
+async function searchSerpApi() {
+  const cacheMs = Number(process.env.SERPAPI_CACHE_MS ?? String(6 * 60 * 60_000));
+  if (serpCache.deals && Date.now() - serpCache.at < cacheMs) {
+    return serpCache.deals;
+  }
+
+  const months = upcomingMonths(6);
+  const month = months[monthRotate % months.length];
+  const useEurope = monthRotate % 2 === 0;
+  const duration = monthRotate % 3 === 0 ? "1" : "2"; // weekend vs 1 week
+  monthRotate = (monthRotate + 1) % Math.max(months.length, 1);
+
+  const queries = [
+    useEurope
+      ? fetchExplore({ arrival_area_id: EUROPE_AREA_ID })
+      : fetchExplore(),
+    fetchExplore({ month: String(month), travel_duration: duration }),
+  ];
+
+  const results = await Promise.allSettled(queries);
+  const lists = [];
+  for (const r of results) {
+    if (r.status === "fulfilled") lists.push(r.value);
+    else console.warn("[serpapi]", r.reason);
+  }
+
+  // Keep previously cached deals so rotating windows accumulate coverage.
+  if (serpCache.deals?.length) lists.push(serpCache.deals);
+
+  const deals = mergeDeals(lists);
+  serpCache = { at: Date.now(), deals };
+  console.log(
+    `[serpapi] windows=${lists.length} (+accum) deals≤$${maxPrice()}: ${deals.length}` +
+      ` (${useEurope ? "Europe" : "default"} + month ${month}/${duration})`,
+  );
+  return deals;
 }
 
 async function resolvePlace(query) {
@@ -145,6 +244,10 @@ async function resolvePlace(query) {
     `https://${HOST}/api/v1/flights/searchAirport?query=${encodeURIComponent(query)}&locale=en-US`,
     { headers: headers() },
   );
+  if (res.status === 429) {
+    skyCooldownUntil = Date.now() + 6 * 60 * 60_000;
+    throw new Error("Skyscanner rate limited (429) — cooling down 6h");
+  }
   if (!res.ok) throw new Error(`Skyscanner airport HTTP ${res.status}`);
   const payload = await res.json();
   const params = payload.data?.[0]?.navigation?.relevantFlightParams;
@@ -155,10 +258,15 @@ async function resolvePlace(query) {
 }
 
 async function searchSkyscanner() {
+  if (Date.now() < skyCooldownUntil) {
+    console.warn("[skyscanner] skipped — still in rate-limit cooldown");
+    return [];
+  }
+
   const origin = await resolvePlace("Tel Aviv");
   if (!origin) throw new Error("Skyscanner TLV resolve failed");
 
-  const batchSize = Number(process.env.SKYSCANNER_DEST_BATCH ?? "4");
+  const batchSize = Number(process.env.SKYSCANNER_DEST_BATCH ?? "3");
   const batch = [];
   for (let i = 0; i < Math.min(batchSize, DEST_QUERIES.length); i += 1) {
     batch.push(DEST_QUERIES[(rotateIndex + i) % DEST_QUERIES.length]);
@@ -191,6 +299,11 @@ async function searchSkyscanner() {
         `https://${HOST}/api/v1/flights/searchFlights?${params}`,
         { headers: headers() },
       );
+      if (res.status === 429) {
+        skyCooldownUntil = Date.now() + 6 * 60 * 60_000;
+        console.warn("[skyscanner] 429 — cooling down 6h");
+        break;
+      }
       if (!res.ok) continue;
       const payload = await res.json();
       for (const item of (payload.data?.itineraries ?? []).slice(0, 3)) {
@@ -223,6 +336,7 @@ async function searchSkyscanner() {
       }
     } catch (error) {
       console.warn("[skyscanner]", query, error);
+      if (String(error?.message ?? "").includes("429")) break;
     }
   }
 
@@ -275,26 +389,6 @@ async function searchAmadeus() {
     });
   }
   return deals.sort((a, b) => a.priceUsd - b.priceUsd);
-}
-
-function mergeDeals(lists) {
-  const byKey = new Map();
-  for (const list of lists) {
-    for (const deal of list) {
-      const key = `${deal.origin}-${deal.destination}-${deal.departureDate}-${deal.returnDate}`;
-      const existing = byKey.get(key);
-      if (!existing || deal.priceUsd < existing.priceUsd) {
-        byKey.set(key, {
-          ...deal,
-          imageUrl: deal.imageUrl || existing?.imageUrl || null,
-          bookingUrl: deal.bookingUrl || existing?.bookingUrl || null,
-          destinationNameHe: deal.destinationNameHe || existing?.destinationNameHe || null,
-          countryNameHe: deal.countryNameHe || existing?.countryNameHe || null,
-        });
-      }
-    }
-  }
-  return [...byKey.values()].sort((a, b) => a.priceUsd - b.priceUsd);
 }
 
 export async function searchDeals() {

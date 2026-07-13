@@ -3,7 +3,7 @@ export const FLIGHT_DEALS_ORIGIN = "TLV";
 
 /** Maximum round-trip price in USD. */
 export const FLIGHT_DEALS_MAX_PRICE_USD = Number(
-  process.env.FLIGHT_DEALS_MAX_PRICE_USD ?? "50",
+  process.env.FLIGHT_DEALS_MAX_PRICE_USD ?? "150",
 );
 
 export const FLIGHT_DEALS_CURRENCY = "USD";

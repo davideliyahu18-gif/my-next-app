@@ -14,7 +14,11 @@ import { fileURLToPath } from "node:url";
 import cron from "node-cron";
 import pino from "pino";
 import qrcode from "qrcode-terminal";
-import { resolveProvider, searchDeals as fetchDeals } from "./providers.mjs";
+import {
+  resolveProvider,
+  searchDeals as fetchDeals,
+  dealFingerprint,
+} from "./providers.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "../..");
@@ -64,7 +68,8 @@ function envConfig() {
 const log = pino({ level: process.env.LOG_LEVEL ?? "info" });
 
 let sock = null;
-let seenDeals = new Set();
+/** @type {Map<string, { priceUsd: number, at: number, id: string }>} */
+let seenDeals = new Map();
 let scanRunning = false;
 let groupJid = "";
 let groupPollTimer = null;
@@ -209,12 +214,63 @@ async function loadJson(file, fallback) {
 }
 
 async function loadSeen() {
-  const ids = await loadJson(SEEN_FILE, []);
-  if (Array.isArray(ids)) seenDeals = new Set(ids);
+  const raw = await loadJson(SEEN_FILE, []);
+  seenDeals = new Map();
+  // Legacy format: string[] of full deal ids
+  if (Array.isArray(raw)) {
+    for (const id of raw) {
+      if (typeof id !== "string") continue;
+      const parts = id.split("-");
+      // TLV-ATH-2026-10-02-2026-10-11-118.00
+      if (parts.length >= 7) {
+        const fp = parts.slice(0, -1).join("-");
+        const priceUsd = Number(parts.at(-1));
+        seenDeals.set(fp, {
+          priceUsd: Number.isFinite(priceUsd) ? priceUsd : 9999,
+          at: Date.now(),
+          id,
+        });
+      } else {
+        seenDeals.set(id, { priceUsd: 9999, at: Date.now(), id });
+      }
+    }
+    return;
+  }
+  // New format: { fingerprint: { priceUsd, at, id } }
+  if (raw && typeof raw === "object") {
+    for (const [fp, meta] of Object.entries(raw)) {
+      seenDeals.set(fp, {
+        priceUsd: Number(meta?.priceUsd ?? 9999),
+        at: Number(meta?.at ?? Date.now()),
+        id: String(meta?.id ?? fp),
+      });
+    }
+  }
 }
 
 async function saveSeen() {
-  await writeFile(SEEN_FILE, JSON.stringify([...seenDeals], null, 2));
+  const obj = Object.fromEntries(seenDeals.entries());
+  await writeFile(SEEN_FILE, JSON.stringify(obj, null, 2));
+}
+
+function shouldNotifyDeal(deal) {
+  const fp = dealFingerprint(deal);
+  const prev = seenDeals.get(fp);
+  const ttlMs = Number(process.env.FLIGHT_DEALS_SEEN_TTL_MS ?? String(72 * 60 * 60_000));
+  const dropUsd = Number(process.env.FLIGHT_DEALS_PRICE_DROP_USD ?? "8");
+
+  if (!prev) return true;
+  if (Date.now() - prev.at > ttlMs) return true;
+  if (deal.priceUsd <= prev.priceUsd - dropUsd) return true;
+  return false;
+}
+
+function markDealSeen(deal) {
+  seenDeals.set(dealFingerprint(deal), {
+    priceUsd: deal.priceUsd,
+    at: Date.now(),
+    id: deal.id,
+  });
 }
 
 async function loadState() {
@@ -362,8 +418,8 @@ async function runScan() {
 
     let sent = 0;
     for (const deal of deals) {
-      if (seenDeals.has(deal.id)) continue;
-      seenDeals.add(deal.id);
+      if (!shouldNotifyDeal(deal)) continue;
+      markDealSeen(deal);
       const ok = await sendToGroup(deal);
       if (ok) {
         sent += 1;

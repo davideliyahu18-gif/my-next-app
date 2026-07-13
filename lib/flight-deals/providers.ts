@@ -9,6 +9,12 @@ export type FlightDealProvider =
   | "demo"
   | "merged";
 
+/** Europe Knowledge Graph id — surfaces more cheap regional destinations. */
+const EUROPE_AREA_ID = "/m/02j9z";
+
+let monthRotate = 0;
+let serpCache: { at: number; deals: FlightDeal[] | null } = { at: 0, deals: null };
+
 function buildDealId(
   origin: string,
   destination: string,
@@ -122,8 +128,9 @@ export async function searchViaTravelpayouts(): Promise<FlightDeal[]> {
   return deals.sort((a, b) => a.priceUsd - b.priceUsd);
 }
 
-type SerpExploreDestination = {
+type SerpExploreDestinationExtended = {
   name?: string;
+  country?: string;
   destination_airport?: { code?: string };
   start_date?: string;
   end_date?: string;
@@ -132,48 +139,22 @@ type SerpExploreDestination = {
   thumbnail?: string;
 };
 
-type SerpExploreDestinationExtended = SerpExploreDestination & {
-  destination_id?: string;
-  country?: string;
-};
-
-export async function searchViaSerpApi(): Promise<FlightDeal[]> {
-  const apiKey = process.env.SERPAPI_API_KEY ?? "";
-  if (!apiKey) throw new Error("SERPAPI_API_KEY is not set");
-
-  // Do NOT send max_price to Google Explore — it strips flight_price from
-  // destinations when the cap is too low. Filter client-side instead.
-  const params = new URLSearchParams({
-    engine: "google_travel_explore",
-    departure_id: FLIGHT_DEALS_ORIGIN,
-    type: "1",
-    currency: "USD",
-    gl: "il",
-    hl: "he",
-    api_key: apiKey,
-  });
-
-  const response = await fetch(`https://serpapi.com/search.json?${params}`, {
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    throw new Error(`SerpAPI HTTP ${response.status}`);
+function upcomingMonths(count = 6): number[] {
+  const now = new Date();
+  const months: number[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + i, 1));
+    months.push(d.getUTCMonth() + 1);
   }
+  return months;
+}
 
-  const payload = (await response.json()) as {
-    error?: string;
-    destinations?: SerpExploreDestinationExtended[];
-  };
-
-  if (payload.error) {
-    throw new Error(`SerpAPI: ${payload.error}`);
-  }
-
-  const foundAt = new Date().toISOString();
+function parseExploreDestinations(
+  destinations: SerpExploreDestinationExtended[] | undefined,
+  foundAt: string,
+): FlightDeal[] {
   const deals: FlightDeal[] = [];
-
-  for (const row of payload.destinations ?? []) {
+  for (const row of destinations ?? []) {
     const destinationCode = String(row.destination_airport?.code ?? "").trim();
     const destinationNameHe = String(row.name ?? "").trim() || null;
     const countryNameHe = String(row.country ?? "").trim() || null;
@@ -202,8 +183,80 @@ export async function searchViaSerpApi(): Promise<FlightDeal[]> {
       foundAt,
     });
   }
+  return deals;
+}
 
-  return deals.sort((a, b) => a.priceUsd - b.priceUsd);
+async function fetchExplore(
+  apiKey: string,
+  extra: Record<string, string> = {},
+): Promise<FlightDeal[]> {
+  const params = new URLSearchParams({
+    engine: "google_travel_explore",
+    departure_id: FLIGHT_DEALS_ORIGIN,
+    type: "1",
+    currency: "USD",
+    gl: "il",
+    hl: "he",
+    api_key: apiKey,
+    ...extra,
+  });
+
+  const response = await fetch(`https://serpapi.com/search.json?${params}`, {
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(`SerpAPI HTTP ${response.status}`);
+  }
+
+  const payload = (await response.json()) as {
+    error?: string;
+    destinations?: SerpExploreDestinationExtended[];
+  };
+
+  if (payload.error) {
+    throw new Error(`SerpAPI: ${payload.error}`);
+  }
+
+  return parseExploreDestinations(payload.destinations, new Date().toISOString());
+}
+
+export async function searchViaSerpApi(): Promise<FlightDeal[]> {
+  const apiKey = process.env.SERPAPI_API_KEY ?? "";
+  if (!apiKey) throw new Error("SERPAPI_API_KEY is not set");
+
+  const cacheMs = Number(process.env.SERPAPI_CACHE_MS ?? String(6 * 60 * 60_000));
+  if (serpCache.deals && Date.now() - serpCache.at < cacheMs) {
+    return serpCache.deals;
+  }
+
+  // Do NOT send max_price to Google Explore — it strips flight_price when
+  // the cap is too low. Filter client-side instead.
+  const months = upcomingMonths(6);
+  const month = months[monthRotate % months.length];
+  const useEurope = monthRotate % 2 === 0;
+  const duration = monthRotate % 3 === 0 ? "1" : "2";
+  monthRotate = (monthRotate + 1) % Math.max(months.length, 1);
+
+  const queries: Promise<FlightDeal[]>[] = [
+    useEurope
+      ? fetchExplore(apiKey, { arrival_area_id: EUROPE_AREA_ID })
+      : fetchExplore(apiKey),
+    fetchExplore(apiKey, { month: String(month), travel_duration: duration }),
+  ];
+
+  const results = await Promise.allSettled(queries);
+  const lists: FlightDeal[][] = [];
+  for (const r of results) {
+    if (r.status === "fulfilled") lists.push(r.value);
+    else console.warn("[flight-deals] serpapi window failed:", r.reason);
+  }
+
+  if (serpCache.deals?.length) lists.push(serpCache.deals);
+
+  const deals = mergeDeals(lists);
+  serpCache = { at: Date.now(), deals };
+  return deals;
 }
 
 export function resolveFlightProvider(): FlightDealProvider | null {
@@ -229,8 +282,17 @@ function mergeDeals(lists: FlightDeal[][]): FlightDeal[] {
       const key = `${deal.origin}-${deal.destination}-${deal.departureDate}-${deal.returnDate}`;
       const existing = byKey.get(key);
       if (!existing || deal.priceUsd < existing.priceUsd) {
+        const priceUsd = Math.min(deal.priceUsd, existing?.priceUsd ?? deal.priceUsd);
         byKey.set(key, {
           ...deal,
+          priceUsd,
+          id: buildDealId(
+            deal.origin,
+            deal.destination,
+            deal.departureDate,
+            deal.returnDate,
+            priceUsd,
+          ),
           imageUrl: deal.imageUrl || existing?.imageUrl || null,
           bookingUrl: deal.bookingUrl || existing?.bookingUrl || null,
           destinationNameHe:
