@@ -10,8 +10,8 @@ const DEST_QUERIES = [
 ];
 
 let rotateIndex = 0;
-/** Start near Oct/Nov windows (higher chance of ≤$150). */
-let weekendRotate = 8;
+/** Start near early November windows (known cheap TLV shoulder season). */
+let weekendRotate = 16;
 let skyCooldownUntil = 0;
 const placeCache = new Map();
 let serpCache = { at: 0, deals: null };
