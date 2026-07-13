@@ -9,13 +9,20 @@ export default function LeadingStatsPanel({ scorers }: { scorers: ScorerView[] }
     value: String(scorer.goals),
     secondary: scorer.assists > 0 ? `${scorer.assists} בישולים` : null,
   }));
+  const leader = cards[0];
 
   return (
     <section id="stats" className="mt-12">
       <div className="mb-6 flex items-end justify-between gap-4">
         <div>
           <p className="text-[11px] font-bold tracking-[0.2em] text-gold">TOP SCORERS</p>
-          <h2 className="mt-1 text-2xl font-black text-white">מלכי השערים</h2>
+          <h2 className="mt-1 text-2xl font-black text-white">מי הבקיע הכי הרבה?</h2>
+          {leader ? (
+            <p className="mt-2 text-sm text-zinc-400">
+              מוביל כרגע: {leader.flag} {leader.name} עם {leader.goals} שערים
+              {leader.assists > 0 ? ` ו־${leader.assists} בישולים` : ""}
+            </p>
+          ) : null}
         </div>
       </div>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
