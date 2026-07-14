@@ -179,17 +179,22 @@ function hebrewDay(iso) {
 function formatDealMessage(deal) {
   const dest = hebrewDestination(deal);
   const country = hebrewCountry(deal);
-  const ils = Math.round(deal.priceUsd * 3.7);
+  const isThailand = deal.watch === "thailand";
+  const ils = Number.isFinite(deal.priceIls)
+    ? Math.round(deal.priceIls)
+    : Math.round(deal.priceUsd * 3.7);
+  const usd = Number.isFinite(deal.priceIls)
+    ? (deal.priceIls / 3.7).toFixed(0)
+    : deal.priceUsd.toFixed(0);
   const outDay = hebrewDay(deal.departureDate);
   const backDay = hebrewDay(deal.returnDate);
-  const isThailand = deal.watch === "thailand";
   return [
     isThailand ? "🇹🇭 *מעקב תאילנד · אמירטס/איתיחאד · מזוודה*" : "🔥 *מכירה מצוינת!*",
     "",
     country ? `*${dest}, ${country}*` : `*${dest}*`,
     `📅 יציאה ${outDay}: ${formatDate(deal.departureDate)}`,
     `📅 חזרה ${backDay}: ${formatDate(deal.returnDate)}`,
-    `💰 ₪${ils} (כ־$${deal.priceUsd.toFixed(0)}) *הלוך ושוב*`,
+    `💰 *₪${ils}* (כ־$${usd}) *הלוך ושוב*`,
     isThailand && deal.airlineLabelHe ? `🛫 חברת תעופה: *${deal.airlineLabelHe}*` : "",
     isThailand ? `🧳 *מזוודה כלולה*` : "",
     isThailand && deal.baggageLabelHe ? `   (${deal.baggageLabelHe})` : "",
@@ -281,10 +286,12 @@ function shouldNotifyDeal(deal) {
   const prev = seenDeals.get(fp);
   if (!prev) return true;
 
-  // Thailand fixed watch: re-alert on meaningful price drops.
+  // Thailand fixed watch: re-alert on meaningful ILS price drops.
   if (deal.watch === "thailand") {
-    const dropUsd = Number(process.env.FLIGHT_DEALS_THAILAND_PRICE_DROP_USD ?? "30");
-    return deal.priceUsd <= prev.priceUsd - dropUsd;
+    const dropIls = Number(process.env.FLIGHT_DEALS_THAILAND_PRICE_DROP_ILS ?? "100");
+    const next = Number(deal.priceIls ?? deal.priceUsd);
+    const prevPrice = Number(prev.priceIls ?? prev.priceUsd);
+    return next <= prevPrice - dropIls;
   }
 
   // Europe deals: only brand-new fingerprints.
@@ -294,6 +301,7 @@ function shouldNotifyDeal(deal) {
 function markDealSeen(deal) {
   seenDeals.set(dealFingerprint(deal), {
     priceUsd: deal.priceUsd,
+    priceIls: deal.priceIls ?? null,
     at: Date.now(),
     id: deal.id,
   });
@@ -364,7 +372,9 @@ function buildStatusReply() {
     "",
     "רק *תאילנד* · *אמירטס + איתיחאד* · *מזוודה כלולה*",
     "תאריכים: *10/02/2027 – 10/03/2027*",
-    th?.lowest != null ? `מחיר נמוך כרגע: *$${th.lowest}*` : "עדיין אין מחיר במאגר",
+    th?.lowestIls != null || th?.lowest != null
+      ? `מחיר נמוך כרגע: *₪${th.lowestIls ?? th.lowest}*`
+      : "עדיין אין מחיר במאגר",
     `סריקה אחרונה: ${ago} | נמצאו ${lastScanFound} | נשלחו חדשים ${lastScanSent}`,
     "כשהמחיר יירד — אשלח לכאן.",
   ]
