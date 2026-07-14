@@ -15,6 +15,20 @@ let weekendRotate = 0;
 let skyCooldownUntil = 0;
 const placeCache = new Map();
 let serpCache = { at: 0, deals: null };
+let thailandCache = { at: 0, deals: null };
+
+/** Permanent Thailand watch — DD/MM/YYYY 10/02/2027–10/03/2027 */
+export function thailandWatchConfig() {
+  return {
+    outbound: process.env.FLIGHT_DEALS_THAILAND_OUTBOUND ?? "2027-02-10",
+    returnDate: process.env.FLIGHT_DEALS_THAILAND_RETURN ?? "2027-03-10",
+    airports: String(process.env.FLIGHT_DEALS_THAILAND_AIRPORTS ?? "BKK,DMK")
+      .split(",")
+      .map((s) => s.trim().toUpperCase())
+      .filter(Boolean),
+    maxPrice: Number(process.env.FLIGHT_DEALS_THAILAND_MAX_PRICE_USD ?? "1200"),
+  };
+}
 
 /** JS getUTCDay(): Sun=0 … Sat=6 */
 const DOW = { sun: 0, mon: 1, wed: 3, thu: 4 };
@@ -349,19 +363,17 @@ async function searchSerpApi({ forceRefresh = false } = {}) {
   const lists = [...first.lists];
   let deals = filterPreferredDeals(mergeDeals(lists));
 
-  // July–August is often empty under $150 — jump to October (better yield)
-  // and keep sampling several preferred weekends.
-  if (deals.length === 0) {
-    const month = first.meta?.outbound_date
-      ? Number(first.meta.outbound_date.slice(5, 7))
-      : 7;
-    if (month <= 9) jumpToMonth(10);
-    const extraPairs = forceRefresh ? 5 : 3;
-    for (let i = 0; i < extraPairs && deals.length === 0; i += 1) {
-      const next = await fetchNextPair();
-      lists.push(...next.lists);
-      deals = filterPreferredDeals(mergeDeals(lists));
-    }
+  // On refresh / empty early season: jump to October and sample several windows.
+  const month = first.meta?.outbound_date
+    ? Number(first.meta.outbound_date.slice(5, 7))
+    : 7;
+  const shouldSweep = forceRefresh || deals.length === 0;
+  if (shouldSweep && month <= 9) jumpToMonth(10);
+
+  const extraPairs = forceRefresh ? 5 : deals.length === 0 ? 3 : 0;
+  for (let i = 0; i < extraPairs; i += 1) {
+    const next = await fetchNextPair();
+    lists.push(...next.lists);
   }
 
   if (serpCache.deals?.length) lists.push(serpCache.deals);
@@ -379,6 +391,7 @@ export function getCachedDealCount() {
 export function getSearchStatus() {
   const windows = preferredDateWindows();
   const next = windows[weekendRotate % Math.max(windows.length, 1)];
+  const th = thailandWatchConfig();
   return {
     cachedDeals: serpCache.deals?.length ?? 0,
     cacheAgeMin: serpCache.at
@@ -388,7 +401,117 @@ export function getSearchStatus() {
       ? `${next.label} ${next.outbound_date}→${next.return_date}`
       : null,
     skyCooldown: Date.now() < skyCooldownUntil,
+    thailand: {
+      outbound: th.outbound,
+      returnDate: th.returnDate,
+      airports: th.airports,
+      maxPrice: th.maxPrice,
+      cached: thailandCache.deals?.length ?? 0,
+      lowest: thailandCache.deals?.[0]?.priceUsd ?? null,
+    },
   };
+}
+
+const THAILAND_META = {
+  BKK: { nameHe: "בנגקוק", countryHe: "תאילנד" },
+  DMK: { nameHe: "בנגקוק (דון מויאנג)", countryHe: "תאילנד" },
+  HKT: { nameHe: "פוקט", countryHe: "תאילנד" },
+  CNX: { nameHe: "צ׳יאנג מאי", countryHe: "תאילנד" },
+};
+
+async function searchThailandWatch({ forceRefresh = false } = {}) {
+  const apiKey = process.env.SERPAPI_API_KEY;
+  if (!apiKey) return [];
+
+  const cacheMs = Number(process.env.SERPAPI_CACHE_MS ?? String(6 * 60 * 60_000));
+  if (
+    !forceRefresh &&
+    thailandCache.deals &&
+    Date.now() - thailandCache.at < cacheMs
+  ) {
+    return thailandCache.deals;
+  }
+
+  const cfg = thailandWatchConfig();
+  const deals = [];
+
+  for (const airport of cfg.airports) {
+    try {
+      const params = new URLSearchParams({
+        engine: "google_flights",
+        departure_id: ORIGIN,
+        arrival_id: airport,
+        outbound_date: cfg.outbound,
+        return_date: cfg.returnDate,
+        type: "1",
+        currency: "USD",
+        hl: "he",
+        gl: "il",
+        api_key: apiKey,
+      });
+      const res = await fetch(`https://serpapi.com/search.json?${params}`);
+      if (!res.ok) {
+        console.warn("[thailand] HTTP", res.status, airport);
+        continue;
+      }
+      const payload = await res.json();
+      if (payload.error) {
+        console.warn("[thailand]", airport, payload.error);
+        continue;
+      }
+
+      const flights = [
+        ...(payload.best_flights ?? []),
+        ...(payload.other_flights ?? []),
+      ];
+      let lowest = null;
+      for (const item of flights) {
+        const priceUsd = Number(item.price);
+        if (!Number.isFinite(priceUsd)) continue;
+        if (lowest === null || priceUsd < lowest.priceUsd) {
+          lowest = { priceUsd, item };
+        }
+      }
+      const insightLow = Number(payload.price_insights?.lowest_price);
+      if (Number.isFinite(insightLow) && (lowest === null || insightLow < lowest.priceUsd)) {
+        lowest = { priceUsd: insightLow, item: lowest?.item ?? null };
+      }
+      if (!lowest || lowest.priceUsd > cfg.maxPrice) continue;
+
+      const meta = THAILAND_META[airport] ?? {
+        nameHe: "תאילנד",
+        countryHe: "תאילנד",
+      };
+      const bookingUrl =
+        payload.search_metadata?.google_flights_url ||
+        `https://www.google.com/travel/flights?hl=he&gl=il&curr=USD#flt=${ORIGIN}.${airport}.${cfg.outbound}*${airport}.${ORIGIN}.${cfg.returnDate}`;
+
+      deals.push({
+        id: buildDealId(ORIGIN, airport, cfg.outbound, cfg.returnDate, lowest.priceUsd),
+        origin: ORIGIN,
+        destination: airport,
+        destinationNameHe: meta.nameHe,
+        countryNameHe: meta.countryHe,
+        departureDate: cfg.outbound,
+        returnDate: cfg.returnDate,
+        priceUsd: lowest.priceUsd,
+        bookingUrl,
+        imageUrl: null,
+        watch: "thailand",
+      });
+    } catch (error) {
+      console.warn("[thailand]", airport, error);
+    }
+  }
+
+  const merged = mergeDeals([deals]).sort((a, b) => a.priceUsd - b.priceUsd);
+  thailandCache = { at: Date.now(), deals: merged };
+  console.log(
+    `[thailand] ${cfg.outbound}→${cfg.returnDate} airports=${cfg.airports.join(",")}` +
+      ` → ${merged.length} deals ≤$${cfg.maxPrice}` +
+      (merged[0] ? ` (lowest $${merged[0].priceUsd})` : ""),
+  );
+  return merged;
 }
 
 async function resolvePlace(query) {
@@ -570,5 +693,15 @@ export async function searchDeals({ forceRefresh = false } = {}) {
   else if (provider === "skyscanner") deals = await searchSkyscanner();
   else deals = await searchAmadeus();
 
-  return filterPreferredDeals(deals);
+  const preferred = filterPreferredDeals(deals);
+  const thailandResult = await Promise.allSettled([
+    searchThailandWatch({ forceRefresh }),
+  ]);
+  const thailand =
+    thailandResult[0].status === "fulfilled" ? thailandResult[0].value : [];
+  if (thailandResult[0].status === "rejected") {
+    console.warn("[thailand]", thailandResult[0].reason);
+  }
+
+  return mergeDeals([preferred, thailand]);
 }

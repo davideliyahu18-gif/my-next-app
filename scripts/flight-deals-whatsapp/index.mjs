@@ -89,6 +89,7 @@ const AIRPORT_LABELS = {
   PRG: "פראג", RAK: "מרקש", WAW: "ורשה", KRK: "קרקוב", VCE: "ונציה",
   NAP: "נאפולי", LGW: "לונדון", LHR: "לונדון", STN: "לונדון", VIE: "וינה",
   BER: "ברלין", AMS: "אמסטרדם", CDG: "פריז", MAD: "מדריד", SKG: "סלוניקי",
+  BKK: "בנגקוק", DMK: "בנגקוק", HKT: "פוקט", CNX: "צ׳יאנג מאי",
 };
 
 const COUNTRY_LABELS = {
@@ -98,6 +99,7 @@ const COUNTRY_LABELS = {
   CIA: "איטליה", MXP: "איטליה", NAP: "איטליה", BCN: "ספרד", MAD: "ספרד",
   PRG: "צ׳כיה", WAW: "פולין", KRK: "פולין", LGW: "בריטניה", LHR: "בריטניה",
   VIE: "אוסטריה", BER: "גרמניה", AMS: "הולנד", CDG: "צרפת", DXB: "איחוד האמירויות",
+  BKK: "תאילנד", DMK: "תאילנד", HKT: "תאילנד", CNX: "תאילנד",
 };
 
 function hasHebrew(value) {
@@ -180,14 +182,17 @@ function formatDealMessage(deal) {
   const ils = Math.round(deal.priceUsd * 3.7);
   const outDay = hebrewDay(deal.departureDate);
   const backDay = hebrewDay(deal.returnDate);
+  const isThailand = deal.watch === "thailand";
   return [
-    "🔥 *מכירה מצוינת!*",
+    isThailand ? "🇹🇭 *מעקב תאילנד*" : "🔥 *מכירה מצוינת!*",
     "",
     country ? `*${dest}, ${country}*` : `*${dest}*`,
     `📅 יציאה ${outDay}: ${formatDate(deal.departureDate)}`,
     `📅 חזרה ${backDay}: ${formatDate(deal.returnDate)}`,
     `💰 ₪${ils} (כ־$${deal.priceUsd.toFixed(0)}) *הלוך ושוב*`,
-    `✈️ מתל אביב · רביעי→שני / חמישי→ראשון · יולי–דצמבר · עד ${cfg.maxPrice}$`,
+    isThailand
+      ? `✈️ מתל אביב · מעקב קבוע לתאריכים אלו`
+      : `✈️ מתל אביב · רביעי→שני / חמישי→ראשון · יולי–דצמבר · עד ${cfg.maxPrice}$`,
     deal.bookingUrl ? `\n🔗 קישור להזמנה:\n${deal.bookingUrl}` : "",
   ]
     .filter(Boolean)
@@ -269,8 +274,18 @@ async function saveSeen() {
 }
 
 function shouldNotifyDeal(deal) {
-  // Only brand-new deals — never re-send what was already sent.
-  return !seenDeals.has(dealFingerprint(deal));
+  const fp = dealFingerprint(deal);
+  const prev = seenDeals.get(fp);
+  if (!prev) return true;
+
+  // Thailand fixed watch: re-alert on meaningful price drops.
+  if (deal.watch === "thailand") {
+    const dropUsd = Number(process.env.FLIGHT_DEALS_THAILAND_PRICE_DROP_USD ?? "30");
+    return deal.priceUsd <= prev.priceUsd - dropUsd;
+  }
+
+  // Europe deals: only brand-new fingerprints.
+  return false;
 }
 
 function markDealSeen(deal) {
@@ -340,12 +355,18 @@ function buildStatusReply() {
   const ago = lastScanAt
     ? `${Math.max(1, Math.round((Date.now() - lastScanAt) / 60_000))} דק׳`
     : "עדיין לא";
+  const th = status.thailand;
+  const thLine = th
+    ? `תאילנד קבוע: 10/02/2027–10/03/2027` +
+      (th.lowest != null ? ` · נמוך כרגע $${th.lowest}` : "")
+    : "";
   return [
     "כן ✅ *מחפש*",
     "",
     `סורק כל 10 דקות · TLV הלוך-חזור עד $${cfg.maxPrice}`,
     "רק *רביעי→שני* או *חמישי→ראשון*",
     "טווח חיפוש: *יולי–דצמבר*",
+    thLine,
     `סריקה אחרונה: ${ago} | נמצאו ${lastScanFound} | נשלחו חדשים ${lastScanSent}`,
     `במאגר כרגע: ${status.cachedDeals} דילים`,
     status.nextWindow ? `חלון הבא: ${status.nextWindow}` : "",
@@ -449,6 +470,7 @@ async function onGroupReady() {
         "",
         `אני סורק כל 10 דקות טיסות הלוך-חזור מ-TLV עד $${cfg.maxPrice}.`,
         "רק רביעי→שני או חמישי→ראשון · יולי עד דצמבר.",
+        "מעקב קבוע גם לתאילנד: 10/02/2027–10/03/2027.",
         "כתבו *בוט מחפש?* לבדיקת סטטוס.",
         "כשאמצא דיל חדש — אשלח לכאן תאריכים ומחיר.",
         cfg.demoMode ? "\n_מצב דמו פעיל — הודעת בדיקה תישלח בסריקה הראשונה._" : "",
