@@ -31,7 +31,7 @@ export function thailandWatchConfig() {
   return {
     outbound: process.env.FLIGHT_DEALS_THAILAND_OUTBOUND ?? "2027-02-10",
     returnDate: process.env.FLIGHT_DEALS_THAILAND_RETURN ?? "2027-03-10",
-    airports: String(process.env.FLIGHT_DEALS_THAILAND_AIRPORTS ?? "BKK,DMK")
+    airports: String(process.env.FLIGHT_DEALS_THAILAND_AIRPORTS ?? "BKK")
       .split(",")
       .map((s) => s.trim().toUpperCase())
       .filter(Boolean),
@@ -39,11 +39,16 @@ export function thailandWatchConfig() {
     currency: "ILS",
     maxPriceIls,
     ilsToUsd,
-    /** IATA codes — Emirates + Etihad only */
-    airlines: String(process.env.FLIGHT_DEALS_THAILAND_AIRLINES ?? "EK,EY")
+    /** Emirates preferred for the fixed schedule (FZ+EK). */
+    airlines: String(process.env.FLIGHT_DEALS_THAILAND_AIRLINES ?? "EK")
       .split(",")
       .map((s) => s.trim().toUpperCase())
       .filter(Boolean),
+    /** Outbound TLV 15:10 → BKK 07:35 */
+    outboundDep: process.env.FLIGHT_DEALS_THAILAND_OUT_DEP ?? "15:10",
+    outboundArr: process.env.FLIGHT_DEALS_THAILAND_OUT_ARR ?? "07:35",
+    /** Return must leave Bangkok at night (20:00–05:59). */
+    returnNightOnly: process.env.FLIGHT_DEALS_THAILAND_RETURN_NIGHT !== "false",
   };
 }
 
@@ -470,6 +475,7 @@ function itineraryAirlineCodes(item) {
     const name = String(leg.airline ?? "").trim();
     if (/^emirates$/i.test(name)) codes.push("EK");
     if (/^etihad$/i.test(name)) codes.push("EY");
+    if (/^flydubai$/i.test(name)) codes.push("FZ");
   }
   return codes;
 }
@@ -508,6 +514,45 @@ function thailandAirlineLabel(item) {
   if (codes.includes("EK") || codes.includes("FZ")) return "אמירטס";
   if (codes.includes("EY")) return "איתיחאד";
   return "אמירטס/איתיחאד";
+}
+
+function flightTimeHHMM(value) {
+  const match = String(value ?? "").match(/(\d{2}:\d{2})/);
+  return match ? match[1] : null;
+}
+
+function itineraryEndpoints(item) {
+  const legs = item?.flights ?? [];
+  if (!legs.length) return { dep: null, arr: null };
+  return {
+    dep: flightTimeHHMM(legs[0]?.departure_airport?.time),
+    arr: flightTimeHHMM(legs[legs.length - 1]?.arrival_airport?.time),
+  };
+}
+
+/** Night departure from destination: 20:00–05:59 local. */
+function isNightDeparture(item) {
+  const { dep } = itineraryEndpoints(item);
+  if (!dep) return false;
+  const hour = Number(dep.slice(0, 2));
+  return hour >= 20 || hour <= 5;
+}
+
+function matchesOutboundSchedule(item, cfg) {
+  const { dep, arr } = itineraryEndpoints(item);
+  if (!dep || !arr) return false;
+  if (cfg.outboundDep && dep !== cfg.outboundDep) return false;
+  if (cfg.outboundArr && arr !== cfg.outboundArr) return false;
+  return true;
+}
+
+function scheduleLabelHe(outboundItem, returnItem) {
+  const out = itineraryEndpoints(outboundItem);
+  const ret = itineraryEndpoints(returnItem);
+  const parts = [];
+  if (out.dep && out.arr) parts.push(`יציאה ${out.dep}→${out.arr}`);
+  if (ret.dep && ret.arr) parts.push(`חזרה ${ret.dep}→${ret.arr}`);
+  return parts.join(" · ");
 }
 
 function baggageTextList(...sources) {
@@ -574,6 +619,7 @@ async function findBagIncludedFare({
   allowedAirlines,
   maxPriceIls,
   currency = "ILS",
+  returnNightOnly = true,
 }) {
   if (!outboundItem?.departure_token) return null;
 
@@ -600,12 +646,9 @@ async function findBagIncludedFare({
     ...(returnsPayload.other_flights ?? []),
   ]
     .filter((item) => item?.booking_token)
-    .sort((a, b) => {
-      const aPure = isAllowedThailandAirline(a, allowedAirlines) ? 0 : 1;
-      const bPure = isAllowedThailandAirline(b, allowedAirlines) ? 0 : 1;
-      if (aPure !== bPure) return aPure - bPure;
-      return Number(a.price ?? 9e9) - Number(b.price ?? 9e9);
-    });
+    .filter((item) => (returnNightOnly ? isNightDeparture(item) : true))
+    .filter((item) => isAllowedThailandAirline(item, allowedAirlines))
+    .sort((a, b) => Number(a.price ?? 9e9) - Number(b.price ?? 9e9));
 
   let bestOverall = null;
 
@@ -637,11 +680,11 @@ async function findBagIncludedFare({
           outboundItem,
           returnItem: ret,
           bookWith: together.book_with ?? null,
+          scheduleLabelHe: scheduleLabelHe(outboundItem, ret),
         };
       }
     }
 
-    // Official airline bag fare found — good enough, stop probing returns.
     if (bestOverall?.airlinePreferred) break;
   }
 
@@ -718,6 +761,7 @@ async function searchThailandWatch({ forceRefresh = false } = {}) {
       for (const { flights } of airlineLists) {
         for (const item of flights) {
           if (!isAllowedThailandAirline(item, cfg.airlines)) continue;
+          if (!matchesOutboundSchedule(item, cfg)) continue;
           const priceIls = Number(item.price);
           if (!Number.isFinite(priceIls) || priceIls > cfg.maxPriceIls) continue;
           const token = item.departure_token || `${item.price}-${itineraryAirlineCodes(item).join("-")}`;
@@ -730,7 +774,7 @@ async function searchThailandWatch({ forceRefresh = false } = {}) {
       candidates.sort((a, b) => Number(a.price) - Number(b.price));
       const toCheck = candidates.slice(0, maxCandidates);
       console.log(
-        `[thailand] ${airport}: ${candidates.length} EK/EY candidates, deep-checking ${toCheck.length}`,
+        `[thailand] ${airport}: ${candidates.length} schedule-match candidates (out ${cfg.outboundDep}→${cfg.outboundArr}${cfg.returnNightOnly ? ", night return" : ""}), deep-checking ${toCheck.length}`,
       );
 
       let lowest = null;
@@ -745,6 +789,7 @@ async function searchThailandWatch({ forceRefresh = false } = {}) {
             allowedAirlines: cfg.airlines,
             maxPriceIls: cfg.maxPriceIls,
             currency: cfg.currency,
+            returnNightOnly: cfg.returnNightOnly,
           });
           if (!bagFare) continue;
           if (!lowest || bagFare.priceIls < lowest.priceIls) {
@@ -758,7 +803,9 @@ async function searchThailandWatch({ forceRefresh = false } = {}) {
       }
 
       if (!lowest) {
-        console.log(`[thailand] ${airport}: no EK/EY fare with free checked bag`);
+        console.log(
+          `[thailand] ${airport}: no Emirates fare with free checked bag on ${cfg.outboundDep}→${cfg.outboundArr} + night return`,
+        );
         continue;
       }
 
@@ -790,6 +837,7 @@ async function searchThailandWatch({ forceRefresh = false } = {}) {
         airlineLabelHe: thailandAirlineLabel(lowest.outboundItem),
         baggageIncluded: true,
         baggageLabelHe: lowest.baggageLabelHe,
+        scheduleLabelHe: lowest.scheduleLabelHe,
         bookWith: lowest.bookWith,
       });
     } catch (error) {

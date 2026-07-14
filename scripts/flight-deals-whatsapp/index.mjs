@@ -189,17 +189,20 @@ function formatDealMessage(deal) {
   const outDay = hebrewDay(deal.departureDate);
   const backDay = hebrewDay(deal.returnDate);
   return [
-    isThailand ? "🇹🇭 *מעקב תאילנד · אמירטס/איתיחאד · מזוודה*" : "🔥 *מכירה מצוינת!*",
+    isThailand ? "🇹🇭 *מעקב תאילנד · אמירטס · מזוודה*" : "🔥 *מכירה מצוינת!*",
     "",
     country ? `*${dest}, ${country}*` : `*${dest}*`,
     `📅 יציאה ${outDay}: ${formatDate(deal.departureDate)}`,
     `📅 חזרה ${backDay}: ${formatDate(deal.returnDate)}`,
+    isThailand && deal.scheduleLabelHe
+      ? `🕕 *לוח זמנים:* ${deal.scheduleLabelHe}`
+      : "",
     `💰 *₪${ils}* (כ־$${usd}) *הלוך ושוב*`,
     isThailand && deal.airlineLabelHe ? `🛫 חברת תעופה: *${deal.airlineLabelHe}*` : "",
     isThailand ? `🧳 *מזוודה כלולה*` : "",
     isThailand && deal.baggageLabelHe ? `   (${deal.baggageLabelHe})` : "",
     isThailand
-      ? `✈️ מתל אביב · מעקב קבוע · אמירטס/איתיחאד + מזוודה`
+      ? `✈️ מתל אביב · יציאה 15:10→07:35 · חזרה בלילה · אמירטס + מזוודה`
       : `✈️ מתל אביב · רביעי→שני / חמישי→ראשון · יולי–דצמבר · עד ${cfg.maxPrice}$`,
     deal.bookingUrl ? `\n🔗 קישור להזמנה:\n${deal.bookingUrl}` : "",
   ]
@@ -370,8 +373,9 @@ function buildStatusReply() {
   return [
     "כן ✅ *מחפש*",
     "",
-    "רק *תאילנד* · *אמירטס + איתיחאד* · *מזוודה כלולה*",
+    "רק *תאילנד* · *אמירטס* · *מזוודה כלולה*",
     "תאריכים: *10/02/2027 – 10/03/2027*",
+    "לו״ז: *יציאה 15:10→07:35* · *חזרה בלילה*",
     th?.lowestIls != null || th?.lowest != null
       ? `מחיר נמוך כרגע: *₪${th.lowestIls ?? th.lowest}*`
       : "עדיין אין מחיר במאגר",
@@ -474,7 +478,8 @@ async function onGroupReady() {
       [
         "✅ *הבוט מחובר!*",
         "",
-        "מחפש *רק* טיסות תאילנד באמירטס ואיתיחאד *עם מזוודה כלולה*.",
+        "מחפש *רק* טיסות תאילנד באמירטס *עם מזוודה כלולה*.",
+        "לו״ז: יציאה *15:10→07:35* · חזרה *בלילה*.",
         "תאריכים קבועים: 10/02/2027–10/03/2027.",
         "כתבו *בוט מחפש?* לבדיקת סטטוס.",
         "כשהמחיר יירד — אשלח לכאן.",
@@ -520,13 +525,13 @@ async function runScan({ forceRefresh = false, reason = "cron" } = {}) {
     if (shouldForce) lastForceRefreshAt = Date.now();
 
     log.info(
-      "Scanning Thailand EK/EY watch (%s%s)",
+      "Scanning Thailand Emirates schedule watch (%s%s)",
       reason,
       shouldForce ? ", force-refresh" : "",
     );
     const deals = await fetchDeals({ forceRefresh: shouldForce });
     lastScanFound = deals.length;
-    log.info("Found %d Thailand EK/EY options", deals.length);
+    log.info("Found %d Thailand Emirates schedule options", deals.length);
 
     let sent = 0;
     for (const deal of deals) {
