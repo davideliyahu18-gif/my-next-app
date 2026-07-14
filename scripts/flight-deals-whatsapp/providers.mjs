@@ -305,7 +305,7 @@ async function searchSerpApi({ forceRefresh = false } = {}) {
 
   async function fetchNextPair() {
     const windows = preferredDateWindows();
-    if (!windows.length) return [];
+    if (!windows.length) return { lists: [], meta: null };
     const w1 = windows[weekendRotate % windows.length];
     const w2 = windows[(weekendRotate + 1) % windows.length];
     weekendRotate = (weekendRotate + 2) % Math.max(windows.length, 1);
@@ -321,16 +321,16 @@ async function searchSerpApi({ forceRefresh = false } = {}) {
         return_date: w2.return_date,
       }),
     ]);
-    const lists = [];
+    const pairLists = [];
     for (const r of results) {
-      if (r.status === "fulfilled") lists.push(r.value);
+      if (r.status === "fulfilled") pairLists.push(r.value);
       else console.warn("[serpapi]", r.reason);
     }
     console.log(
       `[serpapi] ${w1.label} ${w1.outbound_date}→${w1.return_date}` +
         ` + ${w2.label} ${w2.outbound_date}→${w2.return_date}`,
     );
-    return lists;
+    return { lists: pairLists, meta: w1 };
   }
 
   function jumpToMonth(month /* 1-12 */) {
@@ -345,20 +345,21 @@ async function searchSerpApi({ forceRefresh = false } = {}) {
     }
   }
 
-  const lists = await fetchNextPair();
+  const first = await fetchNextPair();
+  const lists = [...first.lists];
   let deals = filterPreferredDeals(mergeDeals(lists));
 
-  // July–August is often empty under $150 — jump to September and keep sampling.
+  // July–August is often empty under $150 — jump to October (better yield)
+  // and keep sampling several preferred weekends.
   if (deals.length === 0) {
-    const outbound = lists
-      .flat()
-      .map((d) => d.departureDate)
-      .find(Boolean);
-    const month = outbound ? Number(outbound.slice(5, 7)) : 7;
-    if (month <= 8) jumpToMonth(9);
-    const extraPairs = forceRefresh ? 4 : 2;
+    const month = first.meta?.outbound_date
+      ? Number(first.meta.outbound_date.slice(5, 7))
+      : 7;
+    if (month <= 9) jumpToMonth(10);
+    const extraPairs = forceRefresh ? 5 : 3;
     for (let i = 0; i < extraPairs && deals.length === 0; i += 1) {
-      lists.push(...(await fetchNextPair()));
+      const next = await fetchNextPair();
+      lists.push(...next.lists);
       deals = filterPreferredDeals(mergeDeals(lists));
     }
   }

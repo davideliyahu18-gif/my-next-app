@@ -460,7 +460,7 @@ async function onGroupReady() {
     await saveState();
   }
 
-  await runScan({ forceRefresh: false, reason: "group-ready" });
+  await runScan({ forceRefresh: true, reason: "group-ready" });
 }
 
 async function runScan({ forceRefresh = false, reason = "cron" } = {}) {
@@ -518,8 +518,16 @@ async function runScan({ forceRefresh = false, reason = "cron" } = {}) {
     await saveSeen();
     log.info("Scan done — %d new messages sent", sent);
 
-    // If forced refresh still found nothing new, try one more nearby window pair soon
-    // (rate-limited by lastForceRefreshAt / cache accumulation).
+    // If we only hit already-sent deals, roll windows forward once more.
+    if (sent === 0 && deals.length > 0 && reason !== "followup-refresh") {
+      const followGap = Date.now() - lastForceRefreshAt;
+      if (followGap > 2 * 60_000) {
+        lastForceRefreshAt = Date.now();
+        scanRunning = false;
+        await runScan({ forceRefresh: true, reason: "followup-refresh" });
+        return;
+      }
+    }
   } catch (error) {
     log.error({ error }, "Scan failed");
   } finally {
