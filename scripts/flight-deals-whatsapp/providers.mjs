@@ -298,26 +298,41 @@ function mergeDeals(lists) {
     for (const deal of list) {
       const key = `${deal.origin}-${deal.destination}-${deal.departureDate}-${deal.returnDate}`;
       const existing = byKey.get(key);
-      if (!existing || deal.priceUsd < existing.priceUsd) {
+      const dealRank = Number(deal.priceIls ?? deal.priceUsd);
+      const existingRank = existing
+        ? Number(existing.priceIls ?? existing.priceUsd)
+        : null;
+      if (!existing || dealRank < existingRank) {
+        const priceIls = deal.priceIls ?? existing?.priceIls ?? null;
+        const priceUsd = Number(
+          deal.priceUsd ??
+            (priceIls != null ? priceIls / 3.7 : existing?.priceUsd),
+        );
         byKey.set(key, {
+          ...existing,
           ...deal,
+          priceIls,
+          priceUsd,
           id: buildDealId(
             deal.origin,
             deal.destination,
             deal.departureDate,
             deal.returnDate,
-            Math.min(deal.priceUsd, existing?.priceUsd ?? deal.priceUsd),
+            priceIls ?? priceUsd,
           ),
-          priceUsd: Math.min(deal.priceUsd, existing?.priceUsd ?? deal.priceUsd),
           imageUrl: deal.imageUrl || existing?.imageUrl || null,
           bookingUrl: deal.bookingUrl || existing?.bookingUrl || null,
           destinationNameHe: deal.destinationNameHe || existing?.destinationNameHe || null,
           countryNameHe: deal.countryNameHe || existing?.countryNameHe || null,
+          airlineLabelHe: deal.airlineLabelHe || existing?.airlineLabelHe || null,
+          baggageLabelHe: deal.baggageLabelHe || existing?.baggageLabelHe || null,
         });
       }
     }
   }
-  return [...byKey.values()].sort((a, b) => a.priceUsd - b.priceUsd);
+  return [...byKey.values()].sort(
+    (a, b) => Number(a.priceIls ?? a.priceUsd) - Number(b.priceIls ?? b.priceUsd),
+  );
 }
 
 /**
