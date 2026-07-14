@@ -357,21 +357,14 @@ function buildStatusReply() {
     ? `${Math.max(1, Math.round((Date.now() - lastScanAt) / 60_000))} דק׳`
     : "עדיין לא";
   const th = status.thailand;
-  const thLine = th
-    ? `תאילנד קבוע: 10/02/2027–10/03/2027 · אמירטס/איתיחאד` +
-      (th.lowest != null ? ` · נמוך כרגע $${th.lowest}` : "")
-    : "";
   return [
     "כן ✅ *מחפש*",
     "",
-    `סורק כל 10 דקות · TLV הלוך-חזור עד $${cfg.maxPrice}`,
-    "רק *רביעי→שני* או *חמישי→ראשון*",
-    "טווח חיפוש: *יולי–דצמבר*",
-    thLine,
+    "רק *תאילנד* · *אמירטס + איתיחאד* בלבד",
+    "תאריכים: *10/02/2027 – 10/03/2027*",
+    th?.lowest != null ? `מחיר נמוך כרגע: *$${th.lowest}*` : "עדיין אין מחיר במאגר",
     `סריקה אחרונה: ${ago} | נמצאו ${lastScanFound} | נשלחו חדשים ${lastScanSent}`,
-    `במאגר כרגע: ${status.cachedDeals} דילים`,
-    status.nextWindow ? `חלון הבא: ${status.nextWindow}` : "",
-    "כשיימצא דיל חדש — אשלח לכאן.",
+    "כשהמחיר יירד — אשלח לכאן.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -469,12 +462,11 @@ async function onGroupReady() {
       [
         "✅ *הבוט מחובר!*",
         "",
-        `אני סורק כל 10 דקות טיסות הלוך-חזור מ-TLV עד $${cfg.maxPrice}.`,
-        "רק רביעי→שני או חמישי→ראשון · יולי עד דצמבר.",
-        "מעקב קבוע גם לתאילנד: 10/02/2027–10/03/2027 · אמירטס ואיתיחאד בלבד.",
+        "מחפש *רק* טיסות תאילנד באמירטס ואיתיחאד.",
+        "תאריכים קבועים: 10/02/2027–10/03/2027.",
         "כתבו *בוט מחפש?* לבדיקת סטטוס.",
-        "כשאמצא דיל חדש — אשלח לכאן תאריכים ומחיר.",
-        cfg.demoMode ? "\n_מצב דמו פעיל — הודעת בדיקה תישלח בסריקה הראשונה._" : "",
+        "כשהמחיר יירד — אשלח לכאן.",
+        cfg.demoMode ? "\n_מצב דמו פעיל._" : "",
       ]
         .filter(Boolean)
         .join("\n"),
@@ -516,14 +508,13 @@ async function runScan({ forceRefresh = false, reason = "cron" } = {}) {
     if (shouldForce) lastForceRefreshAt = Date.now();
 
     log.info(
-      "Scanning for TLV deals ≤ $%d (%s%s)",
-      cfg.maxPrice,
+      "Scanning Thailand EK/EY watch (%s%s)",
       reason,
       shouldForce ? ", force-refresh" : "",
     );
     const deals = await fetchDeals({ forceRefresh: shouldForce });
     lastScanFound = deals.length;
-    log.info("Found %d deals at or below max price", deals.length);
+    log.info("Found %d Thailand EK/EY options", deals.length);
 
     let sent = 0;
     for (const deal of deals) {
@@ -541,16 +532,7 @@ async function runScan({ forceRefresh = false, reason = "cron" } = {}) {
     await saveSeen();
     log.info("Scan done — %d new messages sent", sent);
 
-    // If we only hit already-sent deals, roll windows forward once more.
-    if (sent === 0 && deals.length > 0 && reason !== "followup-refresh") {
-      const followGap = Date.now() - lastForceRefreshAt;
-      if (followGap > 2 * 60_000) {
-        lastForceRefreshAt = Date.now();
-        scanRunning = false;
-        await runScan({ forceRefresh: true, reason: "followup-refresh" });
-        return;
-      }
-    }
+    // Follow-up Europe window rolling no longer needed.
   } catch (error) {
     log.error({ error }, "Scan failed");
   } finally {

@@ -719,32 +719,18 @@ export async function searchDeals({ forceRefresh = false } = {}) {
     );
   }
 
-  let deals;
-  if (provider === "demo") deals = demoDeals();
-  else if (provider === "travelpayouts") deals = await searchTravelpayouts();
-  else if (provider === "merged") {
-    const results = await Promise.allSettled([
-      searchSerpApi({ forceRefresh }),
-      searchSkyscanner(),
-    ]);
-    const lists = results.filter((r) => r.status === "fulfilled").map((r) => r.value);
-    for (const r of results) {
-      if (r.status === "rejected") console.warn("[providers]", r.reason);
-    }
-    deals = mergeDeals(lists);
-  } else if (provider === "serpapi") deals = await searchSerpApi({ forceRefresh });
-  else if (provider === "skyscanner") deals = await searchSkyscanner();
-  else deals = await searchAmadeus();
+  // Europe weekend hunting disabled — only permanent Thailand EK/EY watch.
+  if (provider === "demo") {
+    const th = await searchThailandWatch({ forceRefresh: true });
+    return th.length ? th : demoDeals();
+  }
 
-  const preferred = filterPreferredDeals(deals);
   const thailandResult = await Promise.allSettled([
     searchThailandWatch({ forceRefresh }),
   ]);
-  const thailand =
-    thailandResult[0].status === "fulfilled" ? thailandResult[0].value : [];
   if (thailandResult[0].status === "rejected") {
     console.warn("[thailand]", thailandResult[0].reason);
+    return [];
   }
-
-  return mergeDeals([preferred, thailand]);
+  return thailandResult[0].value;
 }
