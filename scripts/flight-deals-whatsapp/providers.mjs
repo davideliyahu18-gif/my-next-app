@@ -446,12 +446,30 @@ function itineraryAirlineCodes(item) {
   return codes;
 }
 
-/** All segments must be Emirates (EK) or Etihad (EY) only — no codeshare mixes. */
+/** All segments EK/EY, or Emirates↔flydubai codeshare marketed as Emirates. */
 function isAllowedThailandAirline(item, allowedCodes) {
+  const allowed = new Set(allowedCodes.map((c) => c.toUpperCase()));
   const codes = itineraryAirlineCodes(item);
   if (!codes.length) return false;
-  const allowed = new Set(allowedCodes.map((c) => c.toUpperCase()));
-  return codes.every((c) => allowed.has(c));
+  if (codes.every((c) => allowed.has(c))) return true;
+
+  const ticketBits = []
+    .concat(item?.ticket_also_sold_by ?? [], item?.ticket ?? [])
+    .map((v) => String(v));
+  const soldAsEmirates = ticketBits.some((t) => /emirates/i.test(t)) || codes.includes("EK");
+  const soldAsEtihad = ticketBits.some((t) => /etihad/i.test(t)) || codes.includes("EY");
+
+  if (
+    allowed.has("EK") &&
+    soldAsEmirates &&
+    codes.every((c) => c === "EK" || c === "FZ")
+  ) {
+    return true;
+  }
+  if (allowed.has("EY") && soldAsEtihad && codes.every((c) => c === "EY")) {
+    return true;
+  }
+  return false;
 }
 
 function thailandAirlineLabel(item) {
@@ -623,38 +641,65 @@ async function searchThailandWatch({ forceRefresh = false } = {}) {
 
   const cfg = thailandWatchConfig();
   const maxCandidates = Number(
-    process.env.FLIGHT_DEALS_THAILAND_BAG_CANDIDATES ?? "4",
+    process.env.FLIGHT_DEALS_THAILAND_BAG_CANDIDATES ?? "6",
   );
   const deals = [];
 
   for (const airport of cfg.airports) {
     try {
-      const payload = await fetchGoogleFlights({
-        engine: "google_flights",
-        departure_id: ORIGIN,
-        arrival_id: airport,
-        outbound_date: cfg.outbound,
-        return_date: cfg.returnDate,
-        type: "1",
-        currency: "USD",
-        hl: "en",
-        gl: "il",
-        include_airlines: cfg.airlines.join(","),
-        api_key: apiKey,
-      });
+      // Search each airline separately so bag-included Emirates isn't
+      // crowded out by cheaper bagless Etihad Light fares.
+      const airlineLists = [];
+      for (const airline of cfg.airlines) {
+        try {
+          const payload = await fetchGoogleFlights({
+            engine: "google_flights",
+            departure_id: ORIGIN,
+            arrival_id: airport,
+            outbound_date: cfg.outbound,
+            return_date: cfg.returnDate,
+            type: "1",
+            currency: "USD",
+            hl: "en",
+            gl: "il",
+            include_airlines: airline,
+            api_key: apiKey,
+          });
+          airlineLists.push({
+            airline,
+            payload,
+            flights: [
+              ...(payload.best_flights ?? []),
+              ...(payload.other_flights ?? []),
+            ],
+          });
+        } catch (error) {
+          console.warn("[thailand] airline search failed", airport, airline, error);
+        }
+      }
 
-      const candidates = [
-        ...(payload.best_flights ?? []),
-        ...(payload.other_flights ?? []),
-      ]
-        .filter((item) => isAllowedThailandAirline(item, cfg.airlines))
-        .filter((item) => Number.isFinite(Number(item.price)))
-        .filter((item) => Number(item.price) <= cfg.maxPrice)
-        .sort((a, b) => Number(a.price) - Number(b.price))
-        .slice(0, maxCandidates);
+      const candidates = [];
+      const seenTokens = new Set();
+      for (const { flights } of airlineLists) {
+        for (const item of flights) {
+          if (!isAllowedThailandAirline(item, cfg.airlines)) continue;
+          const priceUsd = Number(item.price);
+          if (!Number.isFinite(priceUsd) || priceUsd > cfg.maxPrice) continue;
+          const token = item.departure_token || `${item.price}-${itineraryAirlineCodes(item).join("-")}`;
+          if (seenTokens.has(token)) continue;
+          seenTokens.add(token);
+          candidates.push(item);
+        }
+      }
+
+      candidates.sort((a, b) => Number(a.price) - Number(b.price));
+      const toCheck = candidates.slice(0, maxCandidates);
+      console.log(
+        `[thailand] ${airport}: ${candidates.length} EK/EY candidates, deep-checking ${toCheck.length}`,
+      );
 
       let lowest = null;
-      for (const candidate of candidates) {
+      for (const candidate of toCheck) {
         try {
           const bagFare = await findBagIncludedFare({
             apiKey,
@@ -684,7 +729,7 @@ async function searchThailandWatch({ forceRefresh = false } = {}) {
         countryHe: "תאילנד",
       };
       const bookingUrl =
-        payload.search_metadata?.google_flights_url ||
+        airlineLists[0]?.payload?.search_metadata?.google_flights_url ||
         `https://www.google.com/travel/flights?hl=he&gl=il&curr=USD#flt=${ORIGIN}.${airport}.${cfg.outbound}*${airport}.${ORIGIN}.${cfg.returnDate}`;
 
       deals.push({
