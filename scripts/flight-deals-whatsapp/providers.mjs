@@ -305,6 +305,7 @@ async function searchSerpApi({ forceRefresh = false } = {}) {
 
   async function fetchNextPair() {
     const windows = preferredDateWindows();
+    if (!windows.length) return [];
     const w1 = windows[weekendRotate % windows.length];
     const w2 = windows[(weekendRotate + 1) % windows.length];
     weekendRotate = (weekendRotate + 2) % Math.max(windows.length, 1);
@@ -332,16 +333,39 @@ async function searchSerpApi({ forceRefresh = false } = {}) {
     return lists;
   }
 
+  function jumpToMonth(month /* 1-12 */) {
+    const windows = preferredDateWindows();
+    const year = windows[0]?.outbound_date?.slice(0, 4);
+    if (!year) return;
+    const target = `${year}-${String(month).padStart(2, "0")}-01`;
+    const idx = windows.findIndex((w) => w.outbound_date >= target);
+    if (idx >= 0) {
+      weekendRotate = idx;
+      console.log(`[serpapi] jump to month ${month} @ ${windows[idx].outbound_date}`);
+    }
+  }
+
   const lists = await fetchNextPair();
-  // If this pair is empty under budget, try one more nearby pair immediately.
-  const firstBatch = filterPreferredDeals(mergeDeals(lists));
-  if (firstBatch.length === 0) {
-    lists.push(...(await fetchNextPair()));
+  let deals = filterPreferredDeals(mergeDeals(lists));
+
+  // July–August is often empty under $150 — jump to September and keep sampling.
+  if (deals.length === 0) {
+    const outbound = lists
+      .flat()
+      .map((d) => d.departureDate)
+      .find(Boolean);
+    const month = outbound ? Number(outbound.slice(5, 7)) : 7;
+    if (month <= 8) jumpToMonth(9);
+    const extraPairs = forceRefresh ? 4 : 2;
+    for (let i = 0; i < extraPairs && deals.length === 0; i += 1) {
+      lists.push(...(await fetchNextPair()));
+      deals = filterPreferredDeals(mergeDeals(lists));
+    }
   }
 
   if (serpCache.deals?.length) lists.push(serpCache.deals);
 
-  const deals = filterPreferredDeals(mergeDeals(lists));
+  deals = filterPreferredDeals(mergeDeals(lists));
   serpCache = { at: Date.now(), deals };
   console.log(`[serpapi] total preferred ≤$${maxPrice()}: ${deals.length}`);
   return deals;
