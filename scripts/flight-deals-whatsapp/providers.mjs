@@ -460,6 +460,154 @@ function thailandAirlineLabel(item) {
   return codes.map((c) => AIRLINE_LABELS_HE[c] || c).join(" + ");
 }
 
+function baggageTextList(...sources) {
+  const out = [];
+  for (const source of sources) {
+    if (!source) continue;
+    if (Array.isArray(source)) {
+      for (const row of source) out.push(...baggageTextList(row));
+      continue;
+    }
+    if (typeof source === "string") {
+      out.push(source);
+      continue;
+    }
+    if (typeof source === "object") {
+      for (const value of Object.values(source)) out.push(...baggageTextList(value));
+    }
+  }
+  return out;
+}
+
+/** True when fare text includes free checked luggage (not "for a fee" / "No checked"). */
+export function hasFreeCheckedBag(baggagePrices) {
+  const texts = baggageTextList(baggagePrices).map((t) => String(t).toLowerCase());
+  if (!texts.length) return false;
+  const joined = texts.join(" | ");
+  if (
+    /\d+\s*free checked bag/.test(joined) ||
+    /\d+\s*free checked bags/.test(joined) ||
+    /free checked bag/.test(joined)
+  ) {
+    return true;
+  }
+  // Hebrew variants
+  if (/מזווד/.test(joined) && /(כלול|חינם)/.test(joined) && /צ.?ק|כבודה|מזוודה/.test(joined)) {
+    return true;
+  }
+  if (/no checked bags/.test(joined)) return false;
+  if (/checked baggage for a fee/.test(joined)) return false;
+  return false;
+}
+
+async function fetchGoogleFlights(params) {
+  const res = await fetch(
+    `https://serpapi.com/search.json?${new URLSearchParams(params)}`,
+  );
+  if (!res.ok) throw new Error(`SerpAPI HTTP ${res.status}`);
+  const payload = await res.json();
+  if (payload.error) throw new Error(payload.error);
+  return payload;
+}
+
+/**
+ * Deep-check a candidate: outbound → return → booking options.
+ * Returns lowest airline/official fare that includes free checked bag(s).
+ */
+async function findBagIncludedFare({
+  apiKey,
+  airport,
+  outbound,
+  returnDate,
+  outboundItem,
+  allowedAirlines,
+  maxPrice,
+}) {
+  if (!outboundItem?.departure_token) return null;
+
+  const common = {
+    engine: "google_flights",
+    departure_id: ORIGIN,
+    arrival_id: airport,
+    outbound_date: outbound,
+    return_date: returnDate,
+    type: "1",
+    currency: "USD",
+    // English keeps baggage strings stable ("2 free checked bags").
+    hl: "en",
+    gl: "il",
+    api_key: apiKey,
+  };
+
+  const returnsPayload = await fetchGoogleFlights({
+    ...common,
+    departure_token: outboundItem.departure_token,
+  });
+  const returns = [
+    ...(returnsPayload.best_flights ?? []),
+    ...(returnsPayload.other_flights ?? []),
+  ]
+    .filter((item) => item?.booking_token)
+    .sort((a, b) => {
+      const aPure = isAllowedThailandAirline(a, allowedAirlines) ? 0 : 1;
+      const bPure = isAllowedThailandAirline(b, allowedAirlines) ? 0 : 1;
+      if (aPure !== bPure) return aPure - bPure;
+      return Number(a.price ?? 9e9) - Number(b.price ?? 9e9);
+    });
+
+  for (const ret of returns.slice(0, 2)) {
+    const booking = await fetchGoogleFlights({
+      ...common,
+      booking_token: ret.booking_token,
+    });
+
+    const options = booking.booking_options ?? [];
+    let best = null;
+    for (const option of options) {
+      const together = option.together ?? option;
+      const baggage = together.baggage_prices ?? booking.baggage_prices;
+      if (!hasFreeCheckedBag(baggage)) continue;
+
+      const priceUsd = Number(together.price ?? ret.price ?? outboundItem.price);
+      if (!Number.isFinite(priceUsd) || priceUsd > maxPrice) continue;
+
+      // Prefer official airline checkout when available.
+      const airlinePreferred = Boolean(together.airline);
+      if (
+        !best ||
+        (airlinePreferred && !best.airlinePreferred) ||
+        (airlinePreferred === best.airlinePreferred && priceUsd < best.priceUsd)
+      ) {
+        best = {
+          priceUsd,
+          airlinePreferred,
+          baggage,
+          outboundItem,
+          returnItem: ret,
+          bookWith: together.book_with ?? null,
+        };
+      }
+    }
+
+    if (best) {
+      const bagTexts = baggageTextList(best.baggage);
+      const bagLabel =
+        bagTexts.find((t) => /checked bag/i.test(t)) ||
+        bagTexts.find((t) => /מזווד/i.test(t)) ||
+        "מזוודה כלולה";
+      return {
+        ...best,
+        baggageLabelHe: /checked bags?/i.test(bagLabel)
+          ? bagLabel.replace(/(\d+)\s*free checked bags?/i, "$1 מזוודות כלולות")
+          : "מזוודה כלולה",
+        baggageLabel: bagLabel,
+      };
+    }
+  }
+
+  return null;
+}
+
 async function searchThailandWatch({ forceRefresh = false } = {}) {
   const apiKey = process.env.SERPAPI_API_KEY;
   if (!apiKey) return [];
@@ -474,11 +622,14 @@ async function searchThailandWatch({ forceRefresh = false } = {}) {
   }
 
   const cfg = thailandWatchConfig();
+  const maxCandidates = Number(
+    process.env.FLIGHT_DEALS_THAILAND_BAG_CANDIDATES ?? "4",
+  );
   const deals = [];
 
   for (const airport of cfg.airports) {
     try {
-      const params = new URLSearchParams({
+      const payload = await fetchGoogleFlights({
         engine: "google_flights",
         departure_id: ORIGIN,
         arrival_id: airport,
@@ -486,37 +637,47 @@ async function searchThailandWatch({ forceRefresh = false } = {}) {
         return_date: cfg.returnDate,
         type: "1",
         currency: "USD",
-        hl: "he",
+        hl: "en",
         gl: "il",
         include_airlines: cfg.airlines.join(","),
         api_key: apiKey,
       });
-      const res = await fetch(`https://serpapi.com/search.json?${params}`);
-      if (!res.ok) {
-        console.warn("[thailand] HTTP", res.status, airport);
-        continue;
-      }
-      const payload = await res.json();
-      if (payload.error) {
-        console.warn("[thailand]", airport, payload.error);
-        continue;
-      }
 
-      const flights = [
+      const candidates = [
         ...(payload.best_flights ?? []),
         ...(payload.other_flights ?? []),
-      ];
+      ]
+        .filter((item) => isAllowedThailandAirline(item, cfg.airlines))
+        .filter((item) => Number.isFinite(Number(item.price)))
+        .filter((item) => Number(item.price) <= cfg.maxPrice)
+        .sort((a, b) => Number(a.price) - Number(b.price))
+        .slice(0, maxCandidates);
+
       let lowest = null;
-      for (const item of flights) {
-        const priceUsd = Number(item.price);
-        if (!Number.isFinite(priceUsd)) continue;
-        if (!isAllowedThailandAirline(item, cfg.airlines)) continue;
-        if (lowest === null || priceUsd < lowest.priceUsd) {
-          lowest = { priceUsd, item };
+      for (const candidate of candidates) {
+        try {
+          const bagFare = await findBagIncludedFare({
+            apiKey,
+            airport,
+            outbound: cfg.outbound,
+            returnDate: cfg.returnDate,
+            outboundItem: candidate,
+            allowedAirlines: cfg.airlines,
+            maxPrice: cfg.maxPrice,
+          });
+          if (!bagFare) continue;
+          if (!lowest || bagFare.priceUsd < lowest.priceUsd) {
+            lowest = bagFare;
+          }
+        } catch (error) {
+          console.warn("[thailand] bag-check failed", airport, error);
         }
       }
-      // Do NOT use price_insights — those include other airlines.
-      if (!lowest || lowest.priceUsd > cfg.maxPrice) continue;
+
+      if (!lowest) {
+        console.log(`[thailand] ${airport}: no EK/EY fare with free checked bag`);
+        continue;
+      }
 
       const meta = THAILAND_META[airport] ?? {
         nameHe: "תאילנד",
@@ -527,7 +688,13 @@ async function searchThailandWatch({ forceRefresh = false } = {}) {
         `https://www.google.com/travel/flights?hl=he&gl=il&curr=USD#flt=${ORIGIN}.${airport}.${cfg.outbound}*${airport}.${ORIGIN}.${cfg.returnDate}`;
 
       deals.push({
-        id: buildDealId(ORIGIN, airport, cfg.outbound, cfg.returnDate, lowest.priceUsd),
+        id: buildDealId(
+          ORIGIN,
+          airport,
+          cfg.outbound,
+          cfg.returnDate,
+          lowest.priceUsd,
+        ),
         origin: ORIGIN,
         destination: airport,
         destinationNameHe: meta.nameHe,
@@ -538,7 +705,9 @@ async function searchThailandWatch({ forceRefresh = false } = {}) {
         bookingUrl,
         imageUrl: null,
         watch: "thailand",
-        airlineLabelHe: thailandAirlineLabel(lowest.item),
+        airlineLabelHe: thailandAirlineLabel(lowest.outboundItem),
+        baggageIncluded: true,
+        baggageLabelHe: lowest.baggageLabelHe,
       });
     } catch (error) {
       console.warn("[thailand]", airport, error);
@@ -548,10 +717,11 @@ async function searchThailandWatch({ forceRefresh = false } = {}) {
   const merged = mergeDeals([deals]).sort((a, b) => a.priceUsd - b.priceUsd);
   thailandCache = { at: Date.now(), deals: merged };
   console.log(
-    `[thailand] EK/EY only ${cfg.outbound}→${cfg.returnDate} airports=${cfg.airports.join(",")}` +
+    `[thailand] EK/EY + bag ${cfg.outbound}→${cfg.returnDate}` +
+      ` airports=${cfg.airports.join(",")}` +
       ` → ${merged.length} deals ≤$${cfg.maxPrice}` +
       (merged[0]
-        ? ` (lowest $${merged[0].priceUsd} ${merged[0].airlineLabelHe || ""})`
+        ? ` (lowest $${merged[0].priceUsd} ${merged[0].airlineLabelHe || ""} · ${merged[0].baggageLabelHe || "bag"})`
         : ""),
   );
   return merged;

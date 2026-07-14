@@ -184,15 +184,17 @@ function formatDealMessage(deal) {
   const backDay = hebrewDay(deal.returnDate);
   const isThailand = deal.watch === "thailand";
   return [
-    isThailand ? "🇹🇭 *מעקב תאילנד · אמירטס/איתיחאד*" : "🔥 *מכירה מצוינת!*",
+    isThailand ? "🇹🇭 *מעקב תאילנד · אמירטס/איתיחאד · מזוודה*" : "🔥 *מכירה מצוינת!*",
     "",
     country ? `*${dest}, ${country}*` : `*${dest}*`,
     `📅 יציאה ${outDay}: ${formatDate(deal.departureDate)}`,
     `📅 חזרה ${backDay}: ${formatDate(deal.returnDate)}`,
     `💰 ₪${ils} (כ־$${deal.priceUsd.toFixed(0)}) *הלוך ושוב*`,
     isThailand && deal.airlineLabelHe ? `🛫 חברת תעופה: *${deal.airlineLabelHe}*` : "",
+    isThailand ? `🧳 *מזוודה כלולה*` : "",
+    isThailand && deal.baggageLabelHe ? `   (${deal.baggageLabelHe})` : "",
     isThailand
-      ? `✈️ מתל אביב · מעקב קבוע · אמירטס ואיתיחאד בלבד`
+      ? `✈️ מתל אביב · מעקב קבוע · אמירטס/איתיחאד + מזוודה`
       : `✈️ מתל אביב · רביעי→שני / חמישי→ראשון · יולי–דצמבר · עד ${cfg.maxPrice}$`,
     deal.bookingUrl ? `\n🔗 קישור להזמנה:\n${deal.bookingUrl}` : "",
   ]
@@ -360,7 +362,7 @@ function buildStatusReply() {
   return [
     "כן ✅ *מחפש*",
     "",
-    "רק *תאילנד* · *אמירטס + איתיחאד* בלבד",
+    "רק *תאילנד* · *אמירטס + איתיחאד* · *מזוודה כלולה*",
     "תאריכים: *10/02/2027 – 10/03/2027*",
     th?.lowest != null ? `מחיר נמוך כרגע: *$${th.lowest}*` : "עדיין אין מחיר במאגר",
     `סריקה אחרונה: ${ago} | נמצאו ${lastScanFound} | נשלחו חדשים ${lastScanSent}`,
@@ -462,7 +464,7 @@ async function onGroupReady() {
       [
         "✅ *הבוט מחובר!*",
         "",
-        "מחפש *רק* טיסות תאילנד באמירטס ואיתיחאד.",
+        "מחפש *רק* טיסות תאילנד באמירטס ואיתיחאד *עם מזוודה כלולה*.",
         "תאריכים קבועים: 10/02/2027–10/03/2027.",
         "כתבו *בוט מחפש?* לבדיקת סטטוס.",
         "כשהמחיר יירד — אשלח לכאן.",
