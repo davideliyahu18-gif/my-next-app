@@ -184,14 +184,15 @@ function formatDealMessage(deal) {
   const backDay = hebrewDay(deal.returnDate);
   const isThailand = deal.watch === "thailand";
   return [
-    isThailand ? "🇹🇭 *מעקב תאילנד*" : "🔥 *מכירה מצוינת!*",
+    isThailand ? "🇹🇭 *מעקב תאילנד · אמירטס/איתיחאד*" : "🔥 *מכירה מצוינת!*",
     "",
     country ? `*${dest}, ${country}*` : `*${dest}*`,
     `📅 יציאה ${outDay}: ${formatDate(deal.departureDate)}`,
     `📅 חזרה ${backDay}: ${formatDate(deal.returnDate)}`,
     `💰 ₪${ils} (כ־$${deal.priceUsd.toFixed(0)}) *הלוך ושוב*`,
+    isThailand && deal.airlineLabelHe ? `🛫 חברת תעופה: *${deal.airlineLabelHe}*` : "",
     isThailand
-      ? `✈️ מתל אביב · מעקב קבוע לתאריכים אלו`
+      ? `✈️ מתל אביב · מעקב קבוע · אמירטס ואיתיחאד בלבד`
       : `✈️ מתל אביב · רביעי→שני / חמישי→ראשון · יולי–דצמבר · עד ${cfg.maxPrice}$`,
     deal.bookingUrl ? `\n🔗 קישור להזמנה:\n${deal.bookingUrl}` : "",
   ]
@@ -357,7 +358,7 @@ function buildStatusReply() {
     : "עדיין לא";
   const th = status.thailand;
   const thLine = th
-    ? `תאילנד קבוע: 10/02/2027–10/03/2027` +
+    ? `תאילנד קבוע: 10/02/2027–10/03/2027 · אמירטס/איתיחאד` +
       (th.lowest != null ? ` · נמוך כרגע $${th.lowest}` : "")
     : "";
   return [
@@ -470,7 +471,7 @@ async function onGroupReady() {
         "",
         `אני סורק כל 10 דקות טיסות הלוך-חזור מ-TLV עד $${cfg.maxPrice}.`,
         "רק רביעי→שני או חמישי→ראשון · יולי עד דצמבר.",
-        "מעקב קבוע גם לתאילנד: 10/02/2027–10/03/2027.",
+        "מעקב קבוע גם לתאילנד: 10/02/2027–10/03/2027 · אמירטס ואיתיחאד בלבד.",
         "כתבו *בוט מחפש?* לבדיקת סטטוס.",
         "כשאמצא דיל חדש — אשלח לכאן תאריכים ומחיר.",
         cfg.demoMode ? "\n_מצב דמו פעיל — הודעת בדיקה תישלח בסריקה הראשונה._" : "",

@@ -27,6 +27,11 @@ export function thailandWatchConfig() {
       .map((s) => s.trim().toUpperCase())
       .filter(Boolean),
     maxPrice: Number(process.env.FLIGHT_DEALS_THAILAND_MAX_PRICE_USD ?? "1200"),
+    /** IATA codes — Emirates + Etihad only */
+    airlines: String(process.env.FLIGHT_DEALS_THAILAND_AIRLINES ?? "EK,EY")
+      .split(",")
+      .map((s) => s.trim().toUpperCase())
+      .filter(Boolean),
   };
 }
 
@@ -419,6 +424,42 @@ const THAILAND_META = {
   CNX: { nameHe: "צ׳יאנג מאי", countryHe: "תאילנד" },
 };
 
+const AIRLINE_LABELS_HE = {
+  EK: "אמירטס",
+  EY: "איתיחאד",
+  Emirates: "אמירטס",
+  Etihad: "איתיחאד",
+};
+
+function itineraryAirlineCodes(item) {
+  const codes = [];
+  for (const leg of item?.flights ?? []) {
+    const fromNumber = String(leg.flight_number ?? "")
+      .trim()
+      .split(/\s+/)[0]
+      ?.toUpperCase();
+    if (fromNumber && /^[A-Z0-9]{2}$/.test(fromNumber)) codes.push(fromNumber);
+    const name = String(leg.airline ?? "").trim();
+    if (/^emirates$/i.test(name)) codes.push("EK");
+    if (/^etihad$/i.test(name)) codes.push("EY");
+  }
+  return codes;
+}
+
+/** All segments must be Emirates (EK) or Etihad (EY) only — no codeshare mixes. */
+function isAllowedThailandAirline(item, allowedCodes) {
+  const codes = itineraryAirlineCodes(item);
+  if (!codes.length) return false;
+  const allowed = new Set(allowedCodes.map((c) => c.toUpperCase()));
+  return codes.every((c) => allowed.has(c));
+}
+
+function thailandAirlineLabel(item) {
+  const codes = [...new Set(itineraryAirlineCodes(item))];
+  if (!codes.length) return "אמירטס/איתיחאד";
+  return codes.map((c) => AIRLINE_LABELS_HE[c] || c).join(" + ");
+}
+
 async function searchThailandWatch({ forceRefresh = false } = {}) {
   const apiKey = process.env.SERPAPI_API_KEY;
   if (!apiKey) return [];
@@ -447,6 +488,7 @@ async function searchThailandWatch({ forceRefresh = false } = {}) {
         currency: "USD",
         hl: "he",
         gl: "il",
+        include_airlines: cfg.airlines.join(","),
         api_key: apiKey,
       });
       const res = await fetch(`https://serpapi.com/search.json?${params}`);
@@ -468,14 +510,12 @@ async function searchThailandWatch({ forceRefresh = false } = {}) {
       for (const item of flights) {
         const priceUsd = Number(item.price);
         if (!Number.isFinite(priceUsd)) continue;
+        if (!isAllowedThailandAirline(item, cfg.airlines)) continue;
         if (lowest === null || priceUsd < lowest.priceUsd) {
           lowest = { priceUsd, item };
         }
       }
-      const insightLow = Number(payload.price_insights?.lowest_price);
-      if (Number.isFinite(insightLow) && (lowest === null || insightLow < lowest.priceUsd)) {
-        lowest = { priceUsd: insightLow, item: lowest?.item ?? null };
-      }
+      // Do NOT use price_insights — those include other airlines.
       if (!lowest || lowest.priceUsd > cfg.maxPrice) continue;
 
       const meta = THAILAND_META[airport] ?? {
@@ -498,6 +538,7 @@ async function searchThailandWatch({ forceRefresh = false } = {}) {
         bookingUrl,
         imageUrl: null,
         watch: "thailand",
+        airlineLabelHe: thailandAirlineLabel(lowest.item),
       });
     } catch (error) {
       console.warn("[thailand]", airport, error);
@@ -507,9 +548,11 @@ async function searchThailandWatch({ forceRefresh = false } = {}) {
   const merged = mergeDeals([deals]).sort((a, b) => a.priceUsd - b.priceUsd);
   thailandCache = { at: Date.now(), deals: merged };
   console.log(
-    `[thailand] ${cfg.outbound}→${cfg.returnDate} airports=${cfg.airports.join(",")}` +
+    `[thailand] EK/EY only ${cfg.outbound}→${cfg.returnDate} airports=${cfg.airports.join(",")}` +
       ` → ${merged.length} deals ≤$${cfg.maxPrice}` +
-      (merged[0] ? ` (lowest $${merged[0].priceUsd})` : ""),
+      (merged[0]
+        ? ` (lowest $${merged[0].priceUsd} ${merged[0].airlineLabelHe || ""})`
+        : ""),
   );
   return merged;
 }
