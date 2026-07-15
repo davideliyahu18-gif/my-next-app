@@ -14,6 +14,7 @@ import {
   formatHalfTimeAlert,
   formatKickoffReminder,
   formatMatchStartAlert,
+  formatPenaltiesStartAlert,
   formatSecondHalfStartAlert,
 } from "./format";
 import {
@@ -40,6 +41,7 @@ function mapSnapshotStatus(
 ): FifaBotMatchSnapshot["status"] {
   if (status === "PAUSE") return "pause";
   if (status === "IN_PLAY") return "live";
+  if (status === "PENALTIES") return "penalties";
   if (status === "FINISHED") return "finished";
   return "upcoming";
 }
@@ -93,6 +95,7 @@ function toSnapshot(
     cornerIds: previous?.cornerIds ?? [],
     halfTimeSent: previous?.halfTimeSent ?? false,
     secondHalfSent: previous?.secondHalfSent ?? false,
+    penaltiesSent: previous?.penaltiesSent ?? false,
   };
 }
 
@@ -151,6 +154,9 @@ export async function collectFifaBotAlerts(): Promise<{
           snapshot.halfTimeSent = true;
           snapshot.secondHalfSent = true;
         }
+      }
+      if (snapshot.status === "penalties" || snapshot.status === "finished") {
+        snapshot.penaltiesSent = true;
       }
       nextSnapshots[snapshot.id] = snapshot;
       continue;
@@ -267,6 +273,23 @@ export async function collectFifaBotAlerts(): Promise<{
       }
     }
 
+    if (
+      snapshot.status === "penalties" &&
+      prev?.status !== "penalties" &&
+      !snapshot.penaltiesSent
+    ) {
+      const alert = await buildAlert({
+        id: `pens:${snapshot.id}`,
+        kind: "penalties",
+        matchId: snapshot.id,
+        text: formatPenaltiesStartAlert(snapshot),
+      });
+      if (alert) {
+        alerts.push(alert);
+        snapshot.penaltiesSent = true;
+      }
+    }
+
     nextSnapshots[snapshot.id] = snapshot;
 
     if (prev && prev.status !== "finished" && snapshot.status === "finished") {
@@ -280,12 +303,16 @@ export async function collectFifaBotAlerts(): Promise<{
     }
   }
 
-  // Catch full-time for matches that just left the live/pause window.
+  // Catch full-time for matches that just left the live/pause/pens window.
   for (const [id, prev] of Object.entries(previous)) {
-    const wasInPlay = prev.status === "live" || prev.status === "pause";
+    const wasInPlay =
+      prev.status === "live" ||
+      prev.status === "pause" ||
+      prev.status === "penalties";
     const stillInPlay =
       nextSnapshots[id]?.status === "live" ||
-      nextSnapshots[id]?.status === "pause";
+      nextSnapshots[id]?.status === "pause" ||
+      nextSnapshots[id]?.status === "penalties";
     if (!wasInPlay || stillInPlay) continue;
     try {
       const finished = await getMatchById(id, true);

@@ -14,6 +14,7 @@ export type FifaBotAlertKind =
   | "corner"
   | "half_time"
   | "second_half"
+  | "penalties"
   | "full_time"
   | "kickoff_reminder"
   | "match_start";
@@ -52,7 +53,7 @@ export interface FifaBotMatchSnapshot {
   awayFlag: string;
   homeScore: number | null;
   awayScore: number | null;
-  status: "live" | "pause" | "upcoming" | "finished";
+  status: "live" | "pause" | "penalties" | "upcoming" | "finished";
   minute: string;
   kickoffAt: string;
   stage: string;
@@ -65,4 +66,5 @@ export interface FifaBotMatchSnapshot {
   cornerIds: string[];
   halfTimeSent?: boolean;
   secondHalfSent?: boolean;
+  penaltiesSent?: boolean;
 }

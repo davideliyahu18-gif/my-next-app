@@ -406,6 +406,24 @@ export function hebrewStageLabel(stage: string): string {
   return stage || "מונדיאל";
 }
 
+export function formatPenaltiesStartAlert(
+  snapshot: FifaBotMatchSnapshot,
+): string {
+  const homeScore = snapshot.homeScore ?? 0;
+  const awayScore = snapshot.awayScore ?? 0;
+  return [
+    boldLine("🥅🎯 המשחק עובר לפנדלים"),
+    boldLine(
+      `🏟️ ${snapshot.homeFlag} ${snapshot.home} נגד ${snapshot.awayFlag} ${snapshot.away}`,
+    ),
+    boldLine(
+      `🥅 תוצאה לאחר הארכה | ${snapshot.home} ${homeScore} - ${snapshot.away} ${awayScore}`,
+    ),
+    "",
+    FIFA_BOT_FT_SIGNATURE,
+  ].join("\n");
+}
+
 export function formatSecondHalfStartAlert(
   snapshot: FifaBotMatchSnapshot,
 ): string {
@@ -464,6 +482,8 @@ export function alertKindLabel(kind: FifaBotAlertKind): string {
       return "מחצית";
     case "second_half":
       return "מחצית שנייה";
+    case "penalties":
+      return "פנדלים";
     case "full_time":
       return "סיום";
     case "kickoff_reminder":

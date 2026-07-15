@@ -9,7 +9,9 @@ const OWN_GOAL_EVENT_TYPE = 34;
 const ASSIST_EVENT_TYPE = 1;
 const CORNER_EVENT_TYPE = 16;
 const PERIOD_IN_PLAY = new Set([3, 5, 7, 9]);
-const PERIOD_FINISHED = new Set([10, 11]);
+/** FIFA period for penalty shoot-out in progress. */
+const PERIOD_PENALTIES = 11;
+const PERIOD_FINISHED = new Set([10]);
 const UNKNOWN_SCORER = "Unknown scorer";
 
 /** Splits FIFA event text before the scoring verb / penalty conversion. */
@@ -60,10 +62,12 @@ export interface FifaMatch {
   homeFlag: string;
   awayFlag: string;
   utcDate: Date;
-  status: "SCHEDULED" | "IN_PLAY" | "PAUSE" | "FINISHED";
+  status: "SCHEDULED" | "IN_PLAY" | "PAUSE" | "PENALTIES" | "FINISHED";
   competition: string;
   homeScore: number | null;
   awayScore: number | null;
+  homePenaltyScore: number | null;
+  awayPenaltyScore: number | null;
   goals: FifaGoal[];
   assists: FifaAssist[];
   corners: FifaCorner[];
@@ -303,7 +307,10 @@ async function scorerFromTimelineEvent(
 }
 
 function mapStatus(period: number | null): FifaMatch["status"] {
-  if (period === 4) return "PAUSE";
+  if (period === 4 || period === 8 || period === 16 || period === 17) {
+    return "PAUSE";
+  }
+  if (period === PERIOD_PENALTIES) return "PENALTIES";
   if (period !== null && PERIOD_FINISHED.has(period)) return "FINISHED";
   if (period !== null && PERIOD_IN_PLAY.has(period)) return "IN_PLAY";
   return "SCHEDULED";
@@ -347,6 +354,9 @@ async function parseScoringFromTimeline(
     const description = localizedName(
       event.EventDescription as LocalizedItem[] | undefined,
     );
+
+    // Shoot-out kicks (period 11) are not open-play goals/corners.
+    if (Number(event.Period) === PERIOD_PENALTIES) continue;
 
     if (isCornerTimelineEvent(event) && teamName) {
       corners.push({
@@ -405,6 +415,7 @@ function formatMatchTimeLabel(
   status: FifaMatch["status"],
 ): string | null {
   if (status === "PAUSE" || period === 4) return "HT";
+  if (status === "PENALTIES" || period === PERIOD_PENALTIES) return "פנדלים";
   if (!matchTime) return null;
   const cleaned = String(matchTime).trim();
   if (!cleaned || cleaned === "—") return null;
@@ -472,8 +483,20 @@ async function buildMatch(
       : null;
 
   let status = mapStatus(period);
+  const events =
+    (timelineData.Event as Record<string, unknown>[] | undefined) ?? [];
+  const hasPenaltiesStart = events.some(
+    (event) =>
+      Number(event.Period) === PERIOD_PENALTIES ||
+      /penalty shoot-?out is about to begin/i.test(
+        localizedName(event.EventDescription as LocalizedItem[] | undefined),
+      ),
+  );
+  const hasMatchEnd = events.some((event) => Number(event.Type) === 26);
+  if (status !== "FINISHED" && hasPenaltiesStart && !hasMatchEnd) {
+    status = "PENALTIES";
+  }
   if (status === "SCHEDULED") {
-    const events = (timelineData.Event as Record<string, unknown>[] | undefined) ?? [];
     for (const event of events) {
       if (event.Type === 26) {
         status = "FINISHED";
@@ -483,6 +506,9 @@ async function buildMatch(
         status = "IN_PLAY";
       }
     }
+  }
+  if (Number(liveData.MatchStatus) === 0 || hasMatchEnd) {
+    status = "FINISHED";
   }
 
   const { goals, assists, corners } = await parseScoringFromTimeline(
@@ -501,6 +527,11 @@ async function buildMatch(
       status,
     ) ?? null;
 
+  const rawHomePen =
+    liveData.HomeTeamPenaltyScore ?? calendarRow.HomeTeamPenaltyScore;
+  const rawAwayPen =
+    liveData.AwayTeamPenaltyScore ?? calendarRow.AwayTeamPenaltyScore;
+
   return {
     id: matchId,
     homeTeam: homeLabels.name,
@@ -516,6 +547,10 @@ async function buildMatch(
     ),
     homeScore,
     awayScore,
+    homePenaltyScore:
+      rawHomePen !== null && rawHomePen !== undefined ? Number(rawHomePen) : null,
+    awayPenaltyScore:
+      rawAwayPen !== null && rawAwayPen !== undefined ? Number(rawAwayPen) : null,
     goals,
     assists,
     corners,
@@ -580,6 +615,16 @@ export function calendarRowToMatch(calendarRow: CalendarRow): FifaMatch {
     ),
     homeScore,
     awayScore,
+    homePenaltyScore:
+      calendarRow.HomeTeamPenaltyScore !== null &&
+      calendarRow.HomeTeamPenaltyScore !== undefined
+        ? Number(calendarRow.HomeTeamPenaltyScore)
+        : null,
+    awayPenaltyScore:
+      calendarRow.AwayTeamPenaltyScore !== null &&
+      calendarRow.AwayTeamPenaltyScore !== undefined
+        ? Number(calendarRow.AwayTeamPenaltyScore)
+        : null,
     goals: [],
     assists: [],
     corners: [],
@@ -738,7 +783,11 @@ export function latestMatchMinuteLabel(match: FifaMatch): string {
 }
 
 export async function getLiveMatchesNow(fresh = false): Promise<FifaMatch[]> {
-  const liveStatuses = new Set<FifaMatch["status"]>(["IN_PLAY", "PAUSE"]);
+  const liveStatuses = new Set<FifaMatch["status"]>([
+    "IN_PLAY",
+    "PAUSE",
+    "PENALTIES",
+  ]);
   const now = new Date();
   const candidateIds: string[] = [];
   const seen = new Set<string>();
@@ -751,7 +800,8 @@ export async function getLiveMatchesNow(fresh = false): Promise<FifaMatch[]> {
       seen.add(matchId);
       const kickoff = parseDatetime(row.Date as string | undefined);
       if (kickoff.getTime() > now.getTime() + 15 * 60 * 1000) continue;
-      if (kickoff.getTime() < now.getTime() - 5 * 60 * 60 * 1000) continue;
+      // Extra time + penalties can run past 5h from kickoff.
+      if (kickoff.getTime() < now.getTime() - 6 * 60 * 60 * 1000) continue;
       candidateIds.push(matchId);
     }
   }
