@@ -1,0 +1,370 @@
+#!/usr/bin/env node
+/**
+ * Ultra-fast FIFA hotpath for one live match.
+ * Polls live + timeline directly every ~1s and sends WhatsApp immediately
+ * (skips calendar scan / Next cron overhead).
+ *
+ * MAIN: all except corners
+ * VIP: all except open-play goals
+ */
+import { readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.join(__dirname, "../..");
+const SEEN_PATH = "/tmp/fifa-hotpath-seen.json";
+
+const MATCH = {
+  id: process.env.FIFA_HOT_MATCH_ID || "400021540",
+  idCompetition: "17",
+  idSeason: "285023",
+  idStage: "289290",
+  home: "אנגליה",
+  away: "ארגנטינה",
+  homeFlag: "🇬🇧",
+  awayFlag: "🇦🇷",
+  homeId: "43942",
+  awayId: "43922",
+};
+
+async function loadEnv() {
+  for (const name of [".env.local", ".env"]) {
+    const p = path.join(ROOT, name);
+    if (!existsSync(p)) continue;
+    const text = await readFile(p, "utf8");
+    for (const line of text.split("\n")) {
+      const t = line.trim();
+      if (!t || t.startsWith("#")) continue;
+      const i = t.indexOf("=");
+      if (i === -1) continue;
+      const k = t.slice(0, i);
+      const v = t.slice(i + 1);
+      if (!process.env[k]) process.env[k] = v;
+    }
+  }
+}
+
+function cfg() {
+  return {
+    intervalMs: Number(process.env.FIFA_HOTPATH_MS || "1000"),
+    instance: process.env.GREEN_API_INSTANCE || "",
+    token: process.env.GREEN_API_TOKEN || "",
+    apiHost: process.env.GREEN_API_HOST || "https://7107.api.green-api.com",
+    mainChat:
+      process.env.FIFA_WHATSAPP_MAIN_CHAT_ID || "120363410010039894@g.us",
+    vipChat:
+      process.env.FIFA_WHATSAPP_VIP_CHAT_ID || "120363427162994986@g.us",
+  };
+}
+
+async function loadSeen() {
+  try {
+    return JSON.parse(await readFile(SEEN_PATH, "utf8"));
+  } catch {
+    return {
+      corners: [],
+      goals: [],
+      penalties: [],
+      halfTime: false,
+      secondHalf: false,
+      matchStart: false,
+      fullTime: false,
+      penaltiesStart: false,
+      seeded: false,
+      lastScore: "0-0",
+    };
+  }
+}
+
+async function saveSeen(seen) {
+  await writeFile(SEEN_PATH, JSON.stringify(seen), "utf8");
+}
+
+async function fifaJson(url) {
+  const res = await fetch(url, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "Mozilla/5.0 FIFA-Hotpath",
+    },
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`FIFA ${res.status} ${url}`);
+  return res.json();
+}
+
+async function sendGreen(c, chatId, message) {
+  const url = `${c.apiHost}/waInstance${c.instance}/sendMessage/${c.token}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chatId, message }),
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`Green ${res.status}: ${text.slice(0, 180)}`);
+  return text;
+}
+
+async function blast(c, channels, message, kind) {
+  await Promise.all(
+    channels.map(async (channel) => {
+      const chatId = channel === "main" ? c.mainChat : c.vipChat;
+      await sendGreen(c, chatId, message);
+      console.log(new Date().toISOString(), "HOT", channel, kind);
+    }),
+  );
+}
+
+function teamName(id) {
+  if (String(id) === MATCH.homeId) return MATCH.home;
+  if (String(id) === MATCH.awayId) return MATCH.away;
+  return "";
+}
+
+function scoreEmoji(h, a) {
+  const digits = ["0️⃣", "1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣"];
+  const one = (n) =>
+    String(n)
+      .split("")
+      .map((ch) => digits[Number(ch)] ?? ch)
+      .join("");
+  return `${one(h ?? 0)}➖${one(a ?? 0)}`;
+}
+
+function periodStatus(period, matchStatus) {
+  if (matchStatus === 0 || period === 10) return "finished";
+  if (period === 4 || period === 8 || period === 16 || period === 17) return "pause";
+  if (period === 11) return "penalties";
+  if (period === 3 || period === 5 || period === 7 || period === 9 || period === 0) {
+    return "live";
+  }
+  if (matchStatus === 1 || matchStatus === 3) return "live";
+  return "scheduled";
+}
+
+async function tick(c, seen) {
+  const liveUrl = `https://api.fifa.com/api/v3/live/football/${MATCH.idCompetition}/${MATCH.idSeason}/${MATCH.idStage}/${MATCH.id}?language=en-GB`;
+  const tlUrl = `https://api.fifa.com/api/v3/timelines/${MATCH.id}?language=en-GB`;
+  const [live, tl] = await Promise.all([fifaJson(liveUrl), fifaJson(tlUrl)]);
+  const events = Array.isArray(tl.Event) ? tl.Event : [];
+  const home = live.HomeTeam || {};
+  const away = live.AwayTeam || {};
+  const homeScore = home.Score ?? 0;
+  const awayScore = away.Score ?? 0;
+  const minute = String(live.MatchTime || "—");
+  const status = periodStatus(Number(live.Period), Number(live.MatchStatus));
+
+  // Seed existing history once so we don't spam the whole timeline.
+  if (!seen.seeded) {
+    for (const e of events) {
+      const id = String(e.EventId || "");
+      if (!id) continue;
+      if (Number(e.Type) === 16) seen.corners.push(id);
+      if ([0, 34, 39, 41].includes(Number(e.Type))) seen.goals.push(id);
+    }
+    seen.seeded = true;
+    seen.lastScore = `${homeScore}-${awayScore}`;
+    if (status === "pause") seen.halfTime = true;
+    if (status === "live" && Number(String(minute).replace(/[^\d].*$/, "")) >= 46) {
+      seen.halfTime = true;
+      seen.secondHalf = true;
+    }
+    if (status === "finished") seen.fullTime = true;
+    await saveSeen(seen);
+    console.log(new Date().toISOString(), "seeded events=", events.length, "status=", status, "min=", minute);
+    return { status, minute };
+  }
+
+  if (!seen.matchStart && status === "live") {
+    seen.matchStart = true;
+    await blast(
+      c,
+      ["main", "vip"],
+      `*🚩 המשחק התחיל*\n*🏟️ ${MATCH.homeFlag} ${MATCH.home} נגד ${MATCH.awayFlag} ${MATCH.away}*\n*⏱️ דקה | 0*`,
+      "match_start",
+    );
+  }
+
+  // Corners first — highest sensitivity complaints.
+  for (const e of events) {
+    if (Number(e.Type) !== 16) continue;
+    const id = String(e.EventId || "");
+    if (!id || seen.corners.includes(id)) continue;
+    const team = teamName(e.IdTeam) || "קבוצה";
+    const min = String(e.MatchMinute || minute || "—").replace(/'/g, "");
+    const cornerEvents = events.filter((x) => Number(x.Type) === 16);
+    const upto = [];
+    for (const x of cornerEvents) {
+      upto.push(x);
+      if (String(x.EventId) === id) break;
+    }
+    const homeCount = upto.filter((x) => String(x.IdTeam) === MATCH.homeId).length;
+    const awayCount = upto.filter((x) => String(x.IdTeam) === MATCH.awayId).length;
+    const total = homeCount + awayCount;
+    const text = [
+      "🚩 *קרן*",
+      `🏟️ *${MATCH.homeFlag} ${MATCH.home}* נגד *${MATCH.awayFlag} ${MATCH.away}*`,
+      `⏱️ דקה | ${min} | ${team}`,
+      `🚩 קרנות לפי FIFA עד עכשיו | סה"כ ${total} | ${MATCH.home} ${homeCount} - ${MATCH.away} ${awayCount}`,
+    ].join("\n");
+    seen.corners.push(id);
+    await blast(c, ["vip"], text, "corner");
+  }
+
+  // Goals from timeline
+  for (const e of events) {
+    const type = Number(e.Type);
+    if (![0, 34, 39, 41].includes(type)) continue;
+    const id = String(e.EventId || "");
+    if (!id || seen.goals.includes(id)) continue;
+    const min = String(e.MatchMinute || minute || "—");
+    const team = teamName(e.IdTeam);
+    const desc = ((e.EventDescription || [])[0] || {}).Description || "";
+    const scorer = desc.split(/\s+scores?/i)[0]?.trim() || "מתעדכן...";
+    const hs = e.HomeGoals ?? homeScore;
+    const as = e.AwayGoals ?? awayScore;
+    await blast(
+      c,
+      ["main"],
+      [
+        `*⚽🔥 שער!!!*`,
+        `*🏟️ ${MATCH.homeFlag} ${MATCH.home} 🆚 ${MATCH.awayFlag} ${MATCH.away}*`,
+        `*⏱️ דקה ${min}*`,
+        `*👤 כובש: מתעדכן...*`,
+        `*🥅 תוצאה כעת:*`,
+        `*${MATCH.homeFlag} ${scoreEmoji(hs, as)} ${MATCH.awayFlag}*`,
+      ].join("\n"),
+      "goal",
+    );
+    if (scorer && scorer !== "מתעדכן...") {
+      await blast(
+        c,
+        ["main"],
+        [
+          `*✅ כובש השער!*`,
+          `*🏟️ ${MATCH.homeFlag} ${MATCH.home} 🆚 ${MATCH.awayFlag} ${MATCH.away}*`,
+          `*👤 ${scorer}${team ? ` | ${team}` : ""}*`,
+          `*⏱️ דקה ${min}*`,
+        ].join("\n"),
+        "goal_scorer",
+      );
+    }
+    seen.goals.push(id);
+  }
+
+  // Scoreboard jump before timeline
+  const scoreKey = `${homeScore}-${awayScore}`;
+  if (scoreKey !== seen.lastScore) {
+    const [ph, pa] = String(seen.lastScore || "0-0").split("-").map(Number);
+    const jump = Math.max(0, homeScore - (ph || 0)) + Math.max(0, awayScore - (pa || 0));
+    if (jump > 0) {
+      // Only flash if no new timeline goals in this tick were just handled for that jump;
+      // still notify main for speed if timeline empty.
+      const openGoals = events.filter((e) =>
+        [0, 34, 39, 41].includes(Number(e.Type)),
+      ).length;
+      if (openGoals < (ph || 0) + (pa || 0) + jump) {
+        await blast(
+          c,
+          ["main"],
+          [
+            `*⚽🔥 שער!!!*`,
+            `*🏟️ ${MATCH.homeFlag} ${MATCH.home} 🆚 ${MATCH.awayFlag} ${MATCH.away}*`,
+            `*⏱️ דקה ${minute}*`,
+            `*👤 כובש: מתעדכן...*`,
+            `*🥅 תוצאה כעת:*`,
+            `*${MATCH.homeFlag} ${scoreEmoji(homeScore, awayScore)} ${MATCH.awayFlag}*`,
+          ].join("\n"),
+          "goal_scoreboard",
+        );
+      }
+    }
+    seen.lastScore = scoreKey;
+  }
+
+  if (status === "pause" && !seen.halfTime) {
+    seen.halfTime = true;
+    await blast(
+      c,
+      ["main", "vip"],
+      `*⏸️ מחצית*\n\n*🏟️ ${MATCH.homeFlag} ${MATCH.home} ${scoreEmoji(homeScore, awayScore)} ${MATCH.awayFlag} ${MATCH.away}*`,
+      "half_time",
+    );
+  }
+
+  if (status === "live" && seen.halfTime && !seen.secondHalf) {
+    const minNum = Number(String(minute).replace(/[^\d].*$/, ""));
+    if (Number.isFinite(minNum) && minNum >= 45) {
+      seen.secondHalf = true;
+      await blast(
+        c,
+        ["main", "vip"],
+        `*🏆 חצי הגמר*\n\n*🔔 שריקת הפתיחה למחצית השנייה!*\n\n*🏟️ ${MATCH.homeFlag} ${MATCH.home} ${scoreEmoji(homeScore, awayScore)} ${MATCH.awayFlag} ${MATCH.away}*`,
+        "second_half",
+      );
+    }
+  }
+
+  if (status === "penalties" && !seen.penaltiesStart) {
+    seen.penaltiesStart = true;
+    await blast(
+      c,
+      ["main", "vip"],
+      `*⚡ פנדלים*\n*🏟️ ${MATCH.homeFlag} ${MATCH.home} נגד ${MATCH.awayFlag} ${MATCH.away}*`,
+      "penalties",
+    );
+  }
+
+  if (status === "finished" && !seen.fullTime) {
+    seen.fullTime = true;
+    await blast(
+      c,
+      ["main", "vip"],
+      `*🏁 סיום*\n*🏟️ ${MATCH.homeFlag} ${MATCH.home} ${scoreEmoji(homeScore, awayScore)} ${MATCH.awayFlag} ${MATCH.away}*`,
+      "full_time",
+    );
+  }
+
+  await saveSeen(seen);
+  return { status, minute, homeScore, awayScore, events: events.length };
+}
+
+async function main() {
+  await loadEnv();
+  const c = cfg();
+  if (!c.instance || !c.token) {
+    console.error("Missing Green API creds");
+    process.exit(1);
+  }
+  let seen = await loadSeen();
+  console.log("HOTPATH start match=", MATCH.id, "intervalMs=", c.intervalMs);
+
+  for (;;) {
+    const t0 = Date.now();
+    try {
+      const snap = await tick(c, seen);
+      seen = await loadSeen();
+      console.log(
+        new Date().toISOString(),
+        "ok",
+        snap.status,
+        snap.minute,
+        `${snap.homeScore ?? "?"}-${snap.awayScore ?? "?"}`,
+        "events",
+        snap.events ?? "?",
+        "ms",
+        Date.now() - t0,
+      );
+    } catch (error) {
+      console.error(new Date().toISOString(), "hotpath error", String(error));
+    }
+    const wait = Math.max(150, c.intervalMs - (Date.now() - t0));
+    await new Promise((r) => setTimeout(r, wait));
+  }
+}
+
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
