@@ -48,7 +48,7 @@ async function loadEnv() {
 
 function cfg() {
   return {
-    intervalMs: Number(process.env.FIFA_HOTPATH_MS || "1000"),
+    intervalMs: Number(process.env.FIFA_HOTPATH_MS || "200"),
     instance: process.env.GREEN_API_INSTANCE || "",
     token: process.env.GREEN_API_TOKEN || "",
     apiHost: process.env.GREEN_API_HOST || "https://7107.api.green-api.com",
@@ -426,7 +426,7 @@ async function main() {
     } catch (error) {
       console.error(new Date().toISOString(), "hotpath error", String(error));
     }
-    const wait = Math.max(150, c.intervalMs - (Date.now() - t0));
+    const wait = Math.max(80, c.intervalMs - (Date.now() - t0));
     await new Promise((r) => setTimeout(r, wait));
   }
 }
