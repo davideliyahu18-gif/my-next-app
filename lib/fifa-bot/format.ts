@@ -335,6 +335,26 @@ export function formatMatchStartAlert(snapshot: FifaBotMatchSnapshot): string {
   ].join("\n");
 }
 
+function cornerMinuteLabel(minute: string): string {
+  return String(minute).replace(/'/g, "").trim() || "—";
+}
+
+export function formatCornerAlert(
+  snapshot: FifaBotMatchSnapshot,
+  teamName: string,
+  minute: string,
+  homeCorners: number,
+  awayCorners: number,
+): string {
+  const total = homeCorners + awayCorners;
+  return [
+    `🚩 *קרן*`,
+    `🏟️ *${snapshot.homeFlag} ${snapshot.home}* נגד *${snapshot.awayFlag} ${snapshot.away}*`,
+    `⏱️ דקה | ${cornerMinuteLabel(minute)} | ${teamName}`,
+    `🚩 קרנות לפי FIFA עד עכשיו | סה"כ ${total} | ${snapshot.home} ${homeCorners} - ${snapshot.away} ${awayCorners}`,
+  ].join("\n");
+}
+
 export function formatHalfTimeAlert(snapshot: FifaBotMatchSnapshot): string {
   const score = formatEmojiScore(snapshot.homeScore, snapshot.awayScore, "–");
   const lines = [
@@ -372,6 +392,8 @@ export function alertKindLabel(kind: FifaBotAlertKind): string {
       return "שער";
     case "goal_scorer":
       return "כובש";
+    case "corner":
+      return "קרן";
     case "half_time":
       return "מחצית";
     case "full_time":

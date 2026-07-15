@@ -11,6 +11,7 @@ export type FifaBotCommand =
 export type FifaBotAlertKind =
   | "goal"
   | "goal_scorer"
+  | "corner"
   | "half_time"
   | "full_time"
   | "kickoff_reminder"
@@ -59,5 +60,7 @@ export interface FifaBotMatchSnapshot {
   goalFlashIds: string[];
   /** Goal event ids that already got the "כובש השער" update. */
   goalScorerIds: string[];
+  /** Corner event ids already announced. */
+  cornerIds: string[];
   halfTimeSent?: boolean;
 }

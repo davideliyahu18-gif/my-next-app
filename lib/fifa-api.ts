@@ -7,6 +7,7 @@ const FIFA_USER_AGENT =
 const GOAL_EVENT_TYPES = new Set([0, 34, 39, 41]);
 const OWN_GOAL_EVENT_TYPE = 34;
 const ASSIST_EVENT_TYPE = 1;
+const CORNER_EVENT_TYPE = 16;
 const PERIOD_IN_PLAY = new Set([3, 5, 7, 9]);
 const PERIOD_FINISHED = new Set([10, 11]);
 const UNKNOWN_SCORER = "Unknown scorer";
@@ -43,6 +44,13 @@ export interface FifaAssist {
   teamId: string;
 }
 
+export interface FifaCorner {
+  eventId: string;
+  minute: string;
+  teamName: string;
+  teamId: string;
+}
+
 export interface FifaMatch {
   id: string;
   homeTeam: string;
@@ -58,6 +66,7 @@ export interface FifaMatch {
   awayScore: number | null;
   goals: FifaGoal[];
   assists: FifaAssist[];
+  corners: FifaCorner[];
   stage: string | null;
   group: string | null;
   period: number | null;
@@ -310,16 +319,24 @@ function teamSide(
   return "";
 }
 
+function isCornerTimelineEvent(event: Record<string, unknown>): boolean {
+  if (Number(event.Type) === CORNER_EVENT_TYPE) return true;
+  const localized = event.TypeLocalized as LocalizedItem[] | undefined;
+  const label = localizedName(localized).toLowerCase();
+  return label.includes("corner");
+}
+
 async function parseScoringFromTimeline(
   timeline: Record<string, unknown>,
   homeTeamId: string,
   awayTeamId: string,
   homeTeam: string,
   awayTeam: string,
-): Promise<{ goals: FifaGoal[]; assists: FifaAssist[] }> {
+): Promise<{ goals: FifaGoal[]; assists: FifaAssist[]; corners: FifaCorner[] }> {
   const events = (timeline.Event as Record<string, unknown>[] | undefined) ?? [];
   const goals: FifaGoal[] = [];
   const assists: FifaAssist[] = [];
+  const corners: FifaCorner[] = [];
 
   for (const event of events) {
     const eventType = Number(event.Type);
@@ -330,6 +347,16 @@ async function parseScoringFromTimeline(
     const description = localizedName(
       event.EventDescription as LocalizedItem[] | undefined,
     );
+
+    if (isCornerTimelineEvent(event) && teamName) {
+      corners.push({
+        eventId: String(event.EventId ?? `${teamId}-${event.MatchMinute}`),
+        minute: String(event.MatchMinute ?? "?"),
+        teamName,
+        teamId,
+      });
+      continue;
+    }
 
     if (eventType === ASSIST_EVENT_TYPE) {
       const player = parseAssistPlayer(description);
@@ -355,7 +382,7 @@ async function parseScoringFromTimeline(
     });
   }
 
-  return { goals, assists };
+  return { goals, assists, corners };
 }
 
 export function calendarTeamLabels(side: Record<string, unknown>): {
@@ -458,7 +485,7 @@ async function buildMatch(
     }
   }
 
-  const { goals, assists } = await parseScoringFromTimeline(
+  const { goals, assists, corners } = await parseScoringFromTimeline(
     timelineData,
     homeTeamId,
     awayTeamId,
@@ -491,6 +518,7 @@ async function buildMatch(
     awayScore,
     goals,
     assists,
+    corners,
     stage:
       localizedName(calendarRow.StageName as LocalizedItem[] | undefined) ||
       null,
@@ -554,6 +582,7 @@ export function calendarRowToMatch(calendarRow: CalendarRow): FifaMatch {
     awayScore,
     goals: [],
     assists: [],
+    corners: [],
     stage:
       localizedName(calendarRow.StageName as LocalizedItem[] | undefined) ||
       null,

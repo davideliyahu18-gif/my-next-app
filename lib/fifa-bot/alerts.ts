@@ -7,6 +7,7 @@ import {
   type FifaMatch,
 } from "@/lib/fifa-api";
 import {
+  formatCornerAlert,
   formatFullTimeAlert,
   formatGoalAlert,
   formatGoalScorerUpdate,
@@ -84,6 +85,7 @@ function toSnapshot(
     goals: goalsForSnapshot(match),
     goalFlashIds: previous?.goalFlashIds ?? [],
     goalScorerIds: previous?.goalScorerIds ?? [],
+    cornerIds: previous?.cornerIds ?? [],
     halfTimeSent: previous?.halfTimeSent ?? false,
   };
 }
@@ -107,10 +109,7 @@ export async function collectFifaBotAlerts(): Promise<{
 
   const live = await getLiveMatchesNow(true);
   for (const match of live) {
-    const rich =
-      match.goals.length > 0
-        ? match
-        : await getMatchById(match.id, true).catch(() => match);
+    const rich = await getMatchById(match.id, true).catch(() => match);
     const prev = previous[rich.id];
     const snapshot = toSnapshot(rich, prev);
 
@@ -127,8 +126,53 @@ export async function collectFifaBotAlerts(): Promise<{
       if (alert) alerts.push(alert);
     }
 
+    const corners = rich.corners ?? [];
+
+    // First time we see this match: seed existing events so we don't spam history.
+    if (!prev) {
+      snapshot.goalFlashIds = rich.goals.map((goal) => goalEventId(goal));
+      snapshot.goalScorerIds = rich.goals
+        .filter((goal) => goal.scorer && !isPlaceholderScorer(goal.scorer))
+        .map((goal) => goalEventId(goal));
+      snapshot.cornerIds = corners.map((corner) => corner.eventId);
+      if (snapshot.status === "pause") snapshot.halfTimeSent = true;
+      nextSnapshots[snapshot.id] = snapshot;
+      continue;
+    }
+
     const flashed = new Set(snapshot.goalFlashIds);
     const scored = new Set(snapshot.goalScorerIds);
+    const cornerSeen = new Set(snapshot.cornerIds);
+
+    for (let index = 0; index < corners.length; index += 1) {
+      const corner = corners[index];
+      if (cornerSeen.has(corner.eventId)) continue;
+
+      const upTo = corners.slice(0, index + 1);
+      const homeCount = upTo.filter(
+        (item) => item.teamName === rich.homeTeam,
+      ).length;
+      const awayCount = upTo.filter(
+        (item) => item.teamName === rich.awayTeam,
+      ).length;
+
+      const alert = await buildAlert({
+        id: `corner:${snapshot.id}:${corner.eventId}`,
+        kind: "corner",
+        matchId: snapshot.id,
+        text: formatCornerAlert(
+          snapshot,
+          corner.teamName,
+          corner.minute,
+          homeCount,
+          awayCount,
+        ),
+      });
+      if (alert) {
+        alerts.push(alert);
+        cornerSeen.add(corner.eventId);
+      }
+    }
 
     for (const goal of rich.goals) {
       const eventId = goalEventId(goal);
@@ -171,6 +215,7 @@ export async function collectFifaBotAlerts(): Promise<{
 
     snapshot.goalFlashIds = [...flashed];
     snapshot.goalScorerIds = [...scored];
+    snapshot.cornerIds = [...cornerSeen];
 
     if (
       snapshot.status === "pause" &&
