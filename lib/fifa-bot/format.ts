@@ -314,19 +314,57 @@ export function formatFullTimeAlert(snapshot: FifaBotMatchSnapshot): string {
   const homeScore = snapshot.homeScore ?? 0;
   const awayScore = snapshot.awayScore ?? 0;
   const minute = fullTimeMinuteLabel(snapshot.minute || "90");
+  const score = formatEmojiScore(homeScore, awayScore, "➖");
+  const stage = hebrewStageLabel(snapshot.stage);
 
-  return [
-    boldLine("🏁 סיום המשחק"),
-    boldLine(
-      `🏟️ ${snapshot.homeFlag} ${snapshot.home} נגד ${snapshot.awayFlag} ${snapshot.away}`,
-    ),
-    boldLine(`⏱️ דקה | ${minute}`),
-    boldLine(
-      `🥅 תוצאה סופית | ${snapshot.home} ${homeScore} - ${snapshot.away} ${awayScore}`,
-    ),
+  let winnerBlock: string[];
+  if (homeScore > awayScore) {
+    winnerBlock = [
+      boldLine(`🥇 המנצחת: ${snapshot.homeFlag} ${snapshot.home}`),
+      boldLine("🎉 ניצחון גדול — עולות/עולים לשלב הבא!"),
+    ];
+  } else if (awayScore > homeScore) {
+    winnerBlock = [
+      boldLine(`🥇 המנצחת: ${snapshot.awayFlag} ${snapshot.away}`),
+      boldLine("🎉 ניצחון גדול — עולות/עולים לשלב הבא!"),
+    ];
+  } else {
+    winnerBlock = [
+      boldLine("🤝 תוצאה סופית — תיקו"),
+      boldLine("⚖️ ממשיכים להכריע..."),
+    ];
+  }
+
+  const lines = [
+    boldLine("🏁✨ סיום המשחק!"),
+    boldLine(`🏆 ${stage}`),
     "",
-    FIFA_BOT_FT_SIGNATURE,
-  ].join("\n");
+    boldLine(
+      `🏟️ ${snapshot.homeFlag} ${snapshot.home} ${score} ${snapshot.awayFlag} ${snapshot.away}`,
+    ),
+    boldLine(`⏱️ נשף אחרי ${minute}'`),
+    "",
+    ...winnerBlock,
+    "",
+    boldLine("⚽ כובשים:"),
+  ];
+
+  const scorers = snapshot.goals.filter(
+    (goal) => goal.scorer && !goal.ownGoal,
+  );
+  if (!scorers.length) {
+    lines.push(boldLine("• אין שערים"));
+  } else {
+    for (const goal of scorers) {
+      const goalMinute = minuteLabel(goal.minute).replace(/'/g, "’");
+      lines.push(
+        boldLine(`• ${goal.teamFlag} ${goal.scorer} (${goalMinute})`),
+      );
+    }
+  }
+
+  lines.push("", FIFA_BOT_FT_SIGNATURE);
+  return lines.join("\n");
 }
 
 export function formatKickoffReminder(

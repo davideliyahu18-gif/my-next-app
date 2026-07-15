@@ -392,7 +392,7 @@ async function tick(c, seen) {
   }
 
   // Injury / stoppage time (MatchTime like 45'+2' or 90'+4').
-  const stoppageMatch = String(minute).match(/^(\d+)\s*\+\s*(\d+)/);
+  const stoppageMatch = String(minute).match(/^(\d+)'?\s*\+\s*'?(\d+)/);
   if (stoppageMatch) {
     const base = Number(stoppageMatch[1]);
     const added = stoppageMatch[2];
@@ -542,12 +542,54 @@ async function tick(c, seen) {
 
   if (status === "finished" && !seen.fullTime) {
     seen.fullTime = true;
-    await blast(
-      c,
-      ["main", "vip"],
-      `*🏁 סיום*\n*🏟️ ${MATCH.homeFlag} ${MATCH.home} ${scoreEmoji(homeScore, awayScore)} ${MATCH.awayFlag} ${MATCH.away}*`,
-      "full_time",
-    );
+    const scoreLine = scoreEmoji(homeScore, awayScore);
+    let winnerLines;
+    if (homeScore > awayScore) {
+      winnerLines = [
+        `*🥇 המנצחת: ${MATCH.homeFlag} ${MATCH.home}*`,
+        "*🎉 ניצחון גדול — עולה לגמר!!!!*",
+      ];
+    } else if (awayScore > homeScore) {
+      winnerLines = [
+        `*🥇 המנצחת: ${MATCH.awayFlag} ${MATCH.away}*`,
+        "*🎉 ניצחון גדול — עולה לגמר!!!!*",
+      ];
+    } else {
+      winnerLines = ["*🤝 תיקו בסיום*", "*⚖️ ממשיכים להכריע...*"];
+    }
+
+    const scorers = [];
+    for (const e of events) {
+      if (![0, 34, 39, 41].includes(Number(e.Type))) continue;
+      const desc = (((e.EventDescription || [])[0] || {}).Description || "");
+      const scorer = desc.split(/\s+scores?/i)[0]?.trim();
+      const team = teamName(e.IdTeam);
+      const flag =
+        String(e.IdTeam) === MATCH.homeId
+          ? MATCH.homeFlag
+          : String(e.IdTeam) === MATCH.awayId
+            ? MATCH.awayFlag
+            : "⚽";
+      const min = String(e.MatchMinute || "").replace(/'/g, "’") || "—";
+      if (scorer) scorers.push(`• ${flag} ${scorer} (${min})`);
+    }
+
+    const text = [
+      "*🏁✨ סיום המשחק!*",
+      "*🏆 חצי הגמר*",
+      "",
+      `*🏟️ ${MATCH.homeFlag} ${MATCH.home} ${scoreLine} ${MATCH.awayFlag} ${MATCH.away}*`,
+      `*⏱️ ${String(minute).replace(/'/g, "’") || "90"}*`,
+      "",
+      ...winnerLines,
+      "",
+      "*⚽ כובשים:*",
+      ...(scorers.length ? scorers : ["• אין שערים"]),
+      "",
+      "*📣 עדכוני כדורגל - 24/7 ⚽🥇🏆*",
+    ].join("\n");
+
+    await blast(c, ["main", "vip"], text, "full_time");
   }
 
   await saveSeen(seen);
