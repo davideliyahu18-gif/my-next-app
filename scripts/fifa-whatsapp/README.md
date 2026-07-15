@@ -48,11 +48,23 @@ npm run fifa-bot:start
 | `סטטוס` / `בוט` | האם הבוט חי |
 | `עזרה` | רשימת פקודות |
 
-## Green API (Vercel)
+## Green API (Vercel / cloud poller)
 
 ```bash
 GREEN_API_INSTANCE=
 GREEN_API_TOKEN=
+GREEN_API_HOST=https://7107.api.green-api.com
 FIFA_WHATSAPP_MAIN_CHAT_ID=
 FIFA_WHATSAPP_VIP_CHAT_ID=
+FIFA_BOT_POLL_MS=5000
+FIFA_BOT_IDLE_POLL_MS=20000
 ```
+
+פולר מהיר (בלי Baileys):
+
+```bash
+npm run dev
+npm run fifa-bot:poll
+```
+
+בזמן משחק חי / לפני שריקה — סריקה כל ~5 שניות (שער, קרן, מחצית, מחצית שנייה, פתיחה, סיום).

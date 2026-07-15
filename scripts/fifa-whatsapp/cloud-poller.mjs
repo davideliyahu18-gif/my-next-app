@@ -2,6 +2,8 @@
 /**
  * Cloud poller: poll local/site FIFA bot dry API and fan-out via Green API.
  * MAIN = all except corners; VIP = all except open-play goals.
+ *
+ * Adaptive interval: ~5s while live / near kickoff, slower when idle.
  */
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -41,6 +43,8 @@ function cfg() {
     process.env.NEXT_PUBLIC_SITE_URL ||
     "http://127.0.0.1:3010"
   ).replace(/\/$/, "");
+  const liveMs = Number(process.env.FIFA_BOT_POLL_MS || "5000");
+  const idleMs = Number(process.env.FIFA_BOT_IDLE_POLL_MS || "20000");
   return {
     site,
     secret:
@@ -55,7 +59,8 @@ function cfg() {
       process.env.FIFA_WHATSAPP_MAIN_CHAT_ID || "120363410010039894@g.us",
     vipChat:
       process.env.FIFA_WHATSAPP_VIP_CHAT_ID || "120363427162994986@g.us",
-    intervalMs: Number(process.env.FIFA_BOT_POLL_MS || "45000"),
+    liveMs: Number.isFinite(liveMs) && liveMs >= 2000 ? liveMs : 5000,
+    idleMs: Number.isFinite(idleMs) && idleMs >= 5000 ? idleMs : 20000,
   };
 }
 
@@ -72,8 +77,10 @@ async function sendGreen(c, chatId, message) {
 }
 
 async function pollOnce(c) {
+  const started = Date.now();
   const res = await fetch(`${c.site}/api/cron/fifa-bot?dry=1`, {
     headers: { Authorization: `Bearer ${c.secret}` },
+    cache: "no-store",
   });
   const summary = await res.json();
   if (!res.ok) throw new Error(JSON.stringify(summary));
@@ -81,23 +88,38 @@ async function pollOnce(c) {
   let sent = 0;
   for (const alert of alerts) {
     if (!alert?.text) continue;
-    for (const channel of channelsForAlert(alert.kind)) {
-      const chatId = channel === "main" ? c.mainChat : c.vipChat;
-      await sendGreen(c, chatId, alert.text);
-      sent += 1;
-      console.log(new Date().toISOString(), "sent", channel, alert.kind);
-    }
+    const channels = channelsForAlert(alert.kind);
+    await Promise.all(
+      channels.map(async (channel) => {
+        const chatId = channel === "main" ? c.mainChat : c.vipChat;
+        await sendGreen(c, chatId, alert.text);
+        sent += 1;
+        console.log(new Date().toISOString(), "sent", channel, alert.kind);
+      }),
+    );
   }
+  const liveMatches = Number(summary.liveMatches || 0);
+  const upcomingMatches = Number(summary.upcomingMatches || 0);
   if (!alerts.length) {
     console.log(
       new Date().toISOString(),
       "ok live=",
-      summary.liveMatches,
+      liveMatches,
       "upcoming=",
-      summary.upcomingMatches,
+      upcomingMatches,
+      "ms=",
+      Date.now() - started,
     );
   }
-  return sent;
+  return { sent, liveMatches, upcomingMatches, alerts: alerts.length };
+}
+
+function nextIntervalMs(c, result) {
+  if (!result) return c.liveMs;
+  if (result.liveMatches > 0 || result.alerts > 0) return c.liveMs;
+  // Keep scanning fast while there is an upcoming match on the board.
+  if (result.upcomingMatches > 0) return c.liveMs;
+  return c.idleMs;
 }
 
 async function main() {
@@ -107,19 +129,24 @@ async function main() {
     console.error("Missing GREEN_API_INSTANCE / GREEN_API_TOKEN in .env.local");
     process.exit(1);
   }
-  console.log("FIFA cloud poller starting");
+  console.log("FIFA cloud poller starting (fast mode)");
   console.log(" site=", c.site);
-  console.log(" intervalMs=", c.intervalMs);
+  console.log(" liveMs=", c.liveMs, "idleMs=", c.idleMs);
   console.log(" main=", c.mainChat);
   console.log(" vip=", c.vipChat);
 
+  let last = null;
   for (;;) {
+    const tickStart = Date.now();
     try {
-      await pollOnce(c);
+      last = await pollOnce(c);
     } catch (error) {
       console.error(new Date().toISOString(), "poll error", String(error));
     }
-    await new Promise((r) => setTimeout(r, c.intervalMs));
+    const interval = nextIntervalMs(c, last);
+    const elapsed = Date.now() - tickStart;
+    const wait = Math.max(250, interval - elapsed);
+    await new Promise((r) => setTimeout(r, wait));
   }
 }
 

@@ -905,7 +905,8 @@ export async function getLiveMatchesNow(fresh = false): Promise<FifaMatch[]> {
       if (seen.has(matchId)) continue;
       seen.add(matchId);
       const kickoff = parseDatetime(row.Date as string | undefined);
-      if (kickoff.getTime() > now.getTime() + 15 * 60 * 1000) continue;
+      // Include matches close to kickoff so status flips to IN_PLAY are caught ASAP.
+      if (kickoff.getTime() > now.getTime() + 10 * 60 * 1000) continue;
       // Extra time + penalties can run past 5h from kickoff.
       if (kickoff.getTime() < now.getTime() - 6 * 60 * 60 * 1000) continue;
       candidateIds.push(matchId);
