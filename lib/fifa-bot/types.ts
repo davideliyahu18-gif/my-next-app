@@ -1,0 +1,47 @@
+export type FifaBotCommand =
+  | "help"
+  | "status"
+  | "score"
+  | "tomorrow"
+  | "lineup"
+  | "scorers"
+  | "schedule"
+  | "unknown";
+
+export type FifaBotAlertKind =
+  | "goal"
+  | "full_time"
+  | "kickoff_reminder"
+  | "match_start";
+
+export interface FifaBotAlert {
+  id: string;
+  kind: FifaBotAlertKind;
+  matchId: string;
+  text: string;
+  createdAt: string;
+}
+
+export interface FifaBotPollSummary {
+  ok: boolean;
+  checkedAt: string;
+  liveMatches: number;
+  upcomingMatches: number;
+  alerts: FifaBotAlert[];
+  notified: number;
+}
+
+export interface FifaBotMatchSnapshot {
+  id: string;
+  home: string;
+  away: string;
+  homeFlag: string;
+  awayFlag: string;
+  homeScore: number | null;
+  awayScore: number | null;
+  status: "live" | "upcoming" | "finished";
+  minute: string;
+  kickoffAt: string;
+  stage: string;
+  goalKeys: string[];
+}
