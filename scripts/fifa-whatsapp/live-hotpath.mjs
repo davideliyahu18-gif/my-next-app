@@ -68,6 +68,7 @@ async function loadSeen() {
       goals: [],
       penalties: [],
       delays: [],
+      resumes: [],
       halfTime: false,
       secondHalf: false,
       matchStart: false,
@@ -165,6 +166,7 @@ async function tick(c, seen) {
       if (Number(e.Type) === 16) seen.corners.push(id);
       if ([0, 34, 39, 41].includes(Number(e.Type))) seen.goals.push(id);
       if (Number(e.Type) === 83) seen.delays.push(id);
+      if (Number(e.Type) === 78) seen.resumes.push(id);
     }
     seen.seeded = true;
     seen.lastScore = `${homeScore}-${awayScore}`;
@@ -237,6 +239,23 @@ async function tick(c, seen) {
     ].join("\n");
     seen.delays.push(id);
     await blast(c, ["main", "vip"], text, isHydration ? "drinks_break" : "delay");
+  }
+
+  // Resume after drinks / interruption (FIFA Type 78).
+  seen.resumes = seen.resumes || [];
+  for (const e of events) {
+    if (Number(e.Type) !== 78) continue;
+    const id = String(e.EventId || "");
+    if (!id || seen.resumes.includes(id)) continue;
+    const min = String(e.MatchMinute || minute || "—").replace(/'/g, "");
+    const text = [
+      "*▶️ חזרנו למשחק!*",
+      `*🏟️ ${MATCH.homeFlag} ${MATCH.home} ${scoreEmoji(homeScore, awayScore)} ${MATCH.awayFlag} ${MATCH.away}*`,
+      `*⏱️ דקה | ${min}*`,
+      "_אחרי הפסקת שתייה / השהיה_",
+    ].join("\n");
+    seen.resumes.push(id);
+    await blast(c, ["main", "vip"], text, "resume");
   }
 
   // Goals from timeline
