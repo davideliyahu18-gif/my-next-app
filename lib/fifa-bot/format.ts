@@ -314,13 +314,10 @@ export function formatKickoffReminder(
 
 export function formatMatchStartAlert(snapshot: FifaBotMatchSnapshot): string {
   return [
-    "▶️ *המשחק התחיל!*",
-    "",
-    formatScoreLine({ ...snapshot, status: "live", minute: "1'" }),
-    snapshot.stage ? `🏆 ${snapshot.stage}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
+    `🚩 *המשחק התחיל*`,
+    `🏟️ *${snapshot.homeFlag} ${snapshot.home}* נגד *${snapshot.awayFlag} ${snapshot.away}*`,
+    `⏱️ דקה | 0`,
+  ].join("\n");
 }
 
 export function alertKindLabel(kind: FifaBotAlertKind): string {
