@@ -74,6 +74,12 @@ async function loadSeen() {
       matchStart: false,
       fullTime: false,
       penaltiesStart: false,
+      stoppage1H: false,
+      stoppage2H: false,
+      endNinety: false,
+      extraTimeStart: false,
+      extraTimeHalf: false,
+      extraTimeSecond: false,
       seeded: false,
       lastScore: "0-0",
     };
@@ -176,6 +182,18 @@ async function tick(c, seen) {
       seen.secondHalf = true;
     }
     if (status === "finished") seen.fullTime = true;
+    if (String(minute).includes("+") && Number(String(minute).replace(/[^\d].*$/, "")) >= 90) {
+      seen.stoppage2H = true;
+    } else if (String(minute).includes("+") && Number(String(minute).replace(/[^\d].*$/, "")) >= 45) {
+      seen.stoppage1H = true;
+    }
+    const periodNumSeed = Number(live.Period);
+    if (periodNumSeed === 7 || periodNumSeed === 8 || periodNumSeed === 9) {
+      seen.endNinety = true;
+      seen.extraTimeStart = true;
+    }
+    if (periodNumSeed === 8 || periodNumSeed === 9) seen.extraTimeHalf = true;
+    if (periodNumSeed === 9) seen.extraTimeSecond = true;
     await saveSeen(seen);
     console.log(new Date().toISOString(), "seeded events=", events.length, "status=", status, "min=", minute);
     return { status, minute };
@@ -373,12 +391,149 @@ async function tick(c, seen) {
     }
   }
 
+  // Injury / stoppage time (MatchTime like 45'+2' or 90'+4').
+  const stoppageMatch = String(minute).match(/^(\d+)\s*\+\s*(\d+)/);
+  if (stoppageMatch) {
+    const base = Number(stoppageMatch[1]);
+    const added = stoppageMatch[2];
+    if (base >= 90 && !seen.stoppage2H) {
+      seen.stoppage2H = true;
+      await blast(
+        c,
+        ["main", "vip"],
+        [
+          "*⏱️ תוספת זמן — מחצית שנייה*",
+          `*🏟️ ${MATCH.homeFlag} ${MATCH.home} ${scoreEmoji(homeScore, awayScore)} ${MATCH.awayFlag} ${MATCH.away}*`,
+          `*➕ ${added} דקות לפחות*`,
+        ].join("\n"),
+        "stoppage_2h",
+      );
+    } else if (base >= 45 && base < 90 && !seen.stoppage1H) {
+      seen.stoppage1H = true;
+      await blast(
+        c,
+        ["main", "vip"],
+        [
+          "*⏱️ תוספת זמן — מחצית ראשונה*",
+          `*🏟️ ${MATCH.homeFlag} ${MATCH.home} ${scoreEmoji(homeScore, awayScore)} ${MATCH.awayFlag} ${MATCH.away}*`,
+          `*➕ ${added} דקות לפחות*`,
+        ].join("\n"),
+        "stoppage_1h",
+      );
+    }
+  }
+
+  const periodNum = Number(live.Period);
+  const regulationEnded = events.some(
+    (e) =>
+      Number(e.Type) === 8 &&
+      Number(e.Period) === 5 &&
+      /second period to an end|second half to an end/i.test(
+        (((e.EventDescription || [])[0] || {}).Description || ""),
+      ),
+  );
+
+  // End of 90' — if tied, announce we're heading to extra time ASAP.
+  if (
+    !seen.endNinety &&
+    (regulationEnded ||
+      (status === "pause" && seen.secondHalf && !seen.extraTimeStart && homeScore === awayScore))
+  ) {
+    // Only after second half; avoid HT pause.
+    if (seen.secondHalf) {
+      seen.endNinety = true;
+      if (homeScore === awayScore) {
+        await blast(
+          c,
+          ["main", "vip"],
+          [
+            "*🔔 סיום 90 דקות!*",
+            `*🏟️ ${MATCH.homeFlag} ${MATCH.home} ${scoreEmoji(homeScore, awayScore)} ${MATCH.awayFlag} ${MATCH.away}*`,
+            "*⏳ הולכים להארכה — גחוף!*",
+          ].join("\n"),
+          "end_ninety",
+        );
+      } else {
+        await blast(
+          c,
+          ["main", "vip"],
+          [
+            "*🔔 סיום 90 דקות!*",
+            `*🏟️ ${MATCH.homeFlag} ${MATCH.home} ${scoreEmoji(homeScore, awayScore)} ${MATCH.awayFlag} ${MATCH.away}*`,
+          ].join("\n"),
+          "end_ninety",
+        );
+      }
+    }
+  }
+
+  // Extra time (ET) — Period 7 start, 8 pause, 9 second ET half.
+  if (
+    !seen.extraTimeStart &&
+    (periodNum === 7 ||
+      events.some(
+        (e) =>
+          Number(e.Type) === 7 &&
+          Number(e.Period) === 7,
+      ))
+  ) {
+    seen.extraTimeStart = true;
+    seen.endNinety = true;
+    await blast(
+      c,
+      ["main", "vip"],
+      [
+        "*⏱️🔥 הארכה התחילה!*",
+        `*🏟️ ${MATCH.homeFlag} ${MATCH.home} ${scoreEmoji(homeScore, awayScore)} ${MATCH.awayFlag} ${MATCH.away}*`,
+        "*⏳ 30 דקות — מחליטים פה*",
+      ].join("\n"),
+      "extra_time",
+    );
+  }
+
+  if (
+    !seen.extraTimeHalf &&
+    seen.extraTimeStart &&
+    (periodNum === 8 || (status === "pause" && periodNum !== 4 && periodNum !== 5))
+  ) {
+    if (periodNum === 8 || (seen.extraTimeStart && status === "pause" && periodNum !== 4)) {
+      seen.extraTimeHalf = true;
+      await blast(
+        c,
+        ["main", "vip"],
+        [
+          "*⏸️ מחצית בהארכה*",
+          `*🏟️ ${MATCH.homeFlag} ${MATCH.home} ${scoreEmoji(homeScore, awayScore)} ${MATCH.awayFlag} ${MATCH.away}*`,
+        ].join("\n"),
+        "extra_time_half",
+      );
+    }
+  }
+
+  if (
+    !seen.extraTimeSecond &&
+    seen.extraTimeStart &&
+    (periodNum === 9 ||
+      events.some((e) => Number(e.Type) === 7 && Number(e.Period) === 9))
+  ) {
+    seen.extraTimeSecond = true;
+    await blast(
+      c,
+      ["main", "vip"],
+      [
+        "*🔔 מחצית שנייה בהארכה!*",
+        `*🏟️ ${MATCH.homeFlag} ${MATCH.home} ${scoreEmoji(homeScore, awayScore)} ${MATCH.awayFlag} ${MATCH.away}*`,
+      ].join("\n"),
+      "extra_time_second",
+    );
+  }
+
   if (status === "penalties" && !seen.penaltiesStart) {
     seen.penaltiesStart = true;
     await blast(
       c,
       ["main", "vip"],
-      `*⚡ פנדלים*\n*🏟️ ${MATCH.homeFlag} ${MATCH.home} נגד ${MATCH.awayFlag} ${MATCH.away}*`,
+      `*⚡ פנדלים*\n*🏟️ ${MATCH.homeFlag} ${MATCH.home} נגד ${MATCH.awayFlag} ${MATCH.away}*\n*תוצאה לאחר הארכה | ${MATCH.home} ${homeScore} - ${MATCH.away} ${awayScore}*`,
       "penalties",
     );
   }
