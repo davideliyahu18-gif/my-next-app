@@ -424,6 +424,38 @@ export function formatPenaltiesStartAlert(
   ].join("\n");
 }
 
+export function formatPenaltyKickAlert(
+  snapshot: FifaBotMatchSnapshot,
+  options: {
+    scored: boolean;
+    player: string;
+    teamName: string;
+    minute: string;
+    homeScore: number | null;
+    awayScore: number | null;
+  },
+): string {
+  const homeScore = options.homeScore ?? snapshot.homeScore ?? 0;
+  const awayScore = options.awayScore ?? snapshot.awayScore ?? 0;
+  const minute = cornerMinuteLabel(options.minute || snapshot.minute || "—");
+  const scoreLabel = options.scored ? "תוצאה לאחר הפנדל" : "תוצאה כעת";
+
+  return [
+    boldLine(options.scored ? "✅🎯 פנדל נכבש!!!" : "❌🎯 פנדל הוחמץ"),
+    boldLine(
+      `🏟️ ${snapshot.homeFlag} ${snapshot.home} נגד ${snapshot.awayFlag} ${snapshot.away}`,
+    ),
+    boldLine(
+      `⏱️ דקה | ${minute} - ${options.player} | ${options.teamName}`,
+    ),
+    boldLine(
+      `🥅 ${scoreLabel} | ${snapshot.home} ${homeScore} - ${snapshot.away} ${awayScore}`,
+    ),
+    "",
+    FIFA_BOT_FT_SIGNATURE,
+  ].join("\n");
+}
+
 export function formatSecondHalfStartAlert(
   snapshot: FifaBotMatchSnapshot,
 ): string {
@@ -484,6 +516,10 @@ export function alertKindLabel(kind: FifaBotAlertKind): string {
       return "מחצית שנייה";
     case "penalties":
       return "פנדלים";
+    case "penalty_scored":
+      return "פנדל נכבש";
+    case "penalty_missed":
+      return "פנדל הוחמץ";
     case "full_time":
       return "סיום";
     case "kickoff_reminder":

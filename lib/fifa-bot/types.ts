@@ -15,6 +15,8 @@ export type FifaBotAlertKind =
   | "half_time"
   | "second_half"
   | "penalties"
+  | "penalty_scored"
+  | "penalty_missed"
   | "full_time"
   | "kickoff_reminder"
   | "match_start";
@@ -64,6 +66,8 @@ export interface FifaBotMatchSnapshot {
   goalScorerIds: string[];
   /** Corner event ids already announced. */
   cornerIds: string[];
+  /** Spot-kick event ids already announced (scored/missed). */
+  penaltyKickIds: string[];
   halfTimeSent?: boolean;
   secondHalfSent?: boolean;
   penaltiesSent?: boolean;

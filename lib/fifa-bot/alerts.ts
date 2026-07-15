@@ -15,6 +15,7 @@ import {
   formatKickoffReminder,
   formatMatchStartAlert,
   formatPenaltiesStartAlert,
+  formatPenaltyKickAlert,
   formatSecondHalfStartAlert,
 } from "./format";
 import {
@@ -93,6 +94,7 @@ function toSnapshot(
     goalFlashIds: previous?.goalFlashIds ?? [],
     goalScorerIds: previous?.goalScorerIds ?? [],
     cornerIds: previous?.cornerIds ?? [],
+    penaltyKickIds: previous?.penaltyKickIds ?? [],
     halfTimeSent: previous?.halfTimeSent ?? false,
     secondHalfSent: previous?.secondHalfSent ?? false,
     penaltiesSent: previous?.penaltiesSent ?? false,
@@ -144,6 +146,9 @@ export async function collectFifaBotAlerts(): Promise<{
         .filter((goal) => goal.scorer && !isPlaceholderScorer(goal.scorer))
         .map((goal) => goalEventId(goal));
       snapshot.cornerIds = corners.map((corner) => corner.eventId);
+      snapshot.penaltyKickIds = (rich.penalties ?? []).map(
+        (penalty) => penalty.eventId,
+      );
       if (snapshot.status === "pause") {
         snapshot.halfTimeSent = true;
       }
@@ -165,6 +170,29 @@ export async function collectFifaBotAlerts(): Promise<{
     const flashed = new Set(snapshot.goalFlashIds);
     const scored = new Set(snapshot.goalScorerIds);
     const cornerSeen = new Set(snapshot.cornerIds);
+    const penaltySeen = new Set(snapshot.penaltyKickIds);
+    const penaltyKicks = rich.penalties ?? [];
+
+    for (const kick of penaltyKicks) {
+      if (penaltySeen.has(kick.eventId)) continue;
+      const alert = await buildAlert({
+        id: `pen-kick:${snapshot.id}:${kick.eventId}`,
+        kind: kick.scored ? "penalty_scored" : "penalty_missed",
+        matchId: snapshot.id,
+        text: formatPenaltyKickAlert(snapshot, {
+          scored: kick.scored,
+          player: kick.player,
+          teamName: kick.teamName,
+          minute: kick.minute,
+          homeScore: kick.homeScore,
+          awayScore: kick.awayScore,
+        }),
+      });
+      if (alert) {
+        alerts.push(alert);
+        penaltySeen.add(kick.eventId);
+      }
+    }
 
     for (let index = 0; index < corners.length; index += 1) {
       const corner = corners[index];
@@ -198,6 +226,15 @@ export async function collectFifaBotAlerts(): Promise<{
 
     for (const goal of rich.goals) {
       const eventId = goalEventId(goal);
+
+      // Spot-kick goals use the dedicated penalty templates instead.
+      if (goal.penalty) {
+        flashed.add(eventId);
+        if (goal.scorer && !isPlaceholderScorer(goal.scorer)) {
+          scored.add(eventId);
+        }
+        continue;
+      }
 
       if (!flashed.has(eventId)) {
         const alert = await buildAlert({
@@ -238,6 +275,7 @@ export async function collectFifaBotAlerts(): Promise<{
     snapshot.goalFlashIds = [...flashed];
     snapshot.goalScorerIds = [...scored];
     snapshot.cornerIds = [...cornerSeen];
+    snapshot.penaltyKickIds = [...penaltySeen];
 
     if (
       snapshot.status === "pause" &&
