@@ -476,7 +476,13 @@ function dayOffsetFromIsoDate(isoDate: string): number {
 function scheduleStatus(
   match: FifaMatch,
 ): ScheduleMatchView["status"] {
-  if (match.status === "IN_PLAY" || match.status === "PAUSE") return "live";
+  if (
+    match.status === "IN_PLAY" ||
+    match.status === "PAUSE" ||
+    match.status === "PENALTIES"
+  ) {
+    return "live";
+  }
   if (match.status === "FINISHED") return "finished";
   return "upcoming";
 }
