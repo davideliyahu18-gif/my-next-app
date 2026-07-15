@@ -1,47 +1,42 @@
-# בוט מונדיאל — שלט רחוק בוואטסאפ
+# בוט מונדיאל — LIVE + VIP
 
-בוט WhatsApp (Baileys) שמקשיב לקבוצה ומגיב לפקודות, ויודע גם לשלוח התראות על שערים / סיום / תזכורת לפני משחק.
+בוט WhatsApp (Baileys) לשתי קבוצות, עם ניתוב התראות שונה לכל אחת.
 
-## מה צריך
+## הקבוצות
 
-1. האתר רץ מקומית (`npm run dev`) או ב-Vercel
-2. מספר WhatsApp לסריקת QR (מכשיר מקושר)
-3. קבוצת WhatsApp — הבוט מוצא אותה לפי שם
+| קבוצה | שם לדוגמה | מה נשלח |
+|--------|-----------|---------|
+| **MAIN / LIVE** | `🏆 דוד \| עדכוני מונדיאל LIVE ⚽🔥` | הכל **חוץ מקרנות** |
+| **VIP** | `🔥⚽ דוד VIP עדכוני מונדיאל` | הכל **חוץ משערים** (כולל קרנות, מחצית, סיום, פנדלים…) |
+
+שלט רחוק (`תוצאה`, `עזרה`…) עובד בשתי הקבוצות.
 
 ## הגדרה ב־`.env.local`
 
 ```bash
-# כתובת האתר שהבוט מדבר איתה
 FIFA_BOT_SITE_URL=http://127.0.0.1:3000
-
-# סוד משותף ל־API (אותו ערך כמו בשרת)
 FIFA_BOT_SECRET=generate-a-long-random-secret
 FEED_API_SECRET=generate-a-long-random-secret
 CRON_SECRET=generate-a-long-random-secret
 
-# שם הקבוצה (חלקי מספיק) או chat id מלא
-FIFA_WHATSAPP_GROUP_NAME=מונדיאל
-# WHATSAPP_GROUP_CHAT_ID=120363...@g.us
+# חיפוש לפי שם (חלקי מספיק) — או chat id מלא
+FIFA_WHATSAPP_MAIN_GROUP_NAME=דוד | עדכוני מונדיאל LIVE
+FIFA_WHATSAPP_VIP_GROUP_NAME=דוד VIP עדכוני מונדיאל
+# FIFA_WHATSAPP_MAIN_CHAT_ID=120363...@g.us
+# FIFA_WHATSAPP_VIP_CHAT_ID=120363...@g.us
 ```
 
 ## הפעלה
 
-טרמינל 1 — האתר:
-
 ```bash
 npm run dev
-```
-
-טרמינל 2 — הבוט:
-
-```bash
 npm run fifa-bot:setup
 npm run fifa-bot:start
 ```
 
-סרקו QR → הוסיפו את המספר המקושר לקבוצה → הבוט ישלח הודעת חיבור.
+סרקו QR → הוסיפו את המספר המקושר **לשתי הקבוצות** → הבוט ישלח הודעת חיבור לכל אחת.
 
-## פקודות שלט רחוק (בקבוצה)
+## פקודות
 
 | פקודה | מה קורה |
 |--------|---------|
@@ -53,22 +48,11 @@ npm run fifa-bot:start
 | `סטטוס` / `בוט` | האם הבוט חי |
 | `עזרה` | רשימת פקודות |
 
-## התראות אוטומטיות
-
-הבוט בודק כל דקה (`FIFA_BOT_POLL_CRON`) דרך `/api/cron/fifa-bot?dry=1` ושולח:
-
-- ⚽️ שער
-- 🏁 סיום משחק
-- ⏰ תזכורת ~30 דקות לפני (ניתן לשינוי ב־`FIFA_BOT_REMINDER_MINUTES`)
-
-כדי לכבות: `FIFA_BOT_ALERTS=false`
-
-## בלי Baileys (Vercel + Green API)
-
-ב-Vercel אפשר לתזמן `/api/cron/fifa-bot` ולשלוח דרך Green API / Telegram עם:
+## Green API (Vercel)
 
 ```bash
 GREEN_API_INSTANCE=
 GREEN_API_TOKEN=
-WHATSAPP_GROUP_CHAT_ID=
+FIFA_WHATSAPP_MAIN_CHAT_ID=
+FIFA_WHATSAPP_VIP_CHAT_ID=
 ```

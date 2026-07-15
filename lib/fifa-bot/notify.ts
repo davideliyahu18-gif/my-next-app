@@ -1,10 +1,16 @@
+import { channelsForAlert } from "./channels";
 import type { FifaBotAlert } from "./types";
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? "";
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID ?? "";
 const GREEN_API_INSTANCE = process.env.GREEN_API_INSTANCE ?? "";
 const GREEN_API_TOKEN = process.env.GREEN_API_TOKEN ?? "";
-const WHATSAPP_GROUP_CHAT_ID = process.env.WHATSAPP_GROUP_CHAT_ID ?? "";
+
+const MAIN_CHAT_ID =
+  process.env.FIFA_WHATSAPP_MAIN_CHAT_ID ||
+  process.env.WHATSAPP_GROUP_CHAT_ID ||
+  "";
+const VIP_CHAT_ID = process.env.FIFA_WHATSAPP_VIP_CHAT_ID || "";
 
 async function sendTelegram(text: string): Promise<boolean> {
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return false;
@@ -30,10 +36,11 @@ async function sendTelegram(text: string): Promise<boolean> {
   return true;
 }
 
-async function sendGreenApiWhatsApp(text: string): Promise<boolean> {
-  if (!GREEN_API_INSTANCE || !GREEN_API_TOKEN || !WHATSAPP_GROUP_CHAT_ID) {
-    return false;
-  }
+async function sendGreenApiToChat(
+  chatId: string,
+  text: string,
+): Promise<boolean> {
+  if (!GREEN_API_INSTANCE || !GREEN_API_TOKEN || !chatId) return false;
 
   const response = await fetch(
     `https://api.green-api.com/waInstance${GREEN_API_INSTANCE}/sendMessage/${GREEN_API_TOKEN}`,
@@ -41,7 +48,7 @@ async function sendGreenApiWhatsApp(text: string): Promise<boolean> {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        chatId: WHATSAPP_GROUP_CHAT_ID,
+        chatId,
         message: text,
       }),
     },
@@ -49,10 +56,28 @@ async function sendGreenApiWhatsApp(text: string): Promise<boolean> {
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
-    console.error("[fifa-bot] Green API send failed:", response.status, body);
+    console.error(
+      "[fifa-bot] Green API send failed:",
+      chatId,
+      response.status,
+      body,
+    );
     return false;
   }
   return true;
+}
+
+async function sendGreenApiWhatsApp(alert: FifaBotAlert): Promise<boolean> {
+  const channels = channelsForAlert(alert.kind);
+  let sent = false;
+
+  for (const channel of channels) {
+    const chatId = channel === "main" ? MAIN_CHAT_ID : VIP_CHAT_ID;
+    if (!chatId) continue;
+    if (await sendGreenApiToChat(chatId, alert.text)) sent = true;
+  }
+
+  return sent;
 }
 
 async function mirrorToWebsiteFeed(text: string, alertId: string): Promise<void> {
@@ -83,13 +108,15 @@ async function mirrorToWebsiteFeed(text: string, alertId: string): Promise<void>
 export function isFifaBotNotificationConfigured(): boolean {
   return Boolean(
     (TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID) ||
-      (GREEN_API_INSTANCE && GREEN_API_TOKEN && WHATSAPP_GROUP_CHAT_ID),
+      (GREEN_API_INSTANCE &&
+        GREEN_API_TOKEN &&
+        (MAIN_CHAT_ID || VIP_CHAT_ID)),
   );
 }
 
 export async function notifyFifaBotAlert(alert: FifaBotAlert): Promise<boolean> {
   const sentTelegram = await sendTelegram(alert.text);
-  const sentWhatsApp = await sendGreenApiWhatsApp(alert.text);
+  const sentWhatsApp = await sendGreenApiWhatsApp(alert);
 
   if (sentTelegram || sentWhatsApp) {
     await mirrorToWebsiteFeed(alert.text, alert.id);

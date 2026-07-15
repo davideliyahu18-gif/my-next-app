@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 /**
- * FIFA World Cup WhatsApp remote-control bot (Baileys).
+ * FIFA World Cup WhatsApp bot — two groups:
  *
- * - Auto-finds the WhatsApp group by WHATSAPP_GROUP_NAME
- * - Remote commands in the group: תוצאה / מחר / הרכב / מלך שערים / לוח / סטטוס / עזרה
- * - Polls /api/cron/fifa-bot?dry=1 and posts alerts (goal / FT / reminder)
+ *  MAIN (LIVE): 🏆 דוד | עדכוני מונדיאל LIVE ⚽🔥
+ *    → everything except corners
  *
- * Requires NEXT.js app reachable at FIFA_BOT_SITE_URL (default http://127.0.0.1:3000).
+ *  VIP: 🔥⚽ דוד VIP עדכוני מונדיאל
+ *    → everything except open-play goals (שער / כובש)
+ *
+ * Remote commands work in both groups.
  */
 
 import { createRequire } from "node:module";
@@ -63,22 +65,36 @@ function envConfig() {
       process.env.FEED_API_SECRET ||
       process.env.CRON_SECRET ||
       "",
-    groupJidEnv: process.env.WHATSAPP_GROUP_CHAT_ID ?? "",
-    groupName:
-      process.env.FIFA_WHATSAPP_GROUP_NAME ||
-      process.env.WHATSAPP_GROUP_NAME ||
-      "מונדיאל",
+    mainJidEnv:
+      process.env.FIFA_WHATSAPP_MAIN_CHAT_ID ||
+      process.env.WHATSAPP_GROUP_CHAT_ID ||
+      "",
+    vipJidEnv: process.env.FIFA_WHATSAPP_VIP_CHAT_ID || "",
+    mainName:
+      process.env.FIFA_WHATSAPP_MAIN_GROUP_NAME ||
+      "דוד | עדכוני מונדיאל LIVE",
+    vipName:
+      process.env.FIFA_WHATSAPP_VIP_GROUP_NAME || "דוד VIP עדכוני מונדיאל",
     pollCron: process.env.FIFA_BOT_POLL_CRON ?? "*/1 * * * *",
     alertsEnabled: process.env.FIFA_BOT_ALERTS !== "false",
   };
 }
 
+/** MAIN = no corners. VIP = no open-play goals. */
+function channelsForAlert(kind) {
+  const channels = [];
+  if (kind !== "corner") channels.push("main");
+  if (kind !== "goal" && kind !== "goal_scorer") channels.push("vip");
+  return channels;
+}
+
 const log = pino({ level: process.env.LOG_LEVEL ?? "info" });
 
 let sock = null;
-let groupJid = "";
+/** @type {{ main: string, vip: string }} */
+let groups = { main: "", vip: "" };
 let groupPollTimer = null;
-let welcomeSent = false;
+let welcomeSent = { main: false, vip: false };
 let pollRunning = false;
 let cfg = envConfig();
 
@@ -93,14 +109,29 @@ async function loadJson(file, fallback) {
 
 async function loadState() {
   const state = await loadJson(STATE_FILE, {});
-  if (state.groupJid && !groupJid) groupJid = state.groupJid;
-  welcomeSent = Boolean(state.welcomeSent);
+  if (state.mainJid) groups.main = state.mainJid;
+  if (state.vipJid) groups.vip = state.vipJid;
+  // Legacy single-group state
+  if (state.groupJid && !groups.main) groups.main = state.groupJid;
+  welcomeSent = {
+    main: Boolean(state.welcomeMain ?? state.welcomeSent),
+    vip: Boolean(state.welcomeVip),
+  };
 }
 
 async function saveState() {
   await writeFile(
     STATE_FILE,
-    JSON.stringify({ groupJid, welcomeSent }, null, 2),
+    JSON.stringify(
+      {
+        mainJid: groups.main,
+        vipJid: groups.vip,
+        welcomeMain: welcomeSent.main,
+        welcomeVip: welcomeSent.vip,
+      },
+      null,
+      2,
+    ),
     "utf8",
   );
 }
@@ -108,6 +139,16 @@ async function saveState() {
 function sameChatId(a, b) {
   if (!a || !b) return false;
   return String(a).split("@")[0] === String(b).split("@")[0];
+}
+
+function knownGroupIds() {
+  return [groups.main, groups.vip].filter(Boolean);
+}
+
+function channelForChatId(chatId) {
+  if (groups.main && sameChatId(chatId, groups.main)) return "main";
+  if (groups.vip && sameChatId(chatId, groups.vip)) return "vip";
+  return null;
 }
 
 function extractText(msg) {
@@ -184,37 +225,68 @@ async function runRemoteCommand(text) {
   return result.reply || "אין תשובה מהשרת.";
 }
 
-async function sendToGroup(text) {
-  if (!sock || !groupJid) return false;
-  await sock.sendMessage(groupJid, { text });
+async function sendToJid(jid, text) {
+  if (!sock || !jid) return false;
+  await sock.sendMessage(jid, { text });
   return true;
 }
 
-async function resolveGroupByName() {
+async function sendToChannel(channel, text) {
+  const jid = groups[channel];
+  return sendToJid(jid, text);
+}
+
+async function sendAlert(alert) {
+  const kind = alert?.kind || "unknown";
+  const channels = channelsForAlert(kind);
+  let sent = 0;
+  for (const channel of channels) {
+    if (await sendToChannel(channel, alert.text)) sent += 1;
+  }
+  return sent;
+}
+
+function subjectMatches(subject, wanted) {
+  const s = subject.toLowerCase();
+  const w = wanted.toLowerCase().trim();
+  if (!w) return false;
+  if (s.includes(w) || w.includes(s)) return true;
+  // Loose token match (VIP / LIVE)
+  if (w.includes("vip") && s.includes("vip")) return true;
+  if (w.includes("live") && s.includes("live")) return true;
+  return false;
+}
+
+async function resolveGroupsByName() {
   if (!sock) return false;
-  if (cfg.groupJidEnv) {
-    groupJid = cfg.groupJidEnv;
+
+  if (cfg.mainJidEnv) groups.main = cfg.mainJidEnv;
+  if (cfg.vipJidEnv) groups.vip = cfg.vipJidEnv;
+
+  if (groups.main && groups.vip) {
     await saveState();
     return true;
   }
-  if (groupJid) return true;
 
   try {
-    const groups = await sock.groupFetchAllParticipating();
-    const wanted = cfg.groupName.trim().toLowerCase();
-    for (const [jid, meta] of Object.entries(groups)) {
-      const subject = String(meta.subject || "").toLowerCase();
-      if (subject.includes(wanted) || wanted.includes(subject)) {
-        groupJid = jid;
-        await saveState();
-        log.info({ jid, subject: meta.subject }, "Resolved WhatsApp group");
-        return true;
+    const all = await sock.groupFetchAllParticipating();
+    for (const [jid, meta] of Object.entries(all)) {
+      const subject = String(meta.subject || "");
+      if (!groups.main && subjectMatches(subject, cfg.mainName)) {
+        groups.main = jid;
+        log.info({ jid, subject }, "Resolved MAIN WhatsApp group");
+      }
+      if (!groups.vip && subjectMatches(subject, cfg.vipName)) {
+        groups.vip = jid;
+        log.info({ jid, subject }, "Resolved VIP WhatsApp group");
       }
     }
+    await saveState();
   } catch (error) {
     log.warn({ error }, "groupFetchAllParticipating failed");
   }
-  return false;
+
+  return Boolean(groups.main || groups.vip);
 }
 
 async function handleIncomingMessage(msg) {
@@ -224,25 +296,40 @@ async function handleIncomingMessage(msg) {
     if (!chatId) return;
 
     const isGroup = chatId.endsWith("@g.us");
-    if (groupJid && isGroup && !sameChatId(chatId, groupJid)) return;
+    if (!isGroup) return;
+
+    const known = knownGroupIds();
+    let channel = channelForChatId(chatId);
+
+    if (known.length && !channel) return;
 
     const body = extractText(msg).trim();
     if (!body || !looksLikeRemoteCommand(body)) return;
 
-    if (!groupJid && isGroup) {
-      groupJid = chatId;
+    // Learn group if names not resolved yet
+    if (!channel) {
+      if (!groups.main) {
+        groups.main = chatId;
+        channel = "main";
+      } else if (!groups.vip && !sameChatId(chatId, groups.main)) {
+        groups.vip = chatId;
+        channel = "vip";
+      } else {
+        return;
+      }
       await saveState();
     }
 
-    log.info({ from: chatId, body }, "Remote command received");
-    await sendToGroup("⏳ רגע, בודק…");
+    log.info({ from: chatId, channel, body }, "Remote command received");
+    await sendToJid(chatId, "⏳ רגע, בודק…");
 
     try {
       const reply = await runRemoteCommand(body);
-      await sendToGroup(reply);
+      await sendToJid(chatId, reply);
     } catch (error) {
       log.warn({ error }, "Command API failed");
-      await sendToGroup(
+      await sendToJid(
+        chatId,
         "⚠️ לא הצלחתי לדבר עם שרת האתר.\nבדקו ש-`npm run dev` רץ ו־FIFA_BOT_SITE_URL נכון.",
       );
     }
@@ -253,18 +340,23 @@ async function handleIncomingMessage(msg) {
 
 async function pollAlerts() {
   if (!cfg.alertsEnabled) return;
-  if (!sock || !groupJid || pollRunning) return;
+  if (!sock || (!groups.main && !groups.vip) || pollRunning) return;
   pollRunning = true;
   try {
     const summary = await apiFetch("/api/cron/fifa-bot?dry=1", {
       method: "GET",
     });
     const alerts = Array.isArray(summary.alerts) ? summary.alerts : [];
+    let posted = 0;
     for (const alert of alerts) {
-      if (alert?.text) await sendToGroup(alert.text);
+      if (!alert?.text) continue;
+      posted += await sendAlert(alert);
     }
     if (alerts.length) {
-      log.info({ count: alerts.length }, "Posted FIFA alerts to WhatsApp");
+      log.info(
+        { alerts: alerts.length, sends: posted },
+        "Posted FIFA alerts to WhatsApp channels",
+      );
     }
   } catch (error) {
     log.warn({ error: String(error.message || error) }, "Alert poll failed");
@@ -273,35 +365,44 @@ async function pollAlerts() {
   }
 }
 
+async function welcomeChannel(channel) {
+  if (welcomeSent[channel] || !groups[channel]) return;
+  welcomeSent[channel] = true;
+  await saveState();
+
+  const isVip = channel === "vip";
+  await sendToChannel(
+    channel,
+    [
+      isVip
+        ? "✅ *בוט VIP מחובר!*"
+        : "✅ *בוט LIVE מחובר!*",
+      "",
+      isVip
+        ? "כאן: התראות בלי *שערים* (יש קרנות, מחצית, סיום, פנדלים…)"
+        : "כאן: התראות מלאות בלי *קרנות*",
+      "",
+      "שלט רחוק: *תוצאה* · *מחר* · *לוח* · *הרכב* · *מלך שערים* · *עזרה*",
+    ].join("\n"),
+  );
+}
+
 async function onConnected() {
   console.log("\n✅ מחובר לוואטסאפ.");
-  console.log(`   מחפש קבוצה עם השם: "${cfg.groupName}"`);
-  console.log("   הוסיפו את המספר המקושר לקבוצה.\n");
+  console.log(`   MAIN: "${cfg.mainName}"`);
+  console.log(`   VIP:  "${cfg.vipName}"`);
+  console.log("   הוסיפו את המספר המקושר לשתי הקבוצות.\n");
 
   groupPollTimer = setInterval(async () => {
-    const found = await resolveGroupByName();
-    if (!found) return;
-    clearInterval(groupPollTimer);
-    groupPollTimer = null;
+    await resolveGroupsByName();
+    if (groups.main) await welcomeChannel("main");
+    if (groups.vip) await welcomeChannel("vip");
 
-    if (!welcomeSent) {
-      welcomeSent = true;
-      await saveState();
-      await sendToGroup(
-        [
-          "✅ *בוט מונדיאל מחובר!*",
-          "",
-          "שלט רחוק מהקבוצה:",
-          "• *תוצאה* · *מחר* · *לוח*",
-          "• *הרכב* · *מלך שערים*",
-          "• *סטטוס* / *עזרה*",
-          "",
-          "אשלח גם התראות על שערים, סיום ותזכורת 30 דק׳ לפני.",
-        ].join("\n"),
-      );
+    if (groups.main && groups.vip) {
+      clearInterval(groupPollTimer);
+      groupPollTimer = null;
+      pollAlerts().catch(() => {});
     }
-
-    pollAlerts().catch(() => {});
   }, 10_000);
 
   cron.schedule(cfg.pollCron, () => {
@@ -360,11 +461,13 @@ async function main() {
   await loadEnvFile();
   cfg = envConfig();
   await loadState();
-  if (cfg.groupJidEnv) groupJid = cfg.groupJidEnv;
+  if (cfg.mainJidEnv) groups.main = cfg.mainJidEnv;
+  if (cfg.vipJidEnv) groups.vip = cfg.vipJidEnv;
 
-  console.log("⚽ בוט מונדיאל — שלט רחוק בוואטסאפ");
+  console.log("⚽ בוט מונדיאל — LIVE + VIP");
   console.log(`   Site API: ${cfg.siteUrl}`);
-  console.log(`   Group name filter: ${cfg.groupName}`);
+  console.log(`   MAIN (no corners): ${cfg.mainName}`);
+  console.log(`   VIP  (no goals):   ${cfg.vipName}`);
   console.log(`   Alerts: ${cfg.alertsEnabled ? "on" : "off"}`);
   console.log("");
 
