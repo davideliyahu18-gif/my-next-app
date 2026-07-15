@@ -67,6 +67,7 @@ async function loadSeen() {
       corners: [],
       goals: [],
       penalties: [],
+      delays: [],
       halfTime: false,
       secondHalf: false,
       matchStart: false,
@@ -157,11 +158,13 @@ async function tick(c, seen) {
 
   // Seed existing history once so we don't spam the whole timeline.
   if (!seen.seeded) {
+    seen.delays = seen.delays || [];
     for (const e of events) {
       const id = String(e.EventId || "");
       if (!id) continue;
       if (Number(e.Type) === 16) seen.corners.push(id);
       if ([0, 34, 39, 41].includes(Number(e.Type))) seen.goals.push(id);
+      if (Number(e.Type) === 83) seen.delays.push(id);
     }
     seen.seeded = true;
     seen.lastScore = `${homeScore}-${awayScore}`;
@@ -210,6 +213,30 @@ async function tick(c, seen) {
     ].join("\n");
     seen.corners.push(id);
     await blast(c, ["vip"], text, "corner");
+  }
+
+  // Hydration / cooling drinks breaks (FIFA Type 83 Delay).
+  seen.delays = seen.delays || [];
+  for (const e of events) {
+    if (Number(e.Type) !== 83) continue;
+    const id = String(e.EventId || "");
+    if (!id || seen.delays.includes(id)) continue;
+    const desc = (((e.EventDescription || [])[0] || {}).Description || "").toLowerCase();
+    const min = String(e.MatchMinute || minute || "—").replace(/'/g, "");
+    const isHydration =
+      desc.includes("hydrat") ||
+      desc.includes("drink") ||
+      desc.includes("cooling") ||
+      desc.includes("water");
+    const title = isHydration ? "*💧 הפסקת שתייה*" : "*⏸️ השהיית משחק*";
+    const text = [
+      title,
+      `*🏟️ ${MATCH.homeFlag} ${MATCH.home} ${scoreEmoji(homeScore, awayScore)} ${MATCH.awayFlag} ${MATCH.away}*`,
+      `*⏱️ דקה | ${min}*`,
+      isHydration ? "_המשחק מושהה לחימום / שתייה_" : "_המשחק מושהה_",
+    ].join("\n");
+    seen.delays.push(id);
+    await blast(c, ["main", "vip"], text, isHydration ? "drinks_break" : "delay");
   }
 
   // Goals from timeline
