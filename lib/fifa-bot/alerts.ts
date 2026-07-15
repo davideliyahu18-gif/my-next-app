@@ -79,8 +79,12 @@ function toSnapshot(
     awayScore: match.awayScore,
     status,
     minute:
-      match.matchTime ??
-      (status === "finished" ? "סיום" : status === "pause" ? "HT" : "—"),
+      match.matchTime ||
+      (status === "pause"
+        ? "HT"
+        : status === "finished"
+          ? previous?.minute || "90"
+          : "—"),
     kickoffAt: match.utcDate.toISOString(),
     stage: match.group || match.stage || match.competition || "מונדיאל 2026",
     goals: goalsForSnapshot(match),

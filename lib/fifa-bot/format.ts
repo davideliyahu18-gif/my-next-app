@@ -299,15 +299,34 @@ export function formatGoalScorerUpdate(
   ].join("\n");
 }
 
+export const FIFA_BOT_FT_SIGNATURE = "*📣 עדכוני כדורגל - 24/7 ⚽🥇🏆*";
+
+function fullTimeMinuteLabel(minute: string): string {
+  const cleaned = String(minute).replace(/'/g, "").trim();
+  const plus = cleaned.match(/^(\d+)\+(\d+)$/);
+  if (plus) return String(Number(plus[1]) + Number(plus[2]));
+  const digits = cleaned.match(/(\d+)/);
+  if (digits) return digits[1];
+  return "90";
+}
+
 export function formatFullTimeAlert(snapshot: FifaBotMatchSnapshot): string {
+  const homeScore = snapshot.homeScore ?? 0;
+  const awayScore = snapshot.awayScore ?? 0;
+  const minute = fullTimeMinuteLabel(snapshot.minute || "90");
+
   return [
-    "🏁 *סיום המשחק*",
+    boldLine("🏁 סיום המשחק"),
+    boldLine(
+      `🏟️ ${snapshot.homeFlag} ${snapshot.home} נגד ${snapshot.awayFlag} ${snapshot.away}`,
+    ),
+    boldLine(`⏱️ דקה | ${minute}`),
+    boldLine(
+      `🥅 תוצאה סופית | ${snapshot.home} ${homeScore} - ${snapshot.away} ${awayScore}`,
+    ),
     "",
-    formatScoreLine({ ...snapshot, status: "finished" }),
-    snapshot.stage ? `🏆 ${snapshot.stage}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
+    FIFA_BOT_FT_SIGNATURE,
+  ].join("\n");
 }
 
 export function formatKickoffReminder(
