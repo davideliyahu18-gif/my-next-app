@@ -78,28 +78,40 @@ async function sendGreen(c, chatId, message) {
 
 async function pollOnce(c) {
   const started = Date.now();
-  const res = await fetch(`${c.site}/api/cron/fifa-bot?dry=1`, {
+  // Prefer server-side Green sends (no dry) so alerts aren't lost to a concurrent dry consumer.
+  const res = await fetch(`${c.site}/api/cron/fifa-bot`, {
     headers: { Authorization: `Bearer ${c.secret}` },
     cache: "no-store",
   });
   const summary = await res.json();
   if (!res.ok) throw new Error(JSON.stringify(summary));
   const alerts = Array.isArray(summary.alerts) ? summary.alerts : [];
-  let sent = 0;
-  for (const alert of alerts) {
-    if (!alert?.text) continue;
-    const channels = channelsForAlert(alert.kind);
-    await Promise.all(
-      channels.map(async (channel) => {
-        const chatId = channel === "main" ? c.mainChat : c.vipChat;
-        await sendGreen(c, chatId, alert.text);
-        sent += 1;
-        console.log(new Date().toISOString(), "sent", channel, alert.kind);
-      }),
-    );
-  }
+  const notified = Number(summary.notified || 0);
   const liveMatches = Number(summary.liveMatches || 0);
   const upcomingMatches = Number(summary.upcomingMatches || 0);
+
+  // Fallback: if the site returned alerts but notified nothing (no Green on server),
+  // fan-out from this poller.
+  let sent = notified;
+  if (alerts.length && notified === 0) {
+    for (const alert of alerts) {
+      if (!alert?.text) continue;
+      const channels = channelsForAlert(alert.kind);
+      await Promise.all(
+        channels.map(async (channel) => {
+          const chatId = channel === "main" ? c.mainChat : c.vipChat;
+          await sendGreen(c, chatId, alert.text);
+          sent += 1;
+          console.log(new Date().toISOString(), "sent", channel, alert.kind);
+        }),
+      );
+    }
+  } else if (notified > 0) {
+    for (const alert of alerts) {
+      console.log(new Date().toISOString(), "notified", alert.kind);
+    }
+  }
+
   if (!alerts.length) {
     console.log(
       new Date().toISOString(),

@@ -606,9 +606,21 @@ async function buildMatch(
         status = "FINISHED";
         break;
       }
-      if (event.Type === 7) {
+      // Kick-off / period start whistle.
+      if (event.Type === 7 || event.Type === 8 || event.Type === 11) {
         status = "IN_PLAY";
       }
+    }
+  }
+  // FIFA briefly reports Period 0 + MatchStatus 1/3 with MatchTime "0'" at kickoff
+  // before Period flips to first-half (3). Treat that as live immediately.
+  if (status === "SCHEDULED") {
+    const matchStatus = Number(liveData.MatchStatus);
+    const matchTimeRaw = String(liveData.MatchTime ?? "").trim();
+    const hasClock =
+      Boolean(matchTimeRaw) && matchTimeRaw !== "—" && matchTimeRaw !== "-";
+    if (matchStatus === 1 || matchStatus === 3 || (period === 0 && hasClock)) {
+      status = "IN_PLAY";
     }
   }
   if (Number(liveData.MatchStatus) === 0 || hasMatchEnd) {
