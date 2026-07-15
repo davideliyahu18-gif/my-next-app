@@ -10,6 +10,7 @@ export type FifaBotCommand =
 
 export type FifaBotAlertKind =
   | "goal"
+  | "goal_scorer"
   | "full_time"
   | "kickoff_reminder"
   | "match_start";
@@ -43,5 +44,8 @@ export interface FifaBotMatchSnapshot {
   minute: string;
   kickoffAt: string;
   stage: string;
-  goalKeys: string[];
+  /** Goal event ids that already got the flash "שער!!!" alert. */
+  goalFlashIds: string[];
+  /** Goal event ids that already got the "כובש השער" update. */
+  goalScorerIds: string[];
 }

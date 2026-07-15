@@ -232,21 +232,57 @@ export function formatLineups(lineups: SemiFinalLineupMatchView[]): string {
   return lines.join("\n").trim();
 }
 
-/** Matches the original WhatsApp feed goal template from `.test-data/website_feed.jsonl`. */
+const SCORE_DIGITS = ["0️⃣", "1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣"] as const;
+
+function scoreDigit(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return "❓";
+  if (n <= 9) return SCORE_DIGITS[n];
+  return String(n)
+    .split("")
+    .map((ch) => SCORE_DIGITS[Number(ch)] ?? ch)
+    .join("");
+}
+
+function minuteLabel(minute: string): string {
+  const raw = String(minute).trim();
+  if (!raw) return "—";
+  return raw.includes("'") ? raw : `${raw}'`;
+}
+
+function formatEmojiScore(homeScore: number | null, awayScore: number | null): string {
+  return `${scoreDigit(homeScore ?? 0)} - ${scoreDigit(awayScore ?? 0)}`;
+}
+
+/** Immediate goal flash — scorer still updating. */
 export function formatGoalAlert(
   snapshot: FifaBotMatchSnapshot,
-  _scorer: string,
   minute: string,
-  _teamName: string,
 ): string {
-  const homeScore = snapshot.homeScore ?? 0;
-  const awayScore = snapshot.awayScore ?? 0;
-  const minuteLabel = String(minute).includes("'") ? String(minute) : `${minute}'`;
-
   return [
-    "⚽ *שער!*",
-    `${snapshot.homeFlag} ${snapshot.home} ${homeScore}-${awayScore} ${snapshot.away}`,
-    `🕐 ${minuteLabel}`,
+    `*⚽🔥 שער!!!*`,
+    `*🏟️ ${snapshot.homeFlag} ${snapshot.home} 🆚 ${snapshot.awayFlag} ${snapshot.away}*`,
+    `*⏱️ דקה ${minuteLabel(minute)}*`,
+    `*👤 כובש: מתעדכן...*`,
+    `*🥅 תוצאה כעת:*`,
+    `*${snapshot.homeFlag} ${formatEmojiScore(snapshot.homeScore, snapshot.awayScore)} ${snapshot.awayFlag}*`,
+  ].join("\n");
+}
+
+/** Follow-up once the scorer name is known. */
+export function formatGoalScorerUpdate(
+  snapshot: FifaBotMatchSnapshot,
+  scorer: string,
+  teamName: string,
+  minute: string,
+): string {
+  const scorerLine = teamName ? `${scorer} | ${teamName}` : scorer;
+  return [
+    `*✅ כובש השער!*`,
+    `*🏟️ ${snapshot.homeFlag} ${snapshot.home} 🆚 ${snapshot.awayFlag} ${snapshot.away}*`,
+    `*👤 ${scorerLine}*`,
+    `*🥅 תוצאה כעת:*`,
+    `*${snapshot.homeFlag} ${formatEmojiScore(snapshot.homeScore, snapshot.awayScore)} ${snapshot.awayFlag}*`,
+    `*⏱️ דקה ${minuteLabel(minute)}*`,
   ].join("\n");
 }
 
@@ -291,6 +327,8 @@ export function alertKindLabel(kind: FifaBotAlertKind): string {
   switch (kind) {
     case "goal":
       return "שער";
+    case "goal_scorer":
+      return "כובש";
     case "full_time":
       return "סיום";
     case "kickoff_reminder":

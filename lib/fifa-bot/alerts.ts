@@ -3,11 +3,13 @@ import {
   getMatchById,
   getUpcomingCalendarRows,
   calendarRowToMatch,
+  isPlaceholderScorer,
   type FifaMatch,
 } from "@/lib/fifa-api";
 import {
   formatFullTimeAlert,
   formatGoalAlert,
+  formatGoalScorerUpdate,
   formatKickoffReminder,
   formatMatchStartAlert,
 } from "./format";
@@ -22,11 +24,14 @@ import type { FifaBotAlert, FifaBotMatchSnapshot } from "./types";
 const REMINDER_WINDOW_MIN = Number(process.env.FIFA_BOT_REMINDER_MINUTES ?? "30");
 const REMINDER_TOLERANCE_MIN = 4;
 
-function goalKey(goal: FifaMatch["goals"][number]): string {
-  return `${goal.eventId}:${goal.scorer}:${goal.minute}`;
+function goalEventId(goal: FifaMatch["goals"][number]): string {
+  return goal.eventId || `${goal.minute}:${goal.scorer}:${goal.teamId}`;
 }
 
-function toSnapshot(match: FifaMatch): FifaBotMatchSnapshot {
+function toSnapshot(
+  match: FifaMatch,
+  previous?: FifaBotMatchSnapshot,
+): FifaBotMatchSnapshot {
   const status =
     match.status === "IN_PLAY" || match.status === "PAUSE"
       ? "live"
@@ -46,7 +51,8 @@ function toSnapshot(match: FifaMatch): FifaBotMatchSnapshot {
     minute: match.matchTime ?? (status === "finished" ? "סיום" : "—"),
     kickoffAt: match.utcDate.toISOString(),
     stage: match.group || match.stage || match.competition || "מונדיאל 2026",
-    goalKeys: match.goals.map(goalKey),
+    goalFlashIds: previous?.goalFlashIds ?? [],
+    goalScorerIds: previous?.goalScorerIds ?? [],
   };
 }
 
@@ -70,10 +76,11 @@ export async function collectFifaBotAlerts(): Promise<{
   const live = await getLiveMatchesNow(true);
   for (const match of live) {
     const rich =
-      match.goals.length > 0 ? match : await getMatchById(match.id, true).catch(() => match);
-    const snapshot = toSnapshot(rich);
-    const prev = previous[snapshot.id];
-    nextSnapshots[snapshot.id] = snapshot;
+      match.goals.length > 0
+        ? match
+        : await getMatchById(match.id, true).catch(() => match);
+    const prev = previous[rich.id];
+    const snapshot = toSnapshot(rich, prev);
 
     if (prev?.status === "upcoming" && snapshot.status === "live") {
       const alert = await buildAlert({
@@ -85,23 +92,51 @@ export async function collectFifaBotAlerts(): Promise<{
       if (alert) alerts.push(alert);
     }
 
-    const prevGoals = new Set(prev?.goalKeys ?? []);
+    const flashed = new Set(snapshot.goalFlashIds);
+    const scored = new Set(snapshot.goalScorerIds);
+
     for (const goal of rich.goals) {
-      const key = goalKey(goal);
-      if (prevGoals.has(key)) continue;
-      const alert = await buildAlert({
-        id: `goal:${snapshot.id}:${key}`,
-        kind: "goal",
-        matchId: snapshot.id,
-        text: formatGoalAlert(
-          snapshot,
-          goal.scorer,
-          goal.minute,
-          goal.teamName,
-        ),
-      });
-      if (alert) alerts.push(alert);
+      const eventId = goalEventId(goal);
+
+      if (!flashed.has(eventId)) {
+        const alert = await buildAlert({
+          id: `goal:${snapshot.id}:${eventId}`,
+          kind: "goal",
+          matchId: snapshot.id,
+          text: formatGoalAlert(snapshot, goal.minute),
+        });
+        if (alert) {
+          alerts.push(alert);
+          flashed.add(eventId);
+        }
+      }
+
+      if (
+        !scored.has(eventId) &&
+        goal.scorer &&
+        !isPlaceholderScorer(goal.scorer)
+      ) {
+        const alert = await buildAlert({
+          id: `goal-scorer:${snapshot.id}:${eventId}`,
+          kind: "goal_scorer",
+          matchId: snapshot.id,
+          text: formatGoalScorerUpdate(
+            snapshot,
+            goal.scorer,
+            goal.teamName,
+            goal.minute,
+          ),
+        });
+        if (alert) {
+          alerts.push(alert);
+          scored.add(eventId);
+        }
+      }
     }
+
+    snapshot.goalFlashIds = [...flashed];
+    snapshot.goalScorerIds = [...scored];
+    nextSnapshots[snapshot.id] = snapshot;
 
     if (prev && prev.status !== "finished" && snapshot.status === "finished") {
       const alert = await buildAlert({
@@ -119,7 +154,7 @@ export async function collectFifaBotAlerts(): Promise<{
     if (prev.status !== "live" || nextSnapshots[id]?.status === "live") continue;
     try {
       const finished = await getMatchById(id, true);
-      const snapshot = toSnapshot(finished);
+      const snapshot = toSnapshot(finished, prev);
       nextSnapshots[id] = snapshot;
       if (snapshot.status === "finished") {
         const alert = await buildAlert({
@@ -143,15 +178,11 @@ export async function collectFifaBotAlerts(): Promise<{
     const match = calendarRowToMatch(row);
     if (match.status !== "SCHEDULED") continue;
     upcomingMatches += 1;
-    const snapshot = toSnapshot(match);
-    nextSnapshots[snapshot.id] = {
-      ...snapshot,
-      goalKeys: previous[snapshot.id]?.goalKeys ?? [],
-    };
+    const prev = previous[match.id];
+    const snapshot = toSnapshot(match, prev);
+    nextSnapshots[snapshot.id] = snapshot;
 
-    const minutesLeft = Math.round(
-      (match.utcDate.getTime() - now) / 60_000,
-    );
+    const minutesLeft = Math.round((match.utcDate.getTime() - now) / 60_000);
     if (
       minutesLeft <= REMINDER_WINDOW_MIN &&
       minutesLeft >= REMINDER_WINDOW_MIN - REMINDER_TOLERANCE_MIN
