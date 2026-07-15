@@ -434,36 +434,38 @@ async function tick(c, seen) {
   );
 
   // End of 90' — if tied, announce we're heading to extra time ASAP.
+  const minuteBase = Number(String(minute).replace(/[^\d].*$/, ""));
+  const nearFullTime =
+    Number.isFinite(minuteBase) && minuteBase >= 90;
   if (
     !seen.endNinety &&
+    seen.secondHalf &&
     (regulationEnded ||
-      (status === "pause" && seen.secondHalf && !seen.extraTimeStart && homeScore === awayScore))
+      (nearFullTime && status === "pause" && periodNum === 4) ||
+      (nearFullTime && status === "finished"))
   ) {
-    // Only after second half; avoid HT pause.
-    if (seen.secondHalf) {
-      seen.endNinety = true;
-      if (homeScore === awayScore) {
-        await blast(
-          c,
-          ["main", "vip"],
-          [
-            "*🔔 סיום 90 דקות!*",
-            `*🏟️ ${MATCH.homeFlag} ${MATCH.home} ${scoreEmoji(homeScore, awayScore)} ${MATCH.awayFlag} ${MATCH.away}*`,
-            "*⏳ הולכים להארכה — גחוף!*",
-          ].join("\n"),
-          "end_ninety",
-        );
-      } else {
-        await blast(
-          c,
-          ["main", "vip"],
-          [
-            "*🔔 סיום 90 דקות!*",
-            `*🏟️ ${MATCH.homeFlag} ${MATCH.home} ${scoreEmoji(homeScore, awayScore)} ${MATCH.awayFlag} ${MATCH.away}*`,
-          ].join("\n"),
-          "end_ninety",
-        );
-      }
+    seen.endNinety = true;
+    if (homeScore === awayScore && status !== "finished") {
+      await blast(
+        c,
+        ["main", "vip"],
+        [
+          "*🔔 סיום 90 דקות!*",
+          `*🏟️ ${MATCH.homeFlag} ${MATCH.home} ${scoreEmoji(homeScore, awayScore)} ${MATCH.awayFlag} ${MATCH.away}*`,
+          "*⏳ הולכים להארכה — גחוף!*",
+        ].join("\n"),
+        "end_ninety",
+      );
+    } else if (!(homeScore === awayScore && status !== "finished")) {
+      await blast(
+        c,
+        ["main", "vip"],
+        [
+          "*🔔 סיום 90 דקות!*",
+          `*🏟️ ${MATCH.homeFlag} ${MATCH.home} ${scoreEmoji(homeScore, awayScore)} ${MATCH.awayFlag} ${MATCH.away}*`,
+        ].join("\n"),
+        "end_ninety",
+      );
     }
   }
 
