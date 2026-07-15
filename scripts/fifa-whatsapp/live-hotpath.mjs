@@ -339,9 +339,30 @@ async function tick(c, seen) {
     );
   }
 
-  if (status === "live" && seen.halfTime && !seen.secondHalf) {
+  // Second-half whistle: FIFA Type 7 on period 5, or live again after HT.
+  const secondHalfKickoff = events.some(
+    (e) =>
+      Number(e.Type) === 7 &&
+      Number(e.Period) === 5 &&
+      /second period|second half/i.test(
+        (((e.EventDescription || [])[0] || {}).Description || ""),
+      ),
+  );
+  if (
+    !seen.secondHalf &&
+    seen.halfTime &&
+    (secondHalfKickoff ||
+      status === "live" ||
+      Number(live.Period) === 5)
+  ) {
+    // Avoid firing during 1H if halfTime was incorrectly set — require period 5 / type 7 / minute>=45.
     const minNum = Number(String(minute).replace(/[^\d].*$/, ""));
-    if (Number.isFinite(minNum) && minNum >= 45) {
+    const periodNum = Number(live.Period);
+    const ready =
+      secondHalfKickoff ||
+      periodNum === 5 ||
+      (status === "live" && Number.isFinite(minNum) && minNum >= 45);
+    if (ready) {
       seen.secondHalf = true;
       await blast(
         c,
