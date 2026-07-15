@@ -183,22 +183,28 @@ function pickBestMp4(
 ): string | null {
   if (!mp4Urls.length) return null;
 
-  // Prefer catch-up lowres when present — much smaller than the 4-min HL master.
-  const cuwh = mp4Urls.find((url) => /cuwh/i.test(url));
-  if (cuwh) return cuwh;
+  // Always prefer the ~4–5 minute FOX game recap (4MIN_*_HL_*), never cuwh/goals.
+  const fourMin = mp4Urls.filter((url) => /4min_.*_hl_/i.test(url));
+  if (fourMin.length) {
+    if (preferredFmcId) {
+      const preferred = fourMin.find((url) => url.includes(preferredFmcId));
+      if (preferred) return preferred;
+    }
+    return fourMin[0];
+  }
 
   const scored = mp4Urls.map((url) => {
     let score = 0;
     const file = url.toLowerCase();
     if (preferredFmcId && url.includes(preferredFmcId)) score += 50;
-    if (/4min_.*_hl_|_hl_.*lowres/.test(file)) score += 40;
-    if (/_hl_/.test(file)) score += 25;
-    if (/goal|equal|comp_yt|rivalry|feature|essay|sot_/.test(file)) score -= 30;
+    if (/_hl_.*lowres|hl_.*lowres/.test(file)) score += 40;
+    if (/cuwh/.test(file)) score -= 20; // catch-up is shorter / different cut
+    if (/goal|equal|comp_yt|rivalry|feature|essay|sot_/.test(file)) score -= 40;
     if (/lowres\.mp4$/.test(file)) score += 5;
     return { url, score };
   });
   scored.sort((a, b) => b.score - a.score);
-  return scored[0]?.url ?? null;
+  return scored[0]?.score > 0 ? scored[0].url : null;
 }
 
 function extractHighlightFromHtml(
@@ -289,9 +295,8 @@ async function findHighlightInTrending(
     if (compact.includes("extendedhighlights")) continue;
     if (!(compact.includes(home) && compact.includes(away))) continue;
     const show = row.mcvod?.show_code || "";
-    if (show && !show.includes("4-minute") && !show.includes("game-recap")) {
-      // Still allow if title is clearly the match highlights.
-    }
+    // Only the official ~4 minute horizontal recap.
+    if (show && !show.includes("4-minute")) continue;
     const fmcId = (
       row.external_id ||
       row.mcvod?.content_id ||

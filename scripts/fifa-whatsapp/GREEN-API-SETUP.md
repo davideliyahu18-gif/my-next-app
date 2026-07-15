@@ -58,3 +58,6 @@ curl -X POST "https://YOUR-SITE.vercel.app/api/fifa-bot/announce" \
 - כבוי: `FIFA_BOT_SEND_HIGHLIGHTS=0`
 - שליחה ידנית: `npm run fifa-bot:highlight` עם `FIFA_HL_HOME_CODE` / `FIFA_HL_AWAY_CODE`
 - ב־Vercel בלי ffmpeg יישלח קישור צפייה; עם poller/hotpath מקומי יישלח הווידאו עצמו
+- נשלח **רק** תקציר FOX ~4 דק׳ (`4MIN_*_HL_*`), לא catch-up קצר
+- מניעת כפילויות: fingerprint משותף + כש־hotpath רץ (lock) ה־cron/poller לא שולח גם
+- אם רצים hotpath מקומי וגם Vercel cron עם Green — הגדירו ב־Vercel `FIFA_BOT_WHATSAPP_NOTIFY=0`

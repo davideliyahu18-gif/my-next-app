@@ -103,19 +103,25 @@ async function foxHtml(url) {
 
 function pickBestMp4(mp4Urls, preferredFmc) {
   if (!mp4Urls.length) return null;
-  const cuwh = mp4Urls.find((url) => /cuwh/i.test(url));
-  if (cuwh) return cuwh;
+  const fourMin = mp4Urls.filter((url) => /4min_.*_hl_/i.test(url));
+  if (fourMin.length) {
+    if (preferredFmc) {
+      const preferred = fourMin.find((url) => url.includes(preferredFmc));
+      if (preferred) return preferred;
+    }
+    return fourMin[0];
+  }
   const scored = mp4Urls.map((url) => {
     let score = 0;
     const file = url.toLowerCase();
     if (preferredFmc && url.includes(preferredFmc)) score += 50;
-    if (/4min_.*_hl_|_hl_.*lowres/.test(file)) score += 40;
-    if (/_hl_/.test(file)) score += 25;
-    if (/goal|equal|comp_yt|rivalry|feature|essay|sot_/.test(file)) score -= 30;
+    if (/_hl_.*lowres|hl_.*lowres/.test(file)) score += 40;
+    if (/cuwh/.test(file)) score -= 20;
+    if (/goal|equal|comp_yt|rivalry|feature|essay|sot_/.test(file)) score -= 40;
     return { url, score };
   });
   scored.sort((a, b) => b.score - a.score);
-  return scored[0]?.url ?? null;
+  return scored[0]?.score > 0 ? scored[0].url : null;
 }
 
 function extractHighlight(html, homeEn, awayEn) {
@@ -201,6 +207,8 @@ async function resolveClip(homeCode, awayCode, kickoffAt) {
     if (!(compact.includes(norm(homeEn)) && compact.includes(norm(awayEn)))) {
       continue;
     }
+    const show = row.mcvod?.show_code || "";
+    if (show && !show.includes("4-minute")) continue;
     const fmcId = (row.external_id || row.mcvod?.content_id || "").toLowerCase();
     const mp4Url = row.mcvod?.proxy_url;
     if (fmcId && mp4Url) {

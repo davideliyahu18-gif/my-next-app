@@ -7,7 +7,8 @@
  * MAIN: all except corners
  * VIP: all except open-play goals
  */
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, unlink } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,6 +16,9 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "../..");
 const SEEN_PATH = "/tmp/fifa-hotpath-seen.json";
+const LOCK_PATH = process.env.FIFA_HOTPATH_LOCK_FILE || "/tmp/fifa-hotpath.lock";
+const DEDUPE_PATH = process.env.FIFA_BOT_DEDUPE_FILE || "/tmp/fifa-whatsapp-dedupe.json";
+const DEDUPE_TTL_MS = Number(process.env.FIFA_BOT_DEDUPE_TTL_SEC || "180") * 1000;
 
 const MATCH = {
   id: process.env.FIFA_HOT_MATCH_ID || "400021540",
@@ -104,7 +108,51 @@ async function fifaJson(url) {
   return res.json();
 }
 
+async function claimSend(chatId, message) {
+  const key = createHash("sha256")
+    .update(`${chatId}\n${String(message).replace(/\s+/g, " ").trim().slice(0, 500)}`)
+    .digest("hex")
+    .slice(0, 32);
+  const now = Date.now();
+  let data = {};
+  try {
+    data = JSON.parse(await readFile(DEDUPE_PATH, "utf8"));
+  } catch {
+    data = {};
+  }
+  for (const [k, exp] of Object.entries(data)) {
+    if (exp <= now) delete data[k];
+  }
+  if (data[key] && data[key] > now) return false;
+  data[key] = now + DEDUPE_TTL_MS;
+  await writeFile(DEDUPE_PATH, JSON.stringify(data));
+  return true;
+}
+
+async function writeHotpathLock() {
+  const payload = {
+    pid: process.pid,
+    matchId: MATCH.id,
+    updatedAt: Date.now(),
+    // Keep lock sticky while hotpath loops; renew each tick.
+    expiresAt: Date.now() + 60_000,
+  };
+  await writeFile(LOCK_PATH, JSON.stringify(payload));
+}
+
+async function clearHotpathLock() {
+  try {
+    await unlink(LOCK_PATH);
+  } catch {
+    // ignore
+  }
+}
+
 async function sendGreen(c, chatId, message) {
+  if (!(await claimSend(chatId, message))) {
+    console.log(new Date().toISOString(), "HOT skip duplicate", chatId.slice(-12));
+    return { skipped: true };
+  }
   const url = `${c.apiHost}/waInstance${c.instance}/sendMessage/${c.token}`;
   const res = await fetch(url, {
     method: "POST",
@@ -154,6 +202,7 @@ function periodStatus(period, matchStatus) {
 }
 
 async function tick(c, seen) {
+  await writeHotpathLock();
   const liveUrl = `https://api.fifa.com/api/v3/live/football/${MATCH.idCompetition}/${MATCH.idSeason}/${MATCH.idStage}/${MATCH.id}?language=en-GB`;
   const tlUrl = `https://api.fifa.com/api/v3/timelines/${MATCH.id}?language=en-GB`;
   const [live, tl] = await Promise.all([fifaJson(liveUrl), fifaJson(tlUrl)]);
@@ -651,6 +700,13 @@ async function main() {
   }
   let seen = await loadSeen();
   console.log("HOTPATH start match=", MATCH.id, "intervalMs=", c.intervalMs);
+  await writeHotpathLock();
+  const stop = async () => {
+    await clearHotpathLock();
+    process.exit(0);
+  };
+  process.on("SIGINT", stop);
+  process.on("SIGTERM", stop);
 
   for (;;) {
     const t0 = Date.now();

@@ -1,4 +1,5 @@
 import { alertAllowedForChannel, type FifaBotChannel } from "./channels";
+import { claimWhatsAppSend } from "./send-dedupe";
 import type { FifaBotAlert } from "./types";
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? "";
@@ -49,6 +50,11 @@ async function sendGreenApiToChat(
 ): Promise<boolean> {
   if (!GREEN_API_INSTANCE || !GREEN_API_TOKEN || !chatId) return false;
 
+  if (!(await claimWhatsAppSend(chatId, text))) {
+    console.log("[fifa-bot] skip duplicate WhatsApp send", chatId.slice(-16));
+    return true; // already sent recently — treat as handled
+  }
+
   const response = await fetch(
     `${GREEN_API_HOST}/waInstance${GREEN_API_INSTANCE}/sendMessage/${GREEN_API_TOKEN}`,
     {
@@ -75,6 +81,10 @@ async function sendGreenApiToChat(
 }
 
 export function isGreenApiConfigured(): boolean {
+  const notifyFlag = (process.env.FIFA_BOT_WHATSAPP_NOTIFY ?? "1").toLowerCase();
+  if (notifyFlag === "0" || notifyFlag === "false" || notifyFlag === "off") {
+    return false;
+  }
   return Boolean(
     GREEN_API_INSTANCE &&
       GREEN_API_TOKEN &&
@@ -151,8 +161,10 @@ export async function notifyFifaBotAlert(alert: FifaBotAlert): Promise<boolean> 
 }
 
 export async function notifyFifaBotAlerts(alerts: FifaBotAlert[]): Promise<number> {
-  const results = await Promise.all(
-    alerts.map((alert) => notifyFifaBotAlert(alert)),
-  );
-  return results.filter(Boolean).length;
+  // Sequential so dedupe fingerprints cannot race across parallel alerts.
+  let notified = 0;
+  for (const alert of alerts) {
+    if (await notifyFifaBotAlert(alert)) notified += 1;
+  }
+  return notified;
 }

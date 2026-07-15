@@ -8,6 +8,7 @@ import { Readable } from "node:stream";
 import type { FoxHighlightClip } from "./fox-highlights";
 import type { FifaBotChannel } from "./channels";
 import { channelsForAlert } from "./channels";
+import { claimWhatsAppSend } from "./send-dedupe";
 
 const GREEN_API_INSTANCE = process.env.GREEN_API_INSTANCE ?? "";
 const GREEN_API_TOKEN = process.env.GREEN_API_TOKEN ?? "";
@@ -145,6 +146,10 @@ async function sendGreenFileByUrl(
   caption: string,
 ): Promise<boolean> {
   if (!GREEN_API_INSTANCE || !GREEN_API_TOKEN || !chatId) return false;
+  if (!(await claimWhatsAppSend(chatId, `video:${caption}:${urlFile}`))) {
+    console.log("[fifa-bot] skip duplicate highlight URL", chatId.slice(-16));
+    return true;
+  }
   const res = await fetch(
     `${GREEN_API_HOST}/waInstance${GREEN_API_INSTANCE}/sendFileByUrl/${GREEN_API_TOKEN}`,
     {
@@ -173,6 +178,10 @@ async function sendGreenFileByUpload(
   caption: string,
 ): Promise<boolean> {
   if (!GREEN_API_INSTANCE || !GREEN_API_TOKEN || !chatId) return false;
+  if (!(await claimWhatsAppSend(chatId, `video:${caption}:${fileName}`))) {
+    console.log("[fifa-bot] skip duplicate highlight upload", chatId.slice(-16));
+    return true;
+  }
   const bytes = await readFile(filePath);
   const form = new FormData();
   form.append("chatId", chatId);

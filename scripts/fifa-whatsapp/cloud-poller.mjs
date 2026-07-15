@@ -91,9 +91,11 @@ async function pollOnce(c) {
   const upcomingMatches = Number(summary.upcomingMatches || 0);
 
   // Fallback: if the site returned alerts but notified nothing (no Green on server),
-  // fan-out from this poller.
+  // fan-out from this poller — unless live-hotpath owns sending right now.
   let sent = notified;
-  if (alerts.length && notified === 0) {
+  if (summary.deferredToHotpath) {
+    console.log(new Date().toISOString(), "deferred to hotpath");
+  } else if (alerts.length && notified === 0) {
     for (const alert of alerts) {
       if (!alert?.text) continue;
       const channels = channelsForAlert(alert.kind);

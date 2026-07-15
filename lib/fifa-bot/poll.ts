@@ -4,6 +4,7 @@ import {
   isFifaBotNotificationConfigured,
   notifyFifaBotAlerts,
 } from "./notify";
+import { isHotpathLockActive } from "./send-dedupe";
 import type { FifaBotPollSummary } from "./types";
 
 export async function runFifaBotPoll(options?: {
@@ -13,8 +14,11 @@ export async function runFifaBotPoll(options?: {
   const checkedAt = new Date().toISOString();
   const { alerts, liveMatches, upcomingMatches } = await collectFifaBotAlerts();
 
+  const deferredToHotpath = isHotpathLockActive();
+  const dryNotify = Boolean(options?.dryNotify || deferredToHotpath);
+
   let notified = 0;
-  if (!options?.dryNotify && alerts.length > 0) {
+  if (!dryNotify && alerts.length > 0) {
     if (isFifaBotNotificationConfigured()) {
       notified = await notifyFifaBotAlerts(alerts);
     } else {
@@ -24,9 +28,9 @@ export async function runFifaBotPoll(options?: {
     }
   }
 
-  // After every match: keep probing FOX for the 4-min recap and send video
-  // to LIVE + VIP (compress via ffmpeg when available).
-  if (!options?.dryNotify && isFifaBotNotificationConfigured()) {
+  // After every match: keep probing FOX for the official ~4-min recap and send
+  // video to LIVE + VIP (compress via ffmpeg when available).
+  if (!dryNotify && isFifaBotNotificationConfigured()) {
     try {
       const highlights = await processPendingHighlightVideos();
       if (highlights.sentVideo || highlights.sentLink) {
@@ -38,12 +42,22 @@ export async function runFifaBotPoll(options?: {
     }
   }
 
+  if (deferredToHotpath && alerts.length) {
+    console.log(
+      "[fifa-bot] deferred",
+      alerts.length,
+      "alerts to hotpath (lock active)",
+    );
+  }
+
   return {
     ok: true,
     checkedAt,
     liveMatches,
     upcomingMatches,
-    alerts,
-    notified: options?.dryNotify ? 0 : notified,
+    // Hide alert payloads from poller fallback fan-out while hotpath owns sends.
+    alerts: deferredToHotpath ? [] : alerts,
+    notified: dryNotify ? 0 : notified,
+    deferredToHotpath,
   };
 }

@@ -46,6 +46,8 @@ export interface FifaBotPollSummary {
   upcomingMatches: number;
   alerts: FifaBotAlert[];
   notified: number;
+  /** When live-hotpath holds the lock, cron/poller must not also WhatsApp-send. */
+  deferredToHotpath?: boolean;
 }
 
 export interface FifaBotMatchSnapshot {
