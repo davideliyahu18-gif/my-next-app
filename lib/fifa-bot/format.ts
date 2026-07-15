@@ -232,21 +232,22 @@ export function formatLineups(lineups: SemiFinalLineupMatchView[]): string {
   return lines.join("\n").trim();
 }
 
+/** Matches the original WhatsApp feed goal template from `.test-data/website_feed.jsonl`. */
 export function formatGoalAlert(
   snapshot: FifaBotMatchSnapshot,
-  scorer: string,
+  _scorer: string,
   minute: string,
-  teamName: string,
+  _teamName: string,
 ): string {
+  const homeScore = snapshot.homeScore ?? 0;
+  const awayScore = snapshot.awayScore ?? 0;
+  const minuteLabel = String(minute).includes("'") ? String(minute) : `${minute}'`;
+
   return [
-    "⚽️ *גוooooל!*",
-    "",
-    formatScoreLine(snapshot),
-    `⏱ ${minute}' · ${scorer}${teamName ? ` (${teamName})` : ""}`,
-    snapshot.stage ? `🏆 ${snapshot.stage}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
+    "⚽ *שער!*",
+    `${snapshot.homeFlag} ${snapshot.home} ${homeScore}-${awayScore} ${snapshot.away}`,
+    `🕐 ${minuteLabel}`,
+  ].join("\n");
 }
 
 export function formatFullTimeAlert(snapshot: FifaBotMatchSnapshot): string {
