@@ -355,6 +355,53 @@ export function formatCornerAlert(
   ].join("\n");
 }
 
+export function hebrewStageLabel(stage: string): string {
+  const key = stage.trim().toLowerCase();
+  if (
+    key.includes("semi-final") ||
+    key.includes("semi final") ||
+    key.includes("semifinal") ||
+    key.includes("חצי")
+  ) {
+    return "חצי הגמר";
+  }
+  if (key.includes("quarter") || key.includes("רבע")) {
+    return "רבע הגמר";
+  }
+  if (key.includes("round of 16") || key.includes("round-of-16") || key.includes("שמינית")) {
+    return "שמינית הגמר";
+  }
+  if (
+    (key === "final" || key.includes(" final") || key.startsWith("final")) &&
+    !key.includes("third") &&
+    !key.includes("play")
+  ) {
+    return "גמר";
+  }
+  if (key.includes("third") || key.includes("מקום שלישי")) {
+    return "מקום 3";
+  }
+  if (/^group\s*[a-z]$/i.test(stage.trim()) || key.startsWith("group ")) {
+    return stage.replace(/^group\s*/i, "בית ").toUpperCase();
+  }
+  return stage || "מונדיאל";
+}
+
+export function formatSecondHalfStartAlert(
+  snapshot: FifaBotMatchSnapshot,
+): string {
+  const score = formatEmojiScore(snapshot.homeScore, snapshot.awayScore, "–");
+  return [
+    boldLine(`🏆 ${hebrewStageLabel(snapshot.stage)}`),
+    "",
+    boldLine("🔔 שריקת הפתיחה למחצית השנייה!"),
+    "",
+    boldLine(
+      `🏟️ ${snapshot.homeFlag} ${snapshot.home} ${score} ${snapshot.awayFlag} ${snapshot.away}`,
+    ),
+  ].join("\n");
+}
+
 export function formatHalfTimeAlert(snapshot: FifaBotMatchSnapshot): string {
   const score = formatEmojiScore(snapshot.homeScore, snapshot.awayScore, "–");
   const lines = [
@@ -396,6 +443,8 @@ export function alertKindLabel(kind: FifaBotAlertKind): string {
       return "קרן";
     case "half_time":
       return "מחצית";
+    case "second_half":
+      return "מחצית שנייה";
     case "full_time":
       return "סיום";
     case "kickoff_reminder":

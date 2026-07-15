@@ -14,6 +14,7 @@ import {
   formatHalfTimeAlert,
   formatKickoffReminder,
   formatMatchStartAlert,
+  formatSecondHalfStartAlert,
 } from "./format";
 import {
   hasSeenAlert,
@@ -87,6 +88,7 @@ function toSnapshot(
     goalScorerIds: previous?.goalScorerIds ?? [],
     cornerIds: previous?.cornerIds ?? [],
     halfTimeSent: previous?.halfTimeSent ?? false,
+    secondHalfSent: previous?.secondHalfSent ?? false,
   };
 }
 
@@ -135,7 +137,17 @@ export async function collectFifaBotAlerts(): Promise<{
         .filter((goal) => goal.scorer && !isPlaceholderScorer(goal.scorer))
         .map((goal) => goalEventId(goal));
       snapshot.cornerIds = corners.map((corner) => corner.eventId);
-      if (snapshot.status === "pause") snapshot.halfTimeSent = true;
+      if (snapshot.status === "pause") {
+        snapshot.halfTimeSent = true;
+      }
+      // Mid-match join in 2nd half: don't announce second-half whistle later.
+      if (snapshot.status === "live" && snapshot.minute) {
+        const minuteNum = Number(String(snapshot.minute).replace(/[^\d].*$/, ""));
+        if (Number.isFinite(minuteNum) && minuteNum >= 46) {
+          snapshot.halfTimeSent = true;
+          snapshot.secondHalfSent = true;
+        }
+      }
       nextSnapshots[snapshot.id] = snapshot;
       continue;
     }
@@ -231,6 +243,23 @@ export async function collectFifaBotAlerts(): Promise<{
       if (alert) {
         alerts.push(alert);
         snapshot.halfTimeSent = true;
+      }
+    }
+
+    if (
+      snapshot.status === "live" &&
+      prev?.status === "pause" &&
+      !snapshot.secondHalfSent
+    ) {
+      const alert = await buildAlert({
+        id: `h2:${snapshot.id}`,
+        kind: "second_half",
+        matchId: snapshot.id,
+        text: formatSecondHalfStartAlert(snapshot),
+      });
+      if (alert) {
+        alerts.push(alert);
+        snapshot.secondHalfSent = true;
       }
     }
 

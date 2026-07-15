@@ -13,6 +13,7 @@ export type FifaBotAlertKind =
   | "goal_scorer"
   | "corner"
   | "half_time"
+  | "second_half"
   | "full_time"
   | "kickoff_reminder"
   | "match_start";
@@ -63,4 +64,5 @@ export interface FifaBotMatchSnapshot {
   /** Corner event ids already announced. */
   cornerIds: string[];
   halfTimeSent?: boolean;
+  secondHalfSent?: boolean;
 }
