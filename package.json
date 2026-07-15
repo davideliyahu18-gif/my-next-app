@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "fifa-bot:setup": "npm install --prefix scripts/fifa-whatsapp",
-    "fifa-bot:start": "npm run start --prefix scripts/fifa-whatsapp"
+    "fifa-bot:start": "npm run start --prefix scripts/fifa-whatsapp",
+    "fifa-bot:poll": "node scripts/fifa-whatsapp/cloud-poller.mjs"
   },
   "dependencies": {
     "@upstash/redis": "^1.38.0",
