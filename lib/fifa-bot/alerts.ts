@@ -10,6 +10,7 @@ import {
   formatFullTimeAlert,
   formatGoalAlert,
   formatGoalScorerUpdate,
+  formatHalfTimeAlert,
   formatKickoffReminder,
   formatMatchStartAlert,
 } from "./format";
@@ -19,7 +20,11 @@ import {
   markAlertsSeen,
   saveMatchSnapshots,
 } from "./store";
-import type { FifaBotAlert, FifaBotMatchSnapshot } from "./types";
+import type {
+  FifaBotAlert,
+  FifaBotGoalLine,
+  FifaBotMatchSnapshot,
+} from "./types";
 
 const REMINDER_WINDOW_MIN = Number(process.env.FIFA_BOT_REMINDER_MINUTES ?? "30");
 const REMINDER_TOLERANCE_MIN = 4;
@@ -28,16 +33,39 @@ function goalEventId(goal: FifaMatch["goals"][number]): string {
   return goal.eventId || `${goal.minute}:${goal.scorer}:${goal.teamId}`;
 }
 
+function mapSnapshotStatus(
+  status: FifaMatch["status"],
+): FifaBotMatchSnapshot["status"] {
+  if (status === "PAUSE") return "pause";
+  if (status === "IN_PLAY") return "live";
+  if (status === "FINISHED") return "finished";
+  return "upcoming";
+}
+
+function teamFlagForGoal(match: FifaMatch, teamName: string): string {
+  if (teamName === match.awayTeam) return match.awayFlag;
+  if (teamName === match.homeTeam) return match.homeFlag;
+  return match.homeFlag;
+}
+
+function goalsForSnapshot(match: FifaMatch): FifaBotGoalLine[] {
+  return match.goals
+    .filter((goal) => goal.scorer && !isPlaceholderScorer(goal.scorer))
+    .map((goal) => ({
+      eventId: goalEventId(goal),
+      scorer: goal.scorer,
+      teamName: goal.teamName,
+      teamFlag: teamFlagForGoal(match, goal.teamName),
+      minute: goal.minute,
+      ownGoal: goal.ownGoal,
+    }));
+}
+
 function toSnapshot(
   match: FifaMatch,
   previous?: FifaBotMatchSnapshot,
 ): FifaBotMatchSnapshot {
-  const status =
-    match.status === "IN_PLAY" || match.status === "PAUSE"
-      ? "live"
-      : match.status === "FINISHED"
-        ? "finished"
-        : "upcoming";
+  const status = mapSnapshotStatus(match.status);
 
   return {
     id: match.id,
@@ -48,11 +76,15 @@ function toSnapshot(
     homeScore: match.homeScore,
     awayScore: match.awayScore,
     status,
-    minute: match.matchTime ?? (status === "finished" ? "סיום" : "—"),
+    minute:
+      match.matchTime ??
+      (status === "finished" ? "סיום" : status === "pause" ? "HT" : "—"),
     kickoffAt: match.utcDate.toISOString(),
     stage: match.group || match.stage || match.competition || "מונדיאל 2026",
+    goals: goalsForSnapshot(match),
     goalFlashIds: previous?.goalFlashIds ?? [],
     goalScorerIds: previous?.goalScorerIds ?? [],
+    halfTimeSent: previous?.halfTimeSent ?? false,
   };
 }
 
@@ -82,7 +114,10 @@ export async function collectFifaBotAlerts(): Promise<{
     const prev = previous[rich.id];
     const snapshot = toSnapshot(rich, prev);
 
-    if (prev?.status === "upcoming" && snapshot.status === "live") {
+    if (
+      prev?.status === "upcoming" &&
+      (snapshot.status === "live" || snapshot.status === "pause")
+    ) {
       const alert = await buildAlert({
         id: `start:${snapshot.id}`,
         kind: "match_start",
@@ -136,6 +171,24 @@ export async function collectFifaBotAlerts(): Promise<{
 
     snapshot.goalFlashIds = [...flashed];
     snapshot.goalScorerIds = [...scored];
+
+    if (
+      snapshot.status === "pause" &&
+      !snapshot.halfTimeSent &&
+      prev?.status !== "pause"
+    ) {
+      const alert = await buildAlert({
+        id: `ht:${snapshot.id}`,
+        kind: "half_time",
+        matchId: snapshot.id,
+        text: formatHalfTimeAlert(snapshot),
+      });
+      if (alert) {
+        alerts.push(alert);
+        snapshot.halfTimeSent = true;
+      }
+    }
+
     nextSnapshots[snapshot.id] = snapshot;
 
     if (prev && prev.status !== "finished" && snapshot.status === "finished") {
@@ -149,9 +202,13 @@ export async function collectFifaBotAlerts(): Promise<{
     }
   }
 
-  // Catch full-time for matches that just left the live window.
+  // Catch full-time for matches that just left the live/pause window.
   for (const [id, prev] of Object.entries(previous)) {
-    if (prev.status !== "live" || nextSnapshots[id]?.status === "live") continue;
+    const wasInPlay = prev.status === "live" || prev.status === "pause";
+    const stillInPlay =
+      nextSnapshots[id]?.status === "live" ||
+      nextSnapshots[id]?.status === "pause";
+    if (!wasInPlay || stillInPlay) continue;
     try {
       const finished = await getMatchById(id, true);
       const snapshot = toSnapshot(finished, prev);

@@ -249,8 +249,21 @@ function minuteLabel(minute: string): string {
   return raw.includes("'") ? raw : `${raw}'`;
 }
 
-function formatEmojiScore(homeScore: number | null, awayScore: number | null): string {
-  return `${scoreDigit(homeScore ?? 0)} - ${scoreDigit(awayScore ?? 0)}`;
+function formatEmojiScore(
+  homeScore: number | null,
+  awayScore: number | null,
+  separator = " - ",
+): string {
+  return `${scoreDigit(homeScore ?? 0)}${separator}${scoreDigit(awayScore ?? 0)}`;
+}
+
+export const FIFA_BOT_SIGNATURE = "*📲 דוד – עדכוני מונדיאל ⚽*";
+
+function boldLine(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return "";
+  if (trimmed.startsWith("*") && trimmed.endsWith("*")) return trimmed;
+  return `*${trimmed}*`;
 }
 
 /** Immediate goal flash — scorer still updating. */
@@ -314,10 +327,43 @@ export function formatKickoffReminder(
 
 export function formatMatchStartAlert(snapshot: FifaBotMatchSnapshot): string {
   return [
-    `🚩 *המשחק התחיל*`,
-    `🏟️ *${snapshot.homeFlag} ${snapshot.home}* נגד *${snapshot.awayFlag} ${snapshot.away}*`,
-    `⏱️ דקה | 0`,
+    boldLine("🚩 המשחק התחיל"),
+    boldLine(
+      `🏟️ ${snapshot.homeFlag} ${snapshot.home} נגד ${snapshot.awayFlag} ${snapshot.away}`,
+    ),
+    boldLine("⏱️ דקה | 0"),
   ].join("\n");
+}
+
+export function formatHalfTimeAlert(snapshot: FifaBotMatchSnapshot): string {
+  const score = formatEmojiScore(snapshot.homeScore, snapshot.awayScore, "–");
+  const lines = [
+    boldLine("⏸️ מחצית"),
+    "",
+    boldLine(
+      `🏟️ ${snapshot.homeFlag} ${snapshot.home} ${score} ${snapshot.awayFlag} ${snapshot.away}`,
+    ),
+    "",
+    boldLine("⚽ כובשים:"),
+  ];
+
+  const scorers = snapshot.goals.filter(
+    (goal) => goal.scorer && !goal.ownGoal,
+  );
+
+  if (!scorers.length) {
+    lines.push(boldLine("• אין שערים"));
+  } else {
+    for (const goal of scorers) {
+      const minute = minuteLabel(goal.minute).replace(/'/g, "’");
+      lines.push(
+        boldLine(`• ${goal.teamFlag} ${goal.scorer} (${minute})`),
+      );
+    }
+  }
+
+  lines.push("", FIFA_BOT_SIGNATURE);
+  return lines.join("\n");
 }
 
 export function alertKindLabel(kind: FifaBotAlertKind): string {
@@ -326,6 +372,8 @@ export function alertKindLabel(kind: FifaBotAlertKind): string {
       return "שער";
     case "goal_scorer":
       return "כובש";
+    case "half_time":
+      return "מחצית";
     case "full_time":
       return "סיום";
     case "kickoff_reminder":

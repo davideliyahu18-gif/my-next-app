@@ -11,9 +11,19 @@ export type FifaBotCommand =
 export type FifaBotAlertKind =
   | "goal"
   | "goal_scorer"
+  | "half_time"
   | "full_time"
   | "kickoff_reminder"
   | "match_start";
+
+export interface FifaBotGoalLine {
+  eventId: string;
+  scorer: string;
+  teamName: string;
+  teamFlag: string;
+  minute: string;
+  ownGoal: boolean;
+}
 
 export interface FifaBotAlert {
   id: string;
@@ -40,12 +50,14 @@ export interface FifaBotMatchSnapshot {
   awayFlag: string;
   homeScore: number | null;
   awayScore: number | null;
-  status: "live" | "upcoming" | "finished";
+  status: "live" | "pause" | "upcoming" | "finished";
   minute: string;
   kickoffAt: string;
   stage: string;
+  goals: FifaBotGoalLine[];
   /** Goal event ids that already got the flash "שער!!!" alert. */
   goalFlashIds: string[];
   /** Goal event ids that already got the "כובש השער" update. */
   goalScorerIds: string[];
+  halfTimeSent?: boolean;
 }
