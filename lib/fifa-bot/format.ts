@@ -57,7 +57,7 @@ export function formatHelpMessage(): string {
     "• *סטטוס* / *בוט* — האם הבוט חי",
     "• *עזרה* — ההודעה הזאת",
     "",
-    "התראות אוטומטיות: שער · סיום · תזכורת 30 דק׳ לפני",
+    "התראות אוטומטיות: שער · סיום · תקציר וידאו · תזכורת 30 דק׳ לפני",
   ].join("\n");
 }
 
@@ -365,6 +365,46 @@ export function formatFullTimeAlert(snapshot: FifaBotMatchSnapshot): string {
 
   lines.push("", FIFA_BOT_FT_SIGNATURE);
   return lines.join("\n");
+}
+
+export function formatHighlightCaption(
+  snapshot: FifaBotMatchSnapshot,
+  title?: string,
+): string {
+  const homeScore = snapshot.homeScore ?? 0;
+  const awayScore = snapshot.awayScore ?? 0;
+  const score = formatEmojiScore(homeScore, awayScore, "➖");
+  const stage = hebrewStageLabel(snapshot.stage);
+  return [
+    "🎬 תקציר המשחק",
+    `🏆 ${stage}`,
+    "",
+    `${snapshot.homeFlag} ${snapshot.home} ${score} ${snapshot.awayFlag} ${snapshot.away}`,
+    title ? `🎙 ${title}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+export function formatHighlightLinkAlert(
+  snapshot: FifaBotMatchSnapshot,
+  watchUrl: string,
+): string {
+  const homeScore = snapshot.homeScore ?? 0;
+  const awayScore = snapshot.awayScore ?? 0;
+  const score = formatEmojiScore(homeScore, awayScore, "➖");
+  return [
+    boldLine("🎬 תקציר הווידאו עלה!"),
+    boldLine(
+      `🏟️ ${snapshot.homeFlag} ${snapshot.home} ${score} ${snapshot.awayFlag} ${snapshot.away}`,
+    ),
+    "",
+    "שולחים את הקובץ לקבוצות ברגע שהוא מוכן…",
+    `בינתיים אפשר לצפות כאן:`,
+    watchUrl,
+    "",
+    FIFA_BOT_FT_SIGNATURE,
+  ].join("\n");
 }
 
 export function formatKickoffReminder(

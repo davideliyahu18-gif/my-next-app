@@ -18,6 +18,7 @@ export type FifaBotAlertKind =
   | "penalty_scored"
   | "penalty_missed"
   | "full_time"
+  | "highlight_video"
   | "kickoff_reminder"
   | "match_start";
 
@@ -71,4 +72,11 @@ export interface FifaBotMatchSnapshot {
   halfTimeSent?: boolean;
   secondHalfSent?: boolean;
   penaltiesSent?: boolean;
+  /** FIFA 3-letter codes for FOX Sports highlight matching. */
+  homeCode?: string;
+  awayCode?: string;
+  highlightVideoSent?: boolean;
+  highlightLinkSent?: boolean;
+  highlightAttempts?: number;
+  highlightWatchUrl?: string;
 }

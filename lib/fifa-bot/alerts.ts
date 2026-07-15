@@ -98,6 +98,12 @@ function toSnapshot(
     halfTimeSent: previous?.halfTimeSent ?? false,
     secondHalfSent: previous?.secondHalfSent ?? false,
     penaltiesSent: previous?.penaltiesSent ?? false,
+    homeCode: match.homeTeamCode || previous?.homeCode,
+    awayCode: match.awayTeamCode || previous?.awayCode,
+    highlightVideoSent: previous?.highlightVideoSent ?? false,
+    highlightLinkSent: previous?.highlightLinkSent ?? false,
+    highlightAttempts: previous?.highlightAttempts ?? 0,
+    highlightWatchUrl: previous?.highlightWatchUrl,
   };
 }
 

@@ -49,3 +49,12 @@ curl -X POST "https://YOUR-SITE.vercel.app/api/fifa-bot/announce" \
 ```
 
 אחרי שזה עובד — תגיד לי כאן "תשלח בדיקה" ואני אוכל לשלוח דרך ה-API.
+
+## 5) תקצירי וידאו אחרי כל משחק
+
+אחרי סיום משחק הבוט מחפש תקציר FOX (catch-up / 4 דק׳), דוחס עם `ffmpeg` (כשיש),
+ושולח ל־LIVE + VIP דרך `sendFileByUpload`.
+
+- כבוי: `FIFA_BOT_SEND_HIGHLIGHTS=0`
+- שליחה ידנית: `npm run fifa-bot:highlight` עם `FIFA_HL_HOME_CODE` / `FIFA_HL_AWAY_CODE`
+- ב־Vercel בלי ffmpeg יישלח קישור צפייה; עם poller/hotpath מקומי יישלח הווידאו עצמו

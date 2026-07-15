@@ -80,6 +80,8 @@ async function loadSeen() {
       extraTimeStart: false,
       extraTimeHalf: false,
       extraTimeSecond: false,
+      highlightVideo: false,
+      highlightAttempts: 0,
       seeded: false,
       lastScore: "0-0",
     };
@@ -590,6 +592,50 @@ async function tick(c, seen) {
     ].join("\n");
 
     await blast(c, ["main", "vip"], text, "full_time");
+  }
+
+  // Auto highlight video after FT (FOX 4-min recap → compress → Green upload).
+  if (status === "finished" && seen.fullTime && !seen.highlightVideo) {
+    seen.highlightAttempts = Number(seen.highlightAttempts || 0) + 1;
+    if (seen.highlightAttempts <= 90) {
+      try {
+        const { sendMatchHighlight } = await import("./send-match-highlight.mjs");
+        const homeCode = process.env.FIFA_HL_HOME_CODE || "ENG";
+        const awayCode = process.env.FIFA_HL_AWAY_CODE || "ARG";
+        process.env.FIFA_HL_HOME = MATCH.home;
+        process.env.FIFA_HL_AWAY = MATCH.away;
+        process.env.FIFA_HL_HOME_FLAG = MATCH.homeFlag;
+        process.env.FIFA_HL_AWAY_FLAG = MATCH.awayFlag;
+        process.env.FIFA_HL_HOME_SCORE = String(homeScore ?? "");
+        process.env.FIFA_HL_AWAY_SCORE = String(awayScore ?? "");
+        process.env.FIFA_HL_STAGE = "חצי הגמר";
+        const result = await sendMatchHighlight({
+          homeCode,
+          awayCode,
+          kickoffAt: process.env.FIFA_HL_KICKOFF || "2026-07-15T19:00:00.000Z",
+        });
+        if (result?.ok) {
+          seen.highlightVideo = true;
+          console.log(new Date().toISOString(), "HOT highlight video sent");
+        } else {
+          console.log(
+            new Date().toISOString(),
+            "HOT highlight pending",
+            result?.reason || "retry",
+            "attempt",
+            seen.highlightAttempts,
+          );
+        }
+      } catch (error) {
+        console.error(
+          new Date().toISOString(),
+          "HOT highlight error",
+          String(error),
+        );
+      }
+    } else {
+      seen.highlightVideo = true;
+    }
   }
 
   await saveSeen(seen);
