@@ -43,8 +43,8 @@ function cfg() {
     process.env.NEXT_PUBLIC_SITE_URL ||
     "http://127.0.0.1:3010"
   ).replace(/\/$/, "");
-  const liveMs = Number(process.env.FIFA_BOT_POLL_MS || "5000");
-  const idleMs = Number(process.env.FIFA_BOT_IDLE_POLL_MS || "20000");
+  const liveMs = Number(process.env.FIFA_BOT_POLL_MS || "3000");
+  const idleMs = Number(process.env.FIFA_BOT_IDLE_POLL_MS || "15000");
   return {
     site,
     secret:
@@ -59,8 +59,8 @@ function cfg() {
       process.env.FIFA_WHATSAPP_MAIN_CHAT_ID || "120363410010039894@g.us",
     vipChat:
       process.env.FIFA_WHATSAPP_VIP_CHAT_ID || "120363427162994986@g.us",
-    liveMs: Number.isFinite(liveMs) && liveMs >= 2000 ? liveMs : 5000,
-    idleMs: Number.isFinite(idleMs) && idleMs >= 5000 ? idleMs : 20000,
+    liveMs: Number.isFinite(liveMs) && liveMs >= 2000 ? liveMs : 3000,
+    idleMs: Number.isFinite(idleMs) && idleMs >= 5000 ? idleMs : 15000,
   };
 }
 

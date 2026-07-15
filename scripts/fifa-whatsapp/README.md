@@ -56,8 +56,8 @@ GREEN_API_TOKEN=
 GREEN_API_HOST=https://7107.api.green-api.com
 FIFA_WHATSAPP_MAIN_CHAT_ID=
 FIFA_WHATSAPP_VIP_CHAT_ID=
-FIFA_BOT_POLL_MS=5000
-FIFA_BOT_IDLE_POLL_MS=20000
+FIFA_BOT_POLL_MS=3000
+FIFA_BOT_IDLE_POLL_MS=15000
 ```
 
 פולר מהיר (בלי Baileys):
@@ -67,4 +67,4 @@ npm run dev
 npm run fifa-bot:poll
 ```
 
-בזמן משחק חי / לפני שריקה — סריקה כל ~5 שניות (שער, קרן, מחצית, מחצית שנייה, פתיחה, סיום).
+בזמן משחק חי / לפני שריקה — סריקה כל ~3 שניות (שער, קרן, מחצית, מחצית שנייה, פתיחה, סיום).
