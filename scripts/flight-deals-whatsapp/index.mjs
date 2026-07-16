@@ -20,6 +20,16 @@ import {
   getSearchStatus,
   thailandWatchConfig,
 } from "./providers.mjs";
+import {
+  loadPersonalUsers,
+  upsertPersonalUser,
+  getPersonalUser,
+  listActivePersonalUsers,
+  parsePersonalCommand,
+  personalHelpText,
+  personalStatusText,
+  shouldAlertPersonalUser,
+} from "./personal-users.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "../..");
@@ -310,34 +320,51 @@ function formatDealMessage(deal) {
     .join("\n");
 }
 
-async function sendToGroup(content) {
-  if (!sock || !groupJid) return false;
-
+async function sendChat(chatId, content) {
+  if (!sock || !chatId) return false;
   try {
     if (typeof content === "string") {
-      await sock.sendMessage(groupJid, { text: content });
+      await sock.sendMessage(chatId, { text: content });
       return true;
     }
-
     const caption = formatDealMessage(content);
-    if (content.imageUrl) {
-      try {
-        await sock.sendMessage(groupJid, {
-          image: { url: content.imageUrl },
-          caption,
-        });
-        return true;
-      } catch (error) {
-        log.warn({ error }, "Image send failed — falling back to text");
-      }
-    }
-
-    await sock.sendMessage(groupJid, { text: caption });
+    await sock.sendMessage(chatId, { text: caption });
     return true;
   } catch (error) {
-    log.warn({ error }, "sendToGroup failed");
+    log.warn({ error, chatId }, "sendChat failed");
     return false;
   }
+}
+
+async function sendToGroup(content) {
+  if (!groupJid) return false;
+  return sendChat(groupJid, content);
+}
+
+async function notifyPersonalSubscribers(deal) {
+  if (!deal || deal.watch !== "thailand") return 0;
+  const price = Number(deal.priceIls ?? deal.priceUsd);
+  let sent = 0;
+  for (const [jid, user] of listActivePersonalUsers()) {
+    if (!shouldAlertPersonalUser(user, deal)) continue;
+    const ok = await sendChat(
+      jid,
+      [
+        "🔔 *התראה אישית*",
+        "",
+        formatDealMessage(deal),
+        "",
+        "_כדי להפסיק: כתוב *עצור*_",
+      ].join("\n"),
+    );
+    if (ok) {
+      sent += 1;
+      await upsertPersonalUser(jid, { lastAlertPriceIls: price });
+      log.info({ jid, priceIls: price }, "Personal alert sent");
+    }
+    await sleep(400);
+  }
+  return sent;
 }
 
 async function loadJson(file, fallback) {
@@ -496,7 +523,7 @@ function extractMessageText(msg) {
 let lastStatusCommandAt = 0;
 const STATUS_COMMAND_COOLDOWN_MS = 12_000;
 
-function buildStatusReply({ searching = false } = {}) {
+function buildStatusReply({ searching = false, personal = false } = {}) {
   const status = getSearchStatus();
   const thCfg = thailandWatchConfig();
   const ago = lastScanAt
@@ -505,6 +532,7 @@ function buildStatusReply({ searching = false } = {}) {
   const th = status.thailand;
   return [
     whatsappConnected ? "כן ✅ *מחפש*" : "⏳ *מתחבר…*",
+    personal ? "🔔 *בוט אישי* — התראות רק אליך" : "",
     "",
     "רק *תאילנד* · *אמירטס* · *מזוודה כלולה*",
     `תאריכים: *${formatDate(thCfg.outbound)} – ${formatDate(thCfg.returnDate)}*`,
@@ -517,7 +545,9 @@ function buildStatusReply({ searching = false } = {}) {
     `סריקה אחרונה: ${ago}`,
     searching || scanRunning
       ? "🔄 *מריץ חיפוש עכשיו ב-Google Flights…*"
-      : "כתבו שוב *בוט מחפש* לעדכון מחיר.",
+      : personal
+        ? "כתוב שוב *מחפש* או *סטטוס* לעדכון."
+        : "כתבו שוב *בוט מחפש* לעדכון מחיר.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -551,9 +581,10 @@ async function sendCurrentDealResult(chatId, deals = null) {
 }
 
 async function runStatusSearch(chatId) {
+  const personal = Boolean(chatId && !String(chatId).endsWith("@g.us"));
   try {
     await sock.sendMessage(chatId, {
-      text: buildStatusReply({ searching: true }),
+      text: buildStatusReply({ searching: true, personal }),
     });
   } catch (error) {
     log.warn({ error }, "Failed to send status ack");
@@ -622,6 +653,81 @@ async function isTargetGroup(chatId) {
   }
 }
 
+async function handlePersonalDm(chatId, body, pushName) {
+  const cmd = parsePersonalCommand(body);
+  if (!cmd) {
+    await sendChat(
+      chatId,
+      "לא הבנתי 🙂\nכתוב *עזרה* לתפריט, או *התחל* להצטרף למעקב.",
+    );
+    return;
+  }
+
+  if (cmd.type === "help") {
+    await sendChat(chatId, personalHelpText());
+    return;
+  }
+
+  if (cmd.type === "start") {
+    const user = await upsertPersonalUser(chatId, {
+      active: true,
+      pushName: pushName || null,
+    });
+    await sendChat(
+      chatId,
+      [
+        "✅ *נרשמת למעקב אישי!*",
+        "",
+        personalStatusText(user, getSearchStatus().thailand?.lowestIls),
+        "",
+        "כשמחיר טוב יופיע — אשלח *רק אליך*.",
+      ].join("\n"),
+    );
+    // Immediate personal search
+    runStatusSearch(chatId).catch((error) => {
+      log.warn({ error }, "Personal start search failed");
+    });
+    return;
+  }
+
+  if (cmd.type === "stop") {
+    await upsertPersonalUser(chatId, { active: false });
+    await sendChat(chatId, "🛑 המעקב האישי הופסק.\nכתוב *התחל* כדי לחזור.");
+    return;
+  }
+
+  if (cmd.type === "budget") {
+    const maxPriceIls = Math.max(500, Math.min(20000, Number(cmd.maxPriceIls)));
+    const user = await upsertPersonalUser(chatId, {
+      active: true,
+      maxPriceIls,
+    });
+    await sendChat(
+      chatId,
+      `✅ עודכן תקציב ל־*₪${Math.round(maxPriceIls)}*\n\n${personalStatusText(user, getSearchStatus().thailand?.lowestIls)}`,
+    );
+    return;
+  }
+
+  if (cmd.type === "status") {
+    const user = getPersonalUser(chatId);
+    if (!user?.active) {
+      await sendChat(
+        chatId,
+        "עוד לא נרשמת.\nכתוב *התחל* כדי לקבל התראות אישיות.",
+      );
+      return;
+    }
+    await sendChat(
+      chatId,
+      personalStatusText(user, getSearchStatus().thailand?.lowestIls),
+    );
+    runStatusSearch(chatId).catch((error) => {
+      log.warn({ error }, "Personal status search failed");
+    });
+  }
+}
+
 async function handleIncomingMessage(msg, upsertType = "notify") {
   try {
     if (msg.key?.fromMe) return;
@@ -642,16 +748,22 @@ async function handleIncomingMessage(msg, upsertType = "notify") {
 
     storeMessage(msg);
 
-    const isGroup = chatId.endsWith("@g.us");
-    if (!isGroup && groupJid) return;
-
     // Only live notifies for commands. Append after reconnect is usually history.
     if (upsertType !== "notify") return;
 
     const body = extractMessageText(msg);
     if (!body) return;
 
-    if (isGroup && !(await isTargetGroup(chatId))) {
+    const isGroup = chatId.endsWith("@g.us");
+
+    // Private personal bot (DM)
+    if (!isGroup) {
+      log.info({ from: chatId, body }, "Personal DM received");
+      await handlePersonalDm(chatId, body, msg.pushName);
+      return;
+    }
+
+    if (!(await isTargetGroup(chatId))) {
       if (/בוט/.test(body)) {
         log.info({ chatId, expected: groupJid, body }, "Ignored bot message from other group");
       }
@@ -805,9 +917,13 @@ async function runScan({
     log.info("Found %d Thailand Emirates schedule options", deals.length);
 
     let sent = 0;
-    // Cron: only alert on new/drop. Status command reports the result separately.
+    // Cron: alert group + personal DMs on new/drop.
+    // Status command reports the result to the requester separately.
     if (!reportCurrent) {
       for (const deal of deals) {
+        const personalSent = await notifyPersonalSubscribers(deal);
+        sent += personalSent;
+
         if (!shouldNotifyDeal(deal)) continue;
         markDealSeen(deal);
         const ok = await sendToGroup(deal);
@@ -826,6 +942,8 @@ async function runScan({
       ) {
         markDealSeen(deals[0]);
       }
+      // Also nudge personal subscribers on meaningful drops during status scans.
+      sent += await notifyPersonalSubscribers(deals[0]);
     }
 
     lastScanSent = sent;
@@ -1086,6 +1204,7 @@ async function main() {
 
   await loadSeen();
   await loadState();
+  await loadPersonalUsers();
   // Prefer pinned group JID from env/state — never guess from random groups.
   if (!groupJid && cfg.groupJidEnv) groupJid = cfg.groupJidEnv;
   startTriggerWatcher();
