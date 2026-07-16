@@ -61,7 +61,7 @@ async function loadEnvFile() {
   }
 }
 
-/** Only when explicitly requested — deleting sessions forces phone key re-sync. */
+/** Legacy — prefer `npm run flight-deals:repair-auth`. */
 async function healSignalSessions() {
   if (process.env.FLIGHT_DEALS_HEAL_SESSION !== "true") return;
   try {
@@ -103,6 +103,8 @@ let scanRunning = false;
 let scanQueued = false;
 let startupScanDone = false;
 let whatsappConnected = false;
+/** @type {Map<string, import("@whiskeysockets/baileys").proto.IMessage>} */
+const messageStore = new Map();
 let lastScanAt = 0;
 let lastScanFound = 0;
 let lastScanSent = 0;
@@ -367,10 +369,29 @@ function isStatusCheckCommand(text) {
   const t = normalizeHebrewCommand(text);
   if (!t) return false;
   if (t === "בוט") return true;
-  if (t.includes("בוט מחפש")) return true;
-  if (t.includes("הבוט מחפש")) return true;
-  if (t.startsWith("בוט ") && (t.includes("מחפש") || t.includes("טיסות"))) return true;
+  if (t.includes("בוט") && t.includes("מחפש")) return true;
+  if (t.startsWith("בוט ") && t.includes("טיסות")) return true;
   return false;
+}
+
+function msgKeyString(key) {
+  return `${key.remoteJid}:${key.id}:${key.fromMe}:${key.participant || ""}`;
+}
+
+function storeMessage(msg) {
+  if (!msg?.key?.id || !msg.message) return;
+  messageStore.set(msgKeyString(msg.key), msg.message);
+  if (messageStore.size > 500) {
+    const first = messageStore.keys().next().value;
+    messageStore.delete(first);
+  }
+}
+
+function isRecentMessage(msg) {
+  const ts = Number(msg.messageTimestamp || 0);
+  if (!ts) return false;
+  const ms = ts > 1e12 ? ts : ts * 1000;
+  return Date.now() - ms < 3 * 60_000;
 }
 
 function sameChatId(a, b) {
@@ -472,24 +493,34 @@ async function isTargetGroup(chatId) {
   }
 }
 
-async function handleIncomingMessage(msg) {
+async function handleIncomingMessage(msg, upsertType = "notify") {
   try {
-    if (!msg?.message || msg.key?.fromMe) return;
+    if (msg.key?.fromMe) return;
 
-    const chatId = msg.key.remoteJid;
+    const chatId = msg.key?.remoteJid;
     if (!chatId) return;
 
-    const isGroup = chatId.endsWith("@g.us");
-    if (!isGroup) {
-      if (groupJid) return;
+    if (!msg.message) {
+      if (msg.messageStubType != null && chatId.endsWith("@g.us")) {
+        log.warn(
+          { chatId, stub: msg.messageStubType, upsertType },
+          "Group message could not be decrypted — run npm run flight-deals:repair-auth",
+        );
+      }
+      return;
     }
+
+    storeMessage(msg);
+
+    const isGroup = chatId.endsWith("@g.us");
+    if (!isGroup && groupJid) return;
 
     const body = extractMessageText(msg);
     if (!body) return;
 
     if (isGroup && !(await isTargetGroup(chatId))) {
       if (/בוט/.test(body)) {
-        log.info({ chatId, expected: groupJid }, "Ignored bot message from other group");
+        log.info({ chatId, expected: groupJid, body }, "Ignored bot message from other group");
       }
       return;
     }
@@ -500,13 +531,11 @@ async function handleIncomingMessage(msg) {
       log.info({ groupJid }, "Learned group JID from incoming message");
     }
 
-    if (!isStatusCheckCommand(body)) {
-      return;
-    }
+    if (!isStatusCheckCommand(body)) return;
 
     const reply = buildStatusReply();
     await sock.sendMessage(chatId, { text: reply }, { quoted: msg });
-    log.info({ from: chatId, body }, "Replied to status check command");
+    log.info({ from: chatId, body, upsertType }, "Replied to status check command");
 
     runScan({ forceRefresh: true, reason: "status-command" })
       .then(() => sendScanFollowUp(chatId))
@@ -693,17 +722,21 @@ async function connectWhatsApp() {
     fireInitQueries: false,
     syncFullHistory: false,
     shouldSyncHistoryMessage: () => false,
-    maxMsgRetryCount: 2,
+    maxMsgRetryCount: 5,
     msgRetryCounterCache: retryCache,
+    getMessage: async (key) => messageStore.get(msgKeyString(key)),
   });
 
   sock.ev.on("creds.update", saveCreds);
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
-    // Only live notifications — "append" is history sync and floods the phone.
-    if (type !== "notify") return;
     for (const msg of messages) {
       try {
-        await handleIncomingMessage(msg);
+        if (type === "notify") {
+          await handleIncomingMessage(msg, type);
+        } else if (type === "append" && isRecentMessage(msg)) {
+          // Some linked-device deliveries arrive as append even when live.
+          await handleIncomingMessage(msg, type);
+        }
       } catch (error) {
         log.warn({ error }, "Message handler error");
       }

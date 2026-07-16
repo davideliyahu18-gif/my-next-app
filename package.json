@@ -10,7 +10,8 @@
     "flight-deals:setup": "node scripts/flight-deals-whatsapp/setup.mjs",
     "flight-deals:install": "npm install --prefix scripts/flight-deals-whatsapp",
     "flight-deals:start": "npm run flight-deals:install && node scripts/flight-deals-whatsapp/index.mjs",
-    "flight-deals:test": "npm run flight-deals:install && node scripts/flight-deals-whatsapp/send-test.mjs"
+    "flight-deals:test": "npm run flight-deals:install && node scripts/flight-deals-whatsapp/send-test.mjs",
+    "flight-deals:repair-auth": "node scripts/flight-deals-whatsapp/repair-auth.mjs"
   },
   "dependencies": {
     "@upstash/redis": "^1.38.0",
