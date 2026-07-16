@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+node_modules/
 /.pnp
 .pnp.*
 .yarn/*
@@ -46,3 +47,5 @@ scripts/flight-deals-whatsapp/auth/
 scripts/flight-deals-whatsapp/seen-deals.json
 scripts/flight-deals-whatsapp/bot-state.json
 scripts/flight-deals-whatsapp/node_modules/
+scripts/flight-deals-whatsapp/qr-link.txt
+scripts/flight-deals-whatsapp/test-trigger.json
