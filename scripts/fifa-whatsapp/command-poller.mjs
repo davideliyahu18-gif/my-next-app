@@ -2,8 +2,9 @@
 /**
  * Green API command listener for LIVE + VIP groups.
  *
- * Important: when the linked WhatsApp phone types in the group, Green emits
- * `outgoingMessageReceived` (not incoming). We must handle both.
+ * Phone-typed messages on the linked device arrive as outgoingMessageReceived.
+ * Keep Green request rate low — aggressive polling causes HTTP 429 and looks
+ * like the bot "fell".
  */
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -15,7 +16,10 @@ const ROOT = path.join(__dirname, "../..");
 
 /** @type {Set<string>} */
 const answered = new Set();
-const ANSWERED_MAX = 400;
+const ANSWERED_MAX = 500;
+
+/** Simple mutex so webhook + fallback never double-send the same command. */
+let replyLock = Promise.resolve();
 
 async function loadEnv() {
   for (const name of [".env.local", ".env"]) {
@@ -56,7 +60,9 @@ function cfg() {
       process.env.FIFA_WHATSAPP_MAIN_CHAT_ID || "120363410010039894@g.us",
     vipChat:
       process.env.FIFA_WHATSAPP_VIP_CHAT_ID || "120363427162994986@g.us",
-    receiveTimeout: Number(process.env.FIFA_BOT_RECEIVE_TIMEOUT || "5"),
+    receiveTimeout: Number(process.env.FIFA_BOT_RECEIVE_TIMEOUT || "10"),
+    // Fallback scan — keep sparse to avoid Green 429.
+    fallbackEveryMs: Number(process.env.FIFA_BOT_CMD_FALLBACK_MS || "20000"),
   };
 }
 
@@ -149,9 +155,46 @@ function remember(id) {
   return false;
 }
 
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Fetch with retry on 429 / transient network errors. */
+async function greenFetch(url, init = {}, retries = 4) {
+  let lastErr;
+  for (let i = 0; i <= retries; i += 1) {
+    try {
+      const res = await fetch(url, { ...init, cache: "no-store" });
+      if (res.status === 429 || res.status === 502 || res.status === 503) {
+        const wait = Math.min(8000, 1000 * 2 ** i);
+        console.error(
+          new Date().toISOString(),
+          "green",
+          res.status,
+          `retry in ${wait}ms`,
+        );
+        await sleep(wait);
+        continue;
+      }
+      return res;
+    } catch (error) {
+      lastErr = error;
+      const wait = Math.min(8000, 800 * 2 ** i);
+      console.error(
+        new Date().toISOString(),
+        "green net",
+        String(error),
+        `retry in ${wait}ms`,
+      );
+      await sleep(wait);
+    }
+  }
+  throw lastErr || new Error("green fetch failed");
+}
+
 async function sendGreen(c, chatId, message) {
   const url = `${c.apiHost}/waInstance${c.instance}/sendMessage/${c.token}`;
-  const res = await fetch(url, {
+  const res = await greenFetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ chatId, message }),
@@ -181,12 +224,12 @@ async function runCommand(c, text) {
 async function deleteNotification(c, receiptId) {
   if (receiptId == null) return;
   const url = `${c.apiHost}/waInstance${c.instance}/deleteNotification/${c.token}/${receiptId}`;
-  await fetch(url, { method: "DELETE" }).catch(() => undefined);
+  await greenFetch(url, { method: "DELETE" }, 2).catch(() => undefined);
 }
 
 async function receiveOne(c, timeoutSec) {
   const url = `${c.apiHost}/waInstance${c.instance}/receiveNotification/${c.token}?receiveTimeout=${timeoutSec}`;
-  const res = await fetch(url, { cache: "no-store" });
+  const res = await greenFetch(url);
   if (!res.ok) {
     const t = await res.text().catch(() => "");
     throw new Error(`receive ${res.status}: ${t.slice(0, 160)}`);
@@ -200,48 +243,57 @@ function isCommandWebhook(typeWebhook) {
   return (
     typeWebhook === "incomingMessageReceived" ||
     typeWebhook === "incomingMessage" ||
-    // Phone-typed messages on the linked device
     typeWebhook === "outgoingMessageReceived" ||
     typeWebhook === "outgoingMessage"
   );
 }
 
-/** Skip our own API replies so we don't command-loop on bot output. */
-function isFromApi(body) {
-  const t = body?.typeWebhook || "";
-  if (t === "outgoingAPIMessageReceived") return true;
-  // Bot replies are multi-line / formatted — only exact short command keys fire.
-  return false;
-}
-
 async function replyToCommand(c, chatId, text, id) {
-  const key =
-    id ||
-    `${String(chatId).split("@")[0]}:${normalizeKey(text)}:${Math.floor(Date.now() / 90000)}`;
-  if (remember(key)) return;
-  console.log(
-    new Date().toISOString(),
-    "CMD",
-    chatId.slice(-14),
-    text.slice(0, 40),
-  );
-  const started = Date.now();
-  try {
-    const reply = await runCommand(c, text);
-    await sendGreen(c, chatId, reply);
+  const run = async () => {
+    const chat = String(chatId).split("@")[0];
+    const cmd = normalizeKey(text);
+    // ~2 min bucket so webhook + fallback don't double-send, but user can re-ask.
+    const fp = `${chat}:${cmd}:${Math.floor(Date.now() / 120000)}`;
+    if ((id && remember(id)) || remember(fp)) return;
+
     console.log(
       new Date().toISOString(),
-      "CMD ok",
-      `${Date.now() - started}ms`,
-      text.slice(0, 24),
+      "CMD",
+      chatId.slice(-14),
+      text.slice(0, 40),
     );
-  } catch (error) {
-    console.error(new Date().toISOString(), "command fail", String(error));
-    await sendGreen(
-      c,
-      chatId,
-      "⚠️ לא הצלחתי לענות עכשיו. נסו שוב בעוד רגע.",
-    ).catch(() => undefined);
+    const started = Date.now();
+    try {
+      const reply = await runCommand(c, text);
+      await sendGreen(c, chatId, reply);
+      console.log(
+        new Date().toISOString(),
+        "CMD ok",
+        `${Date.now() - started}ms`,
+        text.slice(0, 24),
+      );
+    } catch (error) {
+      console.error(new Date().toISOString(), "command fail", String(error));
+      answered.delete(fp);
+      if (id) answered.delete(id);
+      await sendGreen(
+        c,
+        chatId,
+        "⚠️ לא הצלחתי לענות עכשיו. נסו שוב בעוד רגע.",
+      ).catch(() => undefined);
+    }
+  };
+
+  const prev = replyLock;
+  let release;
+  replyLock = new Promise((r) => {
+    release = r;
+  });
+  await prev;
+  try {
+    await run();
+  } finally {
+    release();
   }
 }
 
@@ -250,8 +302,9 @@ async function handleNotification(c, note) {
   const body = note?.body || note;
   try {
     const typeWebhook = body?.typeWebhook || "";
+    // Always delete junk (status etc.) so the queue never backs up.
     if (typeWebhook && !isCommandWebhook(typeWebhook)) return;
-    if (isFromApi(body)) return;
+    if (typeWebhook === "outgoingAPIMessageReceived") return;
 
     const senderData = body?.senderData || {};
     const chatId =
@@ -266,14 +319,9 @@ async function handleNotification(c, note) {
 
     const text = extractText(body);
     if (!text || !looksLikeCommand(text)) return;
-
-    // Ignore long bot-formatted messages that happen to contain a keyword.
     if (text.includes("\n") && text.length > 40) return;
 
-    const id = messageId(body);
-    // Delete first so queue stays clear, then answer.
-    await deleteNotification(c, receiptId);
-    await replyToCommand(c, chatId, text, id);
+    await replyToCommand(c, chatId, text, messageId(body));
   } finally {
     await deleteNotification(c, receiptId);
   }
@@ -291,64 +339,44 @@ function messageText(m) {
 function isFreshCommandMessage(m) {
   const text = messageText(m);
   if (!text || !looksLikeCommand(text)) return false;
-  // Skip bot-formatted replies.
   if (text.includes("\n") && text.length > 40) return false;
   const ts = Number(m.timestamp || 0);
-  if (ts && Date.now() / 1000 - ts > 120) return false;
+  if (ts && Date.now() / 1000 - ts > 90) return false;
   return true;
 }
 
-/** Fallback when webhooks are delayed: scan recent phone/group messages. */
-async function pollRecentMessages(c) {
-  const endpoints = [
-    `lastIncomingMessages/${c.token}?minutes=5`,
-    `lastOutgoingMessages/${c.token}?minutes=5`,
-  ];
-  for (const ep of endpoints) {
-    const res = await fetch(`${c.apiHost}/waInstance${c.instance}/${ep}`, {
-      cache: "no-store",
-    });
-    if (!res.ok) continue;
-    const rows = await res.json().catch(() => []);
-    if (!Array.isArray(rows)) continue;
-    for (const m of rows) {
-      const chatId = m.chatId || m.chatId_ || "";
-      if (!isOurGroup(c, chatId)) continue;
-      if (!isFreshCommandMessage(m)) continue;
-      await replyToCommand(c, chatId, messageText(m), m.idMessage || "");
-    }
-  }
-
-  for (const chatId of [c.mainChat, c.vipChat]) {
-    const url = `${c.apiHost}/waInstance${c.instance}/getChatHistory/${c.token}`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chatId, count: 6 }),
-      cache: "no-store",
-    });
-    if (!res.ok) continue;
-    const rows = await res.json().catch(() => []);
-    if (!Array.isArray(rows)) continue;
-    for (const m of rows.slice(0, 6)) {
-      if (!isFreshCommandMessage(m)) continue;
-      await replyToCommand(c, chatId, messageText(m), m.idMessage || "");
-    }
+/** Sparse fallback — one Green call, not a barrage. */
+async function pollRecentOutgoing(c) {
+  const url = `${c.apiHost}/waInstance${c.instance}/lastOutgoingMessages/${c.token}?minutes=3`;
+  const res = await greenFetch(url, {}, 2);
+  if (!res.ok) return;
+  const rows = await res.json().catch(() => []);
+  if (!Array.isArray(rows)) return;
+  for (const m of rows) {
+    const chatId = m.chatId || "";
+    if (!isOurGroup(c, chatId)) continue;
+    if (!isFreshCommandMessage(m)) continue;
+    await replyToCommand(c, chatId, messageText(m), m.idMessage || "");
   }
 }
 
 async function ensureGreenReceiveSettings(c) {
   const url = `${c.apiHost}/waInstance${c.instance}/setSettings/${c.token}`;
-  await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      incomingWebhook: "yes",
-      outgoingMessageWebhook: "yes",
-      outgoingAPIMessageWebhook: "no",
-      outgoingWebhook: "yes",
-    }),
-  }).catch(() => undefined);
+  // outgoingWebhook (status) floods the queue → 429. Keep it off.
+  await greenFetch(
+    url,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        incomingWebhook: "yes",
+        outgoingMessageWebhook: "yes",
+        outgoingAPIMessageWebhook: "no",
+        outgoingWebhook: "no",
+      }),
+    },
+    2,
+  ).catch(() => undefined);
 }
 
 async function main() {
@@ -361,34 +389,41 @@ async function main() {
 
   await ensureGreenReceiveSettings(c);
 
-  console.log("FIFA command listener starting (fast + phone-outgoing)");
+  console.log("FIFA command listener starting (rate-safe)");
   console.log(" site=", c.site);
   console.log(" main=", c.mainChat);
   console.log(" vip=", c.vipChat);
   console.log(" receiveTimeout=", c.receiveTimeout);
+  console.log(" fallbackEveryMs=", c.fallbackEveryMs);
 
-  // Parallel safety net every 2s — catches phone-typed commands quickly.
   void (async () => {
+    await sleep(c.fallbackEveryMs);
     for (;;) {
       try {
-        await pollRecentMessages(c);
+        await pollRecentOutgoing(c);
       } catch (error) {
-        console.error(new Date().toISOString(), "recent poll", String(error));
+        console.error(new Date().toISOString(), "fallback", String(error));
       }
-      await new Promise((r) => setTimeout(r, 2000));
+      await sleep(c.fallbackEveryMs);
     }
   })();
 
   for (;;) {
     try {
       let note = await receiveOne(c, c.receiveTimeout);
-      while (note) {
+      let drained = 0;
+      while (note && drained < 20) {
         await handleNotification(c, note);
+        drained += 1;
         note = await receiveOne(c, 0);
+      }
+      if (drained >= 20) {
+        // Brief pause if the queue was huge (status spam leftover).
+        await sleep(1500);
       }
     } catch (error) {
       console.error(new Date().toISOString(), "listener error", String(error));
-      await new Promise((r) => setTimeout(r, 800));
+      await sleep(2000);
     }
   }
 }
