@@ -136,7 +136,8 @@ export async function runFifaBotCommand(
     case "help":
       return { command, reply: formatHelpMessage() };
     case "status": {
-      const matches = await fetchLiveMatches(true);
+      // Prefer cache for snappy remote replies.
+      const matches = await fetchLiveMatches(false);
       const liveCount = matches.filter((m) => m.status === "live").length;
       const next = matches.find((m) => m.status === "upcoming");
       const nextLabel = next
@@ -152,7 +153,7 @@ export async function runFifaBotCommand(
       };
     }
     case "all_good": {
-      const matches = await fetchLiveMatches(true);
+      const matches = await fetchLiveMatches(false);
       const liveCount = matches.filter((m) => m.status === "live").length;
       const next = matches.find((m) => m.status === "upcoming");
       const nextLabel = next
@@ -169,28 +170,29 @@ export async function runFifaBotCommand(
       };
     }
     case "score": {
+      // Live scores: keep fresh.
       const matches = await fetchLiveMatches(true);
       return { command, reply: formatLiveScores(matches) };
     }
     case "tomorrow": {
-      const schedule = await fetchFullSchedule(true);
+      const schedule = await fetchFullSchedule(false);
       return { command, reply: formatTomorrowMatches(schedule) };
     }
     case "schedule": {
-      const schedule = await fetchFullSchedule(true);
+      const schedule = await fetchFullSchedule(false);
       return { command, reply: formatUpcomingSchedule(schedule) };
     }
     case "lineup": {
-      const schedule = await fetchFullSchedule(true);
-      const lineups = await fetchSemiFinalLineups(schedule, true);
+      const schedule = await fetchFullSchedule(false);
+      const lineups = await fetchSemiFinalLineups(schedule, false);
       return { command, reply: formatLineups(lineups) };
     }
     case "scorers": {
-      const scorers = await fetchTopScorers(10, true);
+      const scorers = await fetchTopScorers(10, false);
       return { command, reply: formatScorers(scorers) };
     }
     default: {
-      const dashboard = await fetchFifaDashboard(true).catch(() => null);
+      const dashboard = await fetchFifaDashboard(false).catch(() => null);
       const hint = dashboard?.nextMatch
         ? `\n\nהבא: ${formatScoreLine(dashboard.nextMatch)}`
         : "";

@@ -2,6 +2,7 @@
 /**
  * Green API command listener for LIVE + VIP groups.
  * Polls receiveNotification, runs /api/fifa-bot/command, replies in-chat.
+ * Tuned for low latency: short long-poll, queue drain, single reply (no "wait" ping).
  */
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -50,7 +51,8 @@ function cfg() {
       process.env.FIFA_WHATSAPP_MAIN_CHAT_ID || "120363410010039894@g.us",
     vipChat:
       process.env.FIFA_WHATSAPP_VIP_CHAT_ID || "120363427162994986@g.us",
-    receiveTimeout: Number(process.env.FIFA_BOT_RECEIVE_TIMEOUT || "15"),
+    // Short long-poll: returns immediately when a webhook arrives.
+    receiveTimeout: Number(process.env.FIFA_BOT_RECEIVE_TIMEOUT || "5"),
   };
 }
 
@@ -98,7 +100,7 @@ function looksLikeCommand(raw) {
     "כובשים",
     "scorers",
   ];
-  return keys.some((k) => t === k || t.startsWith(`${k} `) || t.includes(k));
+  return keys.some((k) => t === k || t.startsWith(`${k} `));
 }
 
 function extractText(body) {
@@ -152,8 +154,8 @@ async function deleteNotification(c, receiptId) {
   await fetch(url, { method: "DELETE" }).catch(() => undefined);
 }
 
-async function receiveOne(c) {
-  const url = `${c.apiHost}/waInstance${c.instance}/receiveNotification/${c.token}?receiveTimeout=${c.receiveTimeout}`;
+async function receiveOne(c, timeoutSec) {
+  const url = `${c.apiHost}/waInstance${c.instance}/receiveNotification/${c.token}?receiveTimeout=${timeoutSec}`;
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) {
     const t = await res.text().catch(() => "");
@@ -164,6 +166,7 @@ async function receiveOne(c) {
   return JSON.parse(text);
 }
 
+/** @returns {Promise<boolean>} true if a command reply was sent */
 async function handleNotification(c, note) {
   const receiptId = note?.receiptId;
   const body = note?.body || note;
@@ -174,7 +177,7 @@ async function handleNotification(c, note) {
       typeWebhook !== "incomingMessageReceived" &&
       typeWebhook !== "incomingMessage"
     ) {
-      return;
+      return false;
     }
 
     const senderData = body?.senderData || {};
@@ -183,15 +186,12 @@ async function handleNotification(c, note) {
       body?.chatId ||
       body?.messageData?.chatId ||
       "";
-    if (!isOurGroup(c, chatId)) return;
+    if (!isOurGroup(c, chatId)) return false;
 
-    // Ignore our own API sends
-    if (body?.messageData?.typeMessage === "reactionMessage") return;
-    const fromApi = body?.messageData?.statusMessage != null && body?.instanceData;
-    void fromApi;
+    if (body?.messageData?.typeMessage === "reactionMessage") return false;
 
     const text = extractText(body?.messageData || body);
-    if (!text || !looksLikeCommand(text)) return;
+    if (!text || !looksLikeCommand(text)) return false;
 
     console.log(
       new Date().toISOString(),
@@ -199,19 +199,39 @@ async function handleNotification(c, note) {
       chatId.slice(-14),
       text.slice(0, 40),
     );
-    await sendGreen(c, chatId, "⏳ רגע, בודק…");
+
+    // Delete + resolve reply in parallel, then one WhatsApp send (no "wait" ping).
+    const started = Date.now();
+    const [, reply] = await Promise.all([
+      deleteNotification(c, receiptId),
+      runCommand(c, text),
+    ]);
+    await sendGreen(c, chatId, reply);
+    console.log(
+      new Date().toISOString(),
+      "CMD ok",
+      `${Date.now() - started}ms`,
+      text.slice(0, 24),
+    );
+    return true;
+  } catch (error) {
+    console.error(new Date().toISOString(), "command fail", String(error));
     try {
-      const reply = await runCommand(c, text);
-      await sendGreen(c, chatId, reply);
-    } catch (error) {
-      console.error(new Date().toISOString(), "command fail", String(error));
-      await sendGreen(
-        c,
-        chatId,
-        "⚠️ לא הצלחתי לענות עכשיו. נסו שוב בעוד רגע.",
-      );
+      const senderData = body?.senderData || {};
+      const chatId = senderData.chatId || body?.chatId || "";
+      if (isOurGroup(c, chatId)) {
+        await sendGreen(
+          c,
+          chatId,
+          "⚠️ לא הצלחתי לענות עכשיו. נסו שוב בעוד רגע.",
+        );
+      }
+    } catch {
+      /* ignore */
     }
+    return false;
   } finally {
+    // Idempotent if already deleted on the fast path.
     await deleteNotification(c, receiptId);
   }
 }
@@ -223,18 +243,23 @@ async function main() {
     console.error("Missing GREEN_API_INSTANCE / GREEN_API_TOKEN");
     process.exit(1);
   }
-  console.log("FIFA command listener starting");
+  console.log("FIFA command listener starting (fast)");
   console.log(" site=", c.site);
   console.log(" main=", c.mainChat);
   console.log(" vip=", c.vipChat);
+  console.log(" receiveTimeout=", c.receiveTimeout);
 
   for (;;) {
     try {
-      const note = await receiveOne(c);
-      if (note) await handleNotification(c, note);
+      // Long-poll until something arrives, then drain the whole queue with timeout=0.
+      let note = await receiveOne(c, c.receiveTimeout);
+      while (note) {
+        await handleNotification(c, note);
+        note = await receiveOne(c, 0);
+      }
     } catch (error) {
       console.error(new Date().toISOString(), "listener error", String(error));
-      await new Promise((r) => setTimeout(r, 2000));
+      await new Promise((r) => setTimeout(r, 800));
     }
   }
 }
