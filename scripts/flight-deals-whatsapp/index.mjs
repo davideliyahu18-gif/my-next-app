@@ -513,6 +513,11 @@ async function processTriggerFile() {
   try {
     const raw = JSON.parse(await readFile(TRIGGER_FILE, "utf8"));
     await unlink(TRIGGER_FILE);
+    if (raw.action === "status") {
+      log.info("Queued status search from trigger file");
+      await runStatusSearch(groupJid);
+      return;
+    }
     const text =
       raw.text ||
       "✅ *הודעת בדיקה*\n\nהבוט פעיל ומחובר.";
