@@ -31,6 +31,8 @@ import {
   personalHelpText,
   personalStatusText,
   shouldAlertPersonalUser,
+  formatWatchesHe,
+  DEFAULT_WATCHES,
 } from "./personal-users.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -576,7 +578,7 @@ function buildStatusReply({ searching = false, personal = false } = {}) {
     .join("\n");
 }
 
-function pickWatchDeals(deals = null) {
+function pickWatchDeals(deals = null, watchesFilter = null) {
   const fromScan = Array.isArray(deals) ? deals : [];
   const byWatch = new Map();
   for (const deal of fromScan) {
@@ -592,15 +594,20 @@ function pickWatchDeals(deals = null) {
   for (const deal of getCachedWatchDeals()) {
     if (!byWatch.has(deal.watch)) byWatch.set(deal.watch, deal);
   }
-  return ["thailand", "budapest"].map((w) => byWatch.get(w)).filter(Boolean);
+  const order = Array.isArray(watchesFilter) && watchesFilter.length
+    ? watchesFilter
+    : DEFAULT_WATCHES;
+  return order.map((w) => byWatch.get(w)).filter(Boolean);
 }
 
-async function sendCurrentDealResult(chatId, deals = null) {
+async function sendCurrentDealResult(chatId, deals = null, watchesFilter = null) {
   if (!sock || !chatId) return false;
-  const watchDeals = pickWatchDeals(deals);
+  const watchDeals = pickWatchDeals(deals, watchesFilter);
   if (!watchDeals.length) {
     await sock.sendMessage(chatId, {
-      text: "🔎 *תוצאת חיפוש*\nלא נמצאו כרגע טיסות במעקבים הקבועים.",
+      text: watchesFilter?.length
+        ? `🔎 *תוצאת חיפוש*\nלא נמצאו כרגע טיסות ל־${formatWatchesHe(watchesFilter)}.`
+        : "🔎 *תוצאת חיפוש*\nלא נמצאו כרגע טיסות במעקבים הקבועים.",
     });
     return false;
   }
@@ -624,7 +631,7 @@ async function sendCurrentDealResult(chatId, deals = null) {
   }
 }
 
-async function runStatusSearch(chatId) {
+async function runStatusSearch(chatId, watchesFilter = null) {
   const personal = Boolean(chatId && !String(chatId).endsWith("@g.us"));
   try {
     await sock.sendMessage(chatId, {
@@ -644,7 +651,7 @@ async function runStatusSearch(chatId) {
       reason: "status-command",
       reportCurrent: true,
     });
-    await sendCurrentDealResult(chatId, deals);
+    await sendCurrentDealResult(chatId, deals, watchesFilter);
   } catch (error) {
     log.warn({ error }, "Status-triggered scan failed");
     try {
@@ -724,11 +731,12 @@ async function handlePersonalDm(chatId, body, pushName) {
         "",
         personalStatusText(user, getSearchStatus()),
         "",
+        "בחירת יעד: *רק תאילנד* / *רק בודפשט* / *הכל*",
         "כשמחיר טוב יופיע — אשלח *רק אליך*.",
       ].join("\n"),
     );
     // Immediate personal search
-    runStatusSearch(chatId).catch((error) => {
+    runStatusSearch(chatId, user.watches).catch((error) => {
       log.warn({ error }, "Personal start search failed");
     });
     return;
@@ -737,6 +745,51 @@ async function handlePersonalDm(chatId, body, pushName) {
   if (cmd.type === "stop") {
     await upsertPersonalUser(chatId, { active: false });
     await sendChat(chatId, "🛑 המעקב האישי הופסק.\nכתוב *התחל* כדי לחזור.");
+    return;
+  }
+
+  if (cmd.type === "set-watches") {
+    const user = await upsertPersonalUser(chatId, {
+      active: true,
+      pushName: pushName || null,
+      watches: cmd.watches,
+    });
+    await sendChat(
+      chatId,
+      [
+        `✅ היעדים עודכנו: *${formatWatchesHe(user.watches)}*`,
+        "",
+        personalStatusText(user, getSearchStatus()),
+        "",
+        "מכאן אשלח התראות *רק* על היעדים שבחרת.",
+      ].join("\n"),
+    );
+    runStatusSearch(chatId, user.watches).catch((error) => {
+      log.warn({ error }, "Personal watch-change search failed");
+    });
+    return;
+  }
+
+  if (cmd.type === "watches") {
+    const user = getPersonalUser(chatId);
+    if (!user?.active) {
+      await sendChat(
+        chatId,
+        "עוד לא נרשמת.\nכתוב *התחל*, ואז *רק תאילנד* / *רק בודפשט* / *הכל*.",
+      );
+      return;
+    }
+    await sendChat(
+      chatId,
+      [
+        `📍 היעדים שלך עכשיו: *${formatWatchesHe(user.watches)}*`,
+        "",
+        "לבחירה מחדש:",
+        "• *רק תאילנד*",
+        "• *רק בודפשט*",
+        "• *הכל*",
+      ].join("\n"),
+    );
     return;
   }
 
@@ -763,7 +816,7 @@ async function handlePersonalDm(chatId, body, pushName) {
       return;
     }
     await sendChat(chatId, personalStatusText(user, getSearchStatus()));
-    runStatusSearch(chatId).catch((error) => {
+    runStatusSearch(chatId, user.watches).catch((error) => {
       log.warn({ error }, "Personal status search failed");
     });
   }

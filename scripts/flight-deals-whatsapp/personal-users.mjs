@@ -22,10 +22,20 @@ export const PERSONAL_USERS_FILE = path.join(__dirname, "personal-users.json");
 /** @type {Map<string, PersonalUser>} */
 const users = new Map();
 
-const DEFAULT_WATCHES = ["thailand", "budapest"];
+export const DEFAULT_WATCHES = ["thailand", "budapest"];
+
+const WATCH_LABELS_HE = {
+  thailand: "🇹🇭 תאילנד",
+  budapest: "🇭🇺 בודפשט",
+};
 
 function defaultMaxPriceIls() {
   return Number(process.env.FLIGHT_DEALS_PERSONAL_MAX_PRICE_ILS ?? "4500");
+}
+
+export function formatWatchesHe(watches) {
+  const list = normalizeWatches(watches);
+  return list.map((w) => WATCH_LABELS_HE[w] || w).join(" · ");
 }
 
 function normalizeUserJid(jid) {
@@ -133,6 +143,8 @@ export function personalHelpText() {
     "• *עצור* — ביטול התראות",
     "• *סטטוס* / *מחפש* — חיפוש מחיר עכשיו",
     "• *תקציב 3200* — מקסימום בשקלים",
+    "• *רק תאילנד* / *רק בודפשט* / *הכל* — בחירת יעד",
+    "• *יעדים* — מה פעיל אצלך",
     "• *עזרה* — התפריט הזה",
     "",
     "מעקב קבוע:",
@@ -145,33 +157,103 @@ export function personalStatusText(user, status = {}) {
   if (!user?.active) {
     return "אתה לא במעקב כרגע. כתוב *התחל* כדי להצטרף.";
   }
+  const watches = normalizeWatches(user.watches);
+  const thOn = watches.includes("thailand");
+  const budOn = watches.includes("budapest");
   const th = status.thailand?.lowestIls;
   const bud = status.budapest?.lowestIls;
-  return [
+  const lines = [
     "✅ *מעקב אישי פעיל*",
+    `📍 יעדים: *${formatWatchesHe(watches)}*`,
     `💰 תקרת תקציב: *₪${Math.round(user.maxPriceIls)}*`,
     "",
-    "🇹🇭 תאילנד · אמירטס · מזוודה · 15:10→07:35",
-    th != null ? `   מחיר נוכחי: *₪${Math.round(th)}*` : "   עדיין אין מחיר",
-    user.lastAlertByWatch?.thailand != null
-      ? `   התראה אחרונה: ₪${Math.round(user.lastAlertByWatch.thailand)}`
-      : "",
-    "",
-    "🇭🇺 בודפשט · 11/11/2026–15/11/2026",
-    bud != null ? `   מחיר נוכחי: *₪${Math.round(bud)}*` : "   עדיין אין מחיר",
-    user.lastAlertByWatch?.budapest != null
-      ? `   התראה אחרונה: ₪${Math.round(user.lastAlertByWatch.budapest)}`
-      : "",
-    "",
-    "כתוב *מחפש* לחיפוש מיידי.",
-  ]
-    .filter(Boolean)
-    .join("\n");
+  ];
+
+  if (thOn) {
+    lines.push(
+      "🇹🇭 תאילנד · אמירטס · מזוודה · 15:10→07:35",
+      th != null ? `   מחיר נוכחי: *₪${Math.round(th)}*` : "   עדיין אין מחיר",
+      user.lastAlertByWatch?.thailand != null
+        ? `   התראה אחרונה: ₪${Math.round(user.lastAlertByWatch.thailand)}`
+        : "",
+      "",
+    );
+  } else {
+    lines.push("🇹🇭 תאילנד — *כבוי*", "   כתוב *רק תאילנד* או *הכל* להפעלה", "");
+  }
+
+  if (budOn) {
+    lines.push(
+      "🇭🇺 בודפשט · 11/11/2026–15/11/2026",
+      bud != null ? `   מחיר נוכחי: *₪${Math.round(bud)}*` : "   עדיין אין מחיר",
+      user.lastAlertByWatch?.budapest != null
+        ? `   התראה אחרונה: ₪${Math.round(user.lastAlertByWatch.budapest)}`
+        : "",
+      "",
+    );
+  } else {
+    lines.push("🇭🇺 בודפשט — *כבוי*", "   כתוב *רק בודפשט* או *הכל* להפעלה", "");
+  }
+
+  lines.push("כתוב *מחפש* לחיפוש מיידי.");
+  return lines.filter(Boolean).join("\n");
+}
+
+/** Parse destination-selection phrases → watch ids. */
+export function parseWatchSelection(text) {
+  const t = String(text ?? "")
+    .replace(/[\u200e\u200f\u202a-\u202e]/g, "")
+    .replace(/[?؟！!.,，、~`'"]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+  if (!t) return null;
+
+  if (
+    t === "הכל" ||
+    t === "כל היעדים" ||
+    t === "שניהם" ||
+    t === "שתי הטיסות" ||
+    t === "יעד הכל" ||
+    t === "all"
+  ) {
+    return [...DEFAULT_WATCHES];
+  }
+
+  if (
+    t === "רק תאילנד" ||
+    t === "יעד תאילנד" ||
+    t === "תאילנד בלבד" ||
+    t === "רק תאי" ||
+    t === "thailand only" ||
+    t === "thailand"
+  ) {
+    return ["thailand"];
+  }
+
+  if (
+    t === "רק בודפשט" ||
+    t === "יעד בודפשט" ||
+    t === "בודפשט בלבד" ||
+    t === "רק הונגריה" ||
+    t === "budapest only" ||
+    t === "budapest" ||
+    t === "bud"
+  ) {
+    return ["budapest"];
+  }
+
+  // "תאילנד ובודפשט" / "בודפשט ותאילנד"
+  const hasTh = /תאילנד|thailand/.test(t);
+  const hasBud = /בודפשט|הונגריה|budapest|\bbud\b/.test(t);
+  if (hasTh && hasBud) return [...DEFAULT_WATCHES];
+
+  return null;
 }
 
 /**
  * Parse a private DM command.
- * @returns {{ type: string, maxPriceIls?: number } | null}
+ * @returns {{ type: string, maxPriceIls?: number, watches?: string[] } | null}
  */
 export function parsePersonalCommand(text) {
   const t = String(text ?? "")
@@ -204,6 +286,15 @@ export function parsePersonalCommand(text) {
   ) {
     return { type: "help" };
   }
+  if (t === "יעדים" || t === "יעד" || t === "watches" || t === "destinations") {
+    return { type: "watches" };
+  }
+
+  const selected = parseWatchSelection(t);
+  if (selected) {
+    return { type: "set-watches", watches: selected };
+  }
+
   if (
     t === "סטטוס" ||
     t === "מצב" ||
