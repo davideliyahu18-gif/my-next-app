@@ -54,6 +54,7 @@ export function formatHelpMessage(): string {
     "• *לוח* — 6 המשחקים הבאים",
     "• *הרכב* — הרכבי חצי הגמר",
     "• *מלך שערים* — טבלת השערים",
+    "• *הכל תקין* — בדיקת מערכת מלאה",
     "• *סטטוס* / *בוט* — האם הבוט חי",
     "• *עזרה* — ההודעה הזאת",
     "",
@@ -78,6 +79,47 @@ export function formatStatusMessage(options: {
       : "🔔 התראות אוטומטיות: *כבוי*",
     "",
     "כתבו *עזרה* לרשימת פקודות.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** Full health-check reply for the "הכל תקין" command. */
+export function formatAllGoodMessage(options: {
+  liveCount: number;
+  nextLabel: string | null;
+  alertsEnabled: boolean;
+  nowLabel: string;
+}): string {
+  return [
+    "*✅ הכל תקין*",
+    "",
+    "━━━━━━━━━━━━━━━━━━━━",
+    "",
+    "*🤖 בוט מונדיאל 2026 — פעיל ומנטר*",
+    "",
+    `*📅 ${options.nowLabel}*`,
+    "",
+    options.liveCount > 0
+      ? `*⚽ עכשיו חיים: ${options.liveCount} משחקים*`
+      : "*⚽ אין משחק חי כרגע — ממתין לעדכון הבא*",
+    options.nextLabel ? `*⏭ הבא: ${options.nextLabel}*` : "",
+    "",
+    options.alertsEnabled
+      ? "*⚡ במשחק חי: התראות אוטומטיות פעילות*"
+      : "*⚡ התראות אוטומטיות: כבוי*",
+    "",
+    "━━━━━━━━━━━━━━━━━━━━",
+    "",
+    "*📋 פקודות זמינות:*",
+    "",
+    "*הכל תקין · עזרה · תוצאה · מחר · לוח*",
+    "",
+    "*הרכב · מלך שערים · סטטוס*",
+    "",
+    "━━━━━━━━━━━━━━━━━━━━",
+    "",
+    "*📣 עדכוני כדורגל - 24/7 ⚽🥇🏆*",
   ]
     .filter(Boolean)
     .join("\n");

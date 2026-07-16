@@ -6,6 +6,7 @@ import {
 } from "@/lib/fifa-data";
 import { fetchSemiFinalLineups } from "@/lib/fifa-lineups";
 import {
+  formatAllGoodMessage,
   formatHelpMessage,
   formatLineups,
   formatLiveScores,
@@ -26,6 +27,22 @@ function normalize(text: string): string {
     .replace(/\s+/g, " ");
 }
 
+function formatNowHe(): string {
+  const now = new Date();
+  const day = now.toLocaleDateString("he-IL", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    timeZone: "Asia/Jerusalem",
+  });
+  const time = now.toLocaleTimeString("he-IL", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Jerusalem",
+  });
+  return `${day} בשעה ${time}`;
+}
+
 /** Parse a Hebrew/WhatsApp remote-control command. */
 export function parseFifaBotCommand(raw: string): FifaBotCommand {
   const text = normalize(raw);
@@ -38,6 +55,15 @@ export function parseFifaBotCommand(raw: string): FifaBotCommand {
     text.includes("מה אפשר")
   ) {
     return "help";
+  }
+
+  if (
+    text === "הכל תקין" ||
+    text === "הכלתקין" ||
+    text === "הכל בסדר" ||
+    text === "תקין"
+  ) {
+    return "all_good";
   }
 
   if (
@@ -122,6 +148,23 @@ export async function runFifaBotCommand(
           liveCount,
           nextLabel,
           alertsEnabled: process.env.FIFA_BOT_ALERTS !== "false",
+        }),
+      };
+    }
+    case "all_good": {
+      const matches = await fetchLiveMatches(true);
+      const liveCount = matches.filter((m) => m.status === "live").length;
+      const next = matches.find((m) => m.status === "upcoming");
+      const nextLabel = next
+        ? `${formatScoreLine(next)} · ${formatKickoffHe(next.kickoffAt)}`
+        : null;
+      return {
+        command,
+        reply: formatAllGoodMessage({
+          liveCount,
+          nextLabel,
+          alertsEnabled: process.env.FIFA_BOT_ALERTS !== "false",
+          nowLabel: formatNowHe(),
         }),
       };
     }

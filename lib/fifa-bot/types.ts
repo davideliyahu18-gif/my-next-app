@@ -1,6 +1,7 @@
 export type FifaBotCommand =
   | "help"
   | "status"
+  | "all_good"
   | "score"
   | "tomorrow"
   | "lineup"
