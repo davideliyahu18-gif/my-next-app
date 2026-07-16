@@ -188,14 +188,9 @@ function filterPreferredDeals(deals) {
 }
 
 export function resolveProvider() {
+  // Thailand watch uses SerpAPI Google Flights only.
   if (process.env.FLIGHT_DEALS_DEMO === "true") return "demo";
-  if (process.env.TRAVELPAYOUTS_TOKEN) return "travelpayouts";
-  const hasSerp = Boolean(process.env.SERPAPI_API_KEY);
-  const hasSky = Boolean(rapidKey());
-  if (hasSerp && hasSky) return "merged";
-  if (hasSerp) return "serpapi";
-  if (hasSky) return "skyscanner";
-  if (process.env.AMADEUS_CLIENT_ID && process.env.AMADEUS_CLIENT_SECRET) return "amadeus";
+  if (process.env.SERPAPI_API_KEY) return "serpapi";
   return null;
 }
 
@@ -867,9 +862,13 @@ async function searchThailandWatch({ forceRefresh = false } = {}) {
   const merged = mergeDeals([deals]).sort(
     (a, b) => (a.priceIls ?? a.priceUsd) - (b.priceIls ?? b.priceUsd),
   );
+  if (!merged.length && thailandCache.deals?.length) {
+    console.warn("[thailand] empty refresh — keeping previous good result");
+    return thailandCache.deals;
+  }
   thailandCache = { at: Date.now(), deals: merged };
   console.log(
-    `[thailand] EK/EY + bag ${cfg.outbound}→${cfg.returnDate}` +
+    `[thailand] Emirates + bag ${cfg.outbound}→${cfg.returnDate}` +
       ` airports=${cfg.airports.join(",")}` +
       ` → ${merged.length} deals ≤₪${cfg.maxPriceIls}` +
       (merged[0]

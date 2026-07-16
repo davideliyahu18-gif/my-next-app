@@ -1,14 +1,13 @@
 #!/usr/bin/env node
 /**
- * WhatsApp flight-deals bot — TLV round-trip ≤ $50, every 30 min.
+ * WhatsApp Thailand flight-deals bot (Emirates schedule watch).
  *
- * The bot finds the WhatsApp group automatically by WHATSAPP_GROUP_NAME.
- * You only need to create the group with that name and add this linked number.
+ * Single process. Pin WHATSAPP_GROUP_CHAT_ID. Never run two instances.
  */
 
 import { createRequire } from "node:module";
 import { mkdir, readFile, writeFile, readdir, unlink } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, openSync, writeSync, closeSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import cron from "node-cron";
@@ -28,6 +27,7 @@ const AUTH_DIR = path.join(__dirname, "auth");
 const SEEN_FILE = path.join(__dirname, "seen-deals.json");
 const STATE_FILE = path.join(__dirname, "bot-state.json");
 const TRIGGER_FILE = path.join(__dirname, "test-trigger.json");
+const LOCK_FILE = path.join(__dirname, "bot.lock");
 
 const require = createRequire(import.meta.url);
 const baileys = require("@whiskeysockets/baileys");
@@ -105,8 +105,13 @@ let startupScanDone = false;
 let whatsappConnected = false;
 let pairingRefreshTimer = null;
 let pairingStarted = false;
+let reconnectTimer = null;
+let connecting = false;
+let connectGeneration = 0;
+let reconnectFailures = 0;
 /** @type {Map<string, import("@whiskeysockets/baileys").proto.IMessage>} */
 const messageStore = new Map();
+const handledMsgIds = new Set();
 let lastScanAt = 0;
 let lastScanFound = 0;
 let lastScanSent = 0;
@@ -115,7 +120,67 @@ let groupJid = "";
 let groupPollTimer = null;
 let welcomeSent = false;
 let cfg = envConfig();
+let lockFd = null;
 const GROUP_POLL_MS = 10_000;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function acquireInstanceLock() {
+  try {
+    lockFd = openSync(LOCK_FILE, "wx");
+    writeSync(lockFd, String(process.pid));
+  } catch (error) {
+    if (error?.code === "EEXIST") {
+      let other = "";
+      try {
+        other = ` (pid ${require("node:fs").readFileSync(LOCK_FILE, "utf8").trim()})`;
+      } catch {
+        // ignore
+      }
+      console.error(
+        `❌ הבוט כבר רץ${other}. עצור אותו לפני הפעלה מחדש:\n   pkill -f 'flight-deals-whatsapp/index.mjs'`,
+      );
+      process.exit(1);
+    }
+    throw error;
+  }
+  const release = () => {
+    try {
+      if (lockFd != null) closeSync(lockFd);
+    } catch {
+      // ignore
+    }
+    try {
+      unlinkSync(LOCK_FILE);
+    } catch {
+      // ignore
+    }
+    lockFd = null;
+  };
+  process.on("exit", release);
+  process.on("SIGINT", () => {
+    release();
+    process.exit(0);
+  });
+  process.on("SIGTERM", () => {
+    release();
+    process.exit(0);
+  });
+}
+
+function rememberHandledMessage(msg) {
+  const id = msg?.key?.id;
+  if (!id) return false;
+  if (handledMsgIds.has(id)) return true;
+  handledMsgIds.add(id);
+  if (handledMsgIds.size > 800) {
+    const first = handledMsgIds.keys().next().value;
+    handledMsgIds.delete(first);
+  }
+  return false;
+}
 
 const AIRPORT_LABELS = {
   TLV: "תל אביב", ATH: "אתונה", LCA: "לרנקה", PFO: "פאפוס", BUD: "בודפשט",
@@ -248,26 +313,31 @@ function formatDealMessage(deal) {
 async function sendToGroup(content) {
   if (!sock || !groupJid) return false;
 
-  if (typeof content === "string") {
-    await sock.sendMessage(groupJid, { text: content });
-    return true;
-  }
-
-  const caption = formatDealMessage(content);
-  if (content.imageUrl) {
-    try {
-      await sock.sendMessage(groupJid, {
-        image: { url: content.imageUrl },
-        caption,
-      });
+  try {
+    if (typeof content === "string") {
+      await sock.sendMessage(groupJid, { text: content });
       return true;
-    } catch (error) {
-      log.warn({ error }, "Image send failed — falling back to text");
     }
-  }
 
-  await sock.sendMessage(groupJid, { text: caption });
-  return true;
+    const caption = formatDealMessage(content);
+    if (content.imageUrl) {
+      try {
+        await sock.sendMessage(groupJid, {
+          image: { url: content.imageUrl },
+          caption,
+        });
+        return true;
+      } catch (error) {
+        log.warn({ error }, "Image send failed — falling back to text");
+      }
+    }
+
+    await sock.sendMessage(groupJid, { text: caption });
+    return true;
+  } catch (error) {
+    log.warn({ error }, "sendToGroup failed");
+    return false;
+  }
 }
 
 async function loadJson(file, fallback) {
@@ -490,6 +560,10 @@ async function runStatusSearch(chatId) {
   }
 
   try {
+    // Wait for any in-flight cron scan, then always run a fresh status search.
+    for (let i = 0; i < 120 && scanRunning; i += 1) {
+      await sleep(500);
+    }
     const deals = await runScan({
       forceRefresh: true,
       reason: "status-command",
@@ -538,8 +612,7 @@ function startTriggerWatcher() {
 
 async function isTargetGroup(chatId) {
   if (!chatId?.endsWith("@g.us")) return false;
-  if (!groupJid) return true;
-  if (sameChatId(chatId, groupJid)) return true;
+  if (groupJid) return sameChatId(chatId, groupJid);
   if (!cfg.groupName || !sock) return false;
   try {
     const meta = await sock.groupMetadata(chatId.split(":")[0]);
@@ -552,6 +625,7 @@ async function isTargetGroup(chatId) {
 async function handleIncomingMessage(msg, upsertType = "notify") {
   try {
     if (msg.key?.fromMe) return;
+    if (rememberHandledMessage(msg)) return;
 
     const chatId = msg.key?.remoteJid;
     if (!chatId) return;
@@ -571,6 +645,9 @@ async function handleIncomingMessage(msg, upsertType = "notify") {
     const isGroup = chatId.endsWith("@g.us");
     if (!isGroup && groupJid) return;
 
+    // Only live notifies for commands. Append after reconnect is usually history.
+    if (upsertType !== "notify") return;
+
     const body = extractMessageText(msg);
     if (!body) return;
 
@@ -588,9 +665,6 @@ async function handleIncomingMessage(msg, upsertType = "notify") {
     }
 
     if (!isStatusCheckCommand(body)) return;
-
-    // Ignore stale history echoes after reconnect.
-    if (upsertType === "append" && !isRecentMessage(msg)) return;
 
     const now = Date.now();
     if (now - lastStatusCommandAt < STATUS_COMMAND_COOLDOWN_MS) {
@@ -632,7 +706,7 @@ async function resolveGroupByName() {
 }
 
 function startGroupPolling() {
-  if (groupJid || !cfg.groupName) return;
+  if (groupJid || !cfg.groupName || groupPollTimer) return;
 
   console.log(`\n⏳ מחכה לקבוצה בשם: "${cfg.groupName}"`);
   console.log("   פתח את הקבוצה, הוסף את המספר המקושר, ואז הבוט יתחבר אוטומטית.\n");
@@ -686,10 +760,21 @@ async function runScan({
   }
 
   if (scanRunning) {
-    if (forceRefresh || reason === "status-command") scanQueued = true;
-    log.info("Scan already running — %s", scanQueued ? "queued follow-up" : "skipping");
-    const cached = getSearchStatus().thailand?.deal;
-    return cached ? [cached] : [];
+    if (reason === "status-command" || reportCurrent) {
+      log.info("Waiting for in-flight scan before status refresh");
+      for (let i = 0; i < 120 && scanRunning; i += 1) {
+        await sleep(500);
+      }
+      if (scanRunning) {
+        const cached = getSearchStatus().thailand?.deal;
+        return cached ? [cached] : [];
+      }
+    } else {
+      if (forceRefresh) scanQueued = true;
+      log.info("Scan already running — %s", scanQueued ? "queued follow-up" : "skipping");
+      const cached = getSearchStatus().thailand?.deal;
+      return cached ? [cached] : [];
+    }
   }
 
   if (!resolveProvider()) {
@@ -812,11 +897,30 @@ async function startPairingCodeFlow(activeSock, phone, creds) {
   }
 }
 
+function scheduleReconnect(delayMs = 8_000) {
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connectWhatsApp().catch((error) => {
+      log.error({ error }, "Reconnect failed");
+      scheduleReconnect(12_000);
+    });
+  }, delayMs);
+}
+
 async function connectWhatsApp() {
+  if (connecting) {
+    log.info("WhatsApp connect already in progress");
+    return;
+  }
+  connecting = true;
+  const generation = ++connectGeneration;
+
   await mkdir(AUTH_DIR, { recursive: true });
 
   if (sock) {
     try {
+      sock.ev.removeAllListeners();
       sock.end(undefined);
     } catch {
       // ignore
@@ -824,124 +928,141 @@ async function connectWhatsApp() {
     sock = null;
   }
 
-  const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-  const { version } = await fetchLatestBaileysVersion();
-  const pairingOnly = process.env.FLIGHT_DEALS_PAIRING_ONLY === "true";
-  const phone = normalizeWhatsAppPhone(
-    process.env.WHATSAPP_PAIR_PHONE || process.env.WHATSAPP_PHONE,
-  );
-  const silent = pino({ level: "silent" });
-  const retryCache = {
-    _data: new Map(),
-    get: (key) => retryCache._data.get(key),
-    set: (key, value) => retryCache._data.set(key, value),
-    del: (key) => retryCache._data.delete(key),
-  };
+  try {
+    const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+    const { version } = await fetchLatestBaileysVersion();
+    const pairingOnly = process.env.FLIGHT_DEALS_PAIRING_ONLY === "true";
+    const phone = normalizeWhatsAppPhone(
+      process.env.WHATSAPP_PAIR_PHONE || process.env.WHATSAPP_PHONE,
+    );
+    const silent = pino({ level: "silent" });
+    const retryCache = {
+      _data: new Map(),
+      get: (key) => retryCache._data.get(key),
+      set: (key, value) => retryCache._data.set(key, value),
+      del: (key) => retryCache._data.delete(key),
+    };
 
-  sock = makeWASocket({
-    version,
-    auth: {
-      creds: state.creds,
-      keys: makeCacheableSignalKeyStore(state.keys, silent),
-    },
-    browser: Browsers.ubuntu("Flight Deals Bot"),
-    logger: silent,
-    printQRInTerminal: !pairingOnly,
-    markOnlineOnConnect: false,
-    emitOwnEvents: false,
-    fireInitQueries: false,
-    syncFullHistory: false,
-    shouldSyncHistoryMessage: () => false,
-    maxMsgRetryCount: 5,
-    msgRetryCounterCache: retryCache,
-    getMessage: async (key) => messageStore.get(msgKeyString(key)),
-  });
+    sock = makeWASocket({
+      version,
+      auth: {
+        creds: state.creds,
+        keys: makeCacheableSignalKeyStore(state.keys, silent),
+      },
+      browser: Browsers.ubuntu("Chrome"),
+      logger: silent,
+      printQRInTerminal: false,
+      markOnlineOnConnect: false,
+      emitOwnEvents: false,
+      // Needed so group sender keys distribute; history sync stays off.
+      fireInitQueries: true,
+      syncFullHistory: false,
+      shouldSyncHistoryMessage: () => false,
+      maxMsgRetryCount: 5,
+      msgRetryCounterCache: retryCache,
+      getMessage: async (key) => messageStore.get(msgKeyString(key)),
+    });
 
-  sock.ev.on("creds.update", saveCreds);
-  sock.ev.on("messages.upsert", async ({ messages, type }) => {
-    for (const msg of messages) {
-      try {
-        if (type === "notify") {
+    sock.ev.on("creds.update", saveCreds);
+    sock.ev.on("messages.upsert", async ({ messages, type }) => {
+      if (generation !== connectGeneration) return;
+      for (const msg of messages) {
+        try {
           await handleIncomingMessage(msg, type);
-        } else if (type === "append" && isRecentMessage(msg)) {
-          // Some linked-device deliveries arrive as append even when live.
-          await handleIncomingMessage(msg, type);
+        } catch (error) {
+          log.warn({ error }, "Message handler error");
         }
-      } catch (error) {
-        log.warn({ error }, "Message handler error");
       }
+    });
+
+    if (pairingOnly && !state.creds.registered && phone) {
+      setTimeout(() => {
+        if (generation !== connectGeneration) return;
+        startPairingCodeFlow(sock, phone, state.creds).catch((error) => {
+          log.warn({ error }, "Pairing flow failed");
+        });
+      }, 3_000);
     }
-  });
 
-  let pairingRequested = false;
+    sock.ev.on("connection.update", async (update) => {
+      if (generation !== connectGeneration) return;
+      const { connection, lastDisconnect, qr } = update;
 
-  if (pairingOnly && !state.creds.registered && phone) {
-    setTimeout(() => {
-      startPairingCodeFlow(sock, phone, state.creds).catch((error) => {
-        log.warn({ error }, "Pairing flow failed");
-      });
-    }, 3_000);
+      if (qr && !pairingOnly) {
+        const qrLink = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(qr)}`;
+        try {
+          await writeFile(path.join(__dirname, "qr-link.txt"), `${qrLink}\n`);
+        } catch {
+          // ignore
+        }
+        console.log("\n════════════════════════════════════════");
+        console.log("📱 פתח את הקישור במחשב / טאבלט וסרוק מהטלפון:");
+        console.log(qrLink);
+        console.log("════════════════════════════════════════\n");
+        console.log("בטלפון: WhatsApp → הגדרות → מכשירים מקושרים → קשר מכשיר → סרוק\n");
+        qrcode.generate(qr, { small: true });
+      }
+
+      if (connection === "open") {
+        whatsappConnected = true;
+        reconnectFailures = 0;
+        connecting = false;
+        if (pairingRefreshTimer) {
+          clearInterval(pairingRefreshTimer);
+          pairingRefreshTimer = null;
+        }
+        console.log("\n✅ WhatsApp מחובר בהצלחה!\n");
+        log.info("WhatsApp connected");
+        if (groupJid) {
+          onGroupReady().catch((error) => {
+            log.warn({ error }, "onGroupReady failed");
+          });
+        } else if (cfg.groupName) {
+          resolveGroupByName().then((found) => {
+            if (found) {
+              onGroupReady().catch((error) => {
+                log.warn({ error }, "onGroupReady failed");
+              });
+            } else {
+              startGroupPolling();
+            }
+          });
+        } else {
+          console.error("❌ הגדר WHATSAPP_GROUP_NAME או WHATSAPP_GROUP_CHAT_ID");
+        }
+      }
+
+      if (connection === "close") {
+        whatsappConnected = false;
+        connecting = false;
+        const status = lastDisconnect?.error?.output?.statusCode;
+        const awaitingPairing =
+          pairingOnly && sock?.authState?.creds && !sock.authState.creds.registered;
+        log.warn({ status, awaitingPairing }, "WhatsApp disconnected");
+
+        if (status === DisconnectReason.loggedOut) {
+          console.error("❌ WhatsApp התנתק לצמיתות (logged out). הריצו: npm run flight-deals:relink");
+          process.exit(1);
+        }
+        if (awaitingPairing) return;
+
+        reconnectFailures += 1;
+        if (reconnectFailures >= 8) {
+          console.error("❌ יותר מדי ניסיונות חיבור שנכשלו. יוצא.");
+          process.exit(1);
+        }
+        scheduleReconnect(Math.min(30_000, 5_000 + reconnectFailures * 2_000));
+      }
+    });
+  } catch (error) {
+    connecting = false;
+    throw error;
   }
-
-  sock.ev.on("connection.update", async (update) => {
-    const { connection, lastDisconnect, qr } = update;
-
-    if (qr && !pairingOnly) {
-      const qrLink = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(qr)}`;
-      try {
-        await writeFile(path.join(__dirname, "qr-link.txt"), `${qrLink}\n`);
-      } catch {
-        // ignore
-      }
-      console.log("\n════════════════════════════════════════");
-      console.log("📱 פתח את הקישור במחשב / טאבלט וסרוק מהטלפון:");
-      console.log(qrLink);
-      console.log("════════════════════════════════════════\n");
-      console.log("בטלפון: WhatsApp → הגדרות → מכשירים מקושרים → קשר מכשיר → סרוק\n");
-      qrcode.generate(qr, { small: true });
-    }
-
-    if (connection === "open") {
-      whatsappConnected = true;
-      if (pairingRefreshTimer) {
-        clearInterval(pairingRefreshTimer);
-        pairingRefreshTimer = null;
-      }
-      console.log("\n✅ WhatsApp מחובר בהצלחה!\n");
-      log.info("WhatsApp connected");
-      if (groupJid) {
-        onGroupReady().catch((error) => {
-          log.warn({ error }, "onGroupReady failed");
-        });
-      } else if (cfg.groupName) {
-        resolveGroupByName().then((found) => {
-          if (found) {
-            onGroupReady().catch((error) => {
-              log.warn({ error }, "onGroupReady failed");
-            });
-          } else {
-            startGroupPolling();
-          }
-        });
-      } else {
-        console.error("❌ הגדר WHATSAPP_GROUP_NAME או WHATSAPP_GROUP_CHAT_ID");
-      }
-    }
-
-    if (connection === "close") {
-      whatsappConnected = false;
-      const status = lastDisconnect?.error?.output?.statusCode;
-      const awaitingPairing =
-        pairingOnly && sock?.authState?.creds && !sock.authState.creds.registered;
-      const shouldReconnect =
-        status !== DisconnectReason.loggedOut && !awaitingPairing;
-      log.warn({ status, awaitingPairing }, "WhatsApp disconnected");
-      if (shouldReconnect) setTimeout(connectWhatsApp, 8_000);
-    }
-  });
 }
 
 async function main() {
+  acquireInstanceLock();
+
   process.on("uncaughtException", (error) => {
     log.error({ error }, "uncaughtException — keeping bot alive");
   });
@@ -954,21 +1075,19 @@ async function main() {
   groupJid = cfg.groupJidEnv;
 
   if (!cfg.groupJidEnv && !cfg.groupName) {
-    console.error("❌ הגדר WHATSAPP_GROUP_NAME (שם הקבוצה) או WHATSAPP_GROUP_CHAT_ID");
+    console.error("❌ הגדר WHATSAPP_GROUP_CHAT_ID או WHATSAPP_GROUP_NAME");
     process.exit(1);
   }
 
   if (!resolveProvider()) {
-    console.error("❌ חסר מקור מחירים. בחר אחד:");
-    console.error("   TRAVELPAYOUTS_TOKEN=...  (הכי קל — travelpayouts.com)");
-    console.error("   SERPAPI_API_KEY=...       (serpapi.com — עם Google)");
-    console.error("   FLIGHT_DEALS_DEMO=true    (בדיקה בלי הרשמה)");
+    console.error("❌ חסר SERPAPI_API_KEY (או FLIGHT_DEALS_DEMO=true)");
     process.exit(1);
   }
 
   await loadSeen();
   await loadState();
-  await healSignalSessions();
+  // Prefer pinned group JID from env/state — never guess from random groups.
+  if (!groupJid && cfg.groupJidEnv) groupJid = cfg.groupJidEnv;
   startTriggerWatcher();
   await connectWhatsApp();
 
@@ -979,7 +1098,6 @@ async function main() {
     });
   });
 
-  // Heartbeat — confirms process is alive between cron ticks.
   setInterval(() => {
     log.info(
       { connected: whatsappConnected, groupJid: groupJid || null },
@@ -987,7 +1105,11 @@ async function main() {
     );
   }, 30 * 60_000);
 
-  log.info("Flight deals bot started — cron: %s", cfg.cronExpr);
+  log.info(
+    "Thailand Emirates watch ready — cron %s | group %s",
+    cfg.cronExpr,
+    groupJid || cfg.groupName || "?",
+  );
 }
 
 main().catch((error) => {

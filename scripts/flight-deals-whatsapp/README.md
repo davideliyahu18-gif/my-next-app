@@ -1,58 +1,44 @@
-# בוט דילי טיסות — מדריך מהיר
+# בוט דילי טיסות — תאילנד / אמירטס
 
-## Amadeus לא עובד? יש חלופות קלות יותר
+מעקב קבוע: **TLV → BKK**, תאריכים `10/02/2027–10/03/2027`,  
+יציאה **15:10→07:35**, חזרה **בלילה**, **אמירטס + מזוודה**, מחירים ב־₪.
 
-| אופציה | קושי | הרשמה |
-|--------|------|--------|
-| **Travelpayouts** ⭐ | הכי קל | [travelpayouts.com](https://www.travelpayouts.com/) → Developers → API Token |
-| **SerpAPI** | קל | [serpapi.com](https://serpapi.com/users/sign_up) — עם חשבון Google |
-| **Demo** | אפס | `FLIGHT_DEALS_DEMO=true` ב-`.env.local` — בלי הרשמה |
-| Amadeus | קשה | רק אם הצלחת להירשם |
+## הפעלה חד-פעמית
 
----
-
-## Travelpayouts — 3 דקות (מומלץ)
-
-1. היכנס ל-[travelpayouts.com](https://www.travelpayouts.com/)
-2. הירשם (אימייל + סיסמה, בעברית)
-3. לך ל-**Developers → API** או [קישור ישיר](https://www.travelpayouts.com/developers/api)
-4. העתק את ה-**Token**
-5. הדבק ב-`.env.local`:
+1. ודא ב-`.env.local`:
+   - `SERPAPI_API_KEY=...`
+   - `WHATSAPP_GROUP_CHAT_ID=120363428169341488@g.us`
+   - `WHATSAPP_PHONE=` המספר שמקושר לבוט
+2. הפעלה:
+   ```bash
+   npm run flight-deals:start
    ```
-   TRAVELPAYOUTS_TOKEN=הטוקן_שלך
+3. אם צריך חיבור מחדש (פעם אחת):
+   ```bash
+   npm run flight-deals:relink
+   npm run flight-deals:start
    ```
+   ואז סרוק QR מהמחשב עם הטלפון.
 
----
+**חשוב:** אל תריצו שני מופעים במקביל — יש נעילה (`bot.lock`).
 
-## SerpAPI — עם Google
+## פקודות בקבוצה
 
-1. [serpapi.com/users/sign_up](https://serpapi.com/users/sign_up) → **Sign up with Google**
-2. העתק API Key מהדשבורד
-3. הדבק ב-`.env.local`:
-   ```
-   SERPAPI_API_KEY=המפתח_שלך
-   ```
+| הודעה | מה קורה |
+|--------|----------|
+| `בוט מחפש` / `בוט מחפש?` / `בוט` | תשובה מיידית + חיפוש חי + כרטיס מחיר עדכני |
 
-> 250 חיפושים חינם בחודש — מספיק לבדיקות. לסריקה כל 30 דקות עדיף Travelpayouts.
-
----
-
-## הפעלה
+## בדיקה בלי חיבור כפול
 
 ```bash
-npm run flight-deals:setup
-npm run flight-deals:start
+npm run flight-deals:test
 ```
 
-סרוק QR → כשאגיד לך, פתח קבוצה ותגיד את השם.
+שולח הודעת בדיקה דרך קובץ טריגר (לא פותח סשן WhatsApp שני).
 
----
+## תיקון מפתחות / חיבור
 
-## בדיקה מיידית (בלי שום הרשמה)
-
-הוסף ל-`.env.local`:
+```bash
+npm run flight-deals:repair-auth   # מפתחות פגומים
+npm run flight-deals:relink       # QR מחדש
 ```
-FLIGHT_DEALS_DEMO=true
-```
-
-ישלח דיל דמו אחד לקבוצה לבדיקה.
