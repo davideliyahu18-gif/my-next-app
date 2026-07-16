@@ -37,6 +37,7 @@ const {
   DisconnectReason,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
+  Browsers,
 } = baileys;
 
 async function loadEnvFile() {
@@ -60,9 +61,9 @@ async function loadEnvFile() {
   }
 }
 
-/** Drop stale 1:1 session keys after a second WhatsApp connection (e.g. test script). */
+/** Only when explicitly requested — deleting sessions forces phone key re-sync. */
 async function healSignalSessions() {
-  if (process.env.FLIGHT_DEALS_SKIP_SESSION_HEAL === "true") return;
+  if (process.env.FLIGHT_DEALS_HEAL_SESSION !== "true") return;
   try {
     const files = await readdir(AUTH_DIR);
     let removed = 0;
@@ -458,6 +459,19 @@ function startTriggerWatcher() {
   }, 5_000);
 }
 
+async function isTargetGroup(chatId) {
+  if (!chatId?.endsWith("@g.us")) return false;
+  if (!groupJid) return true;
+  if (sameChatId(chatId, groupJid)) return true;
+  if (!cfg.groupName || !sock) return false;
+  try {
+    const meta = await sock.groupMetadata(chatId.split(":")[0]);
+    return String(meta?.subject ?? "").trim() === cfg.groupName.trim();
+  } catch {
+    return false;
+  }
+}
+
 async function handleIncomingMessage(msg) {
   try {
     if (!msg?.message || msg.key?.fromMe) return;
@@ -465,38 +479,35 @@ async function handleIncomingMessage(msg) {
     const chatId = msg.key.remoteJid;
     if (!chatId) return;
 
-    // Accept the configured group, and also learn group JID if missing.
     const isGroup = chatId.endsWith("@g.us");
-    if (groupJid && isGroup && !sameChatId(chatId, groupJid)) {
-      // Ignore other groups silently.
-      return;
-    }
-    if (!isGroup && groupJid) {
-      // Ignore DMs when we are bound to a group.
-      return;
+    if (!isGroup) {
+      if (groupJid) return;
     }
 
     const body = extractMessageText(msg);
     if (!body) return;
 
-    if (!isStatusCheckCommand(body)) {
-      // Help debug silent command issues without spamming logs.
+    if (isGroup && !(await isTargetGroup(chatId))) {
       if (/בוט/.test(body)) {
-        log.info({ body, chatId }, "Ignored bot-like message (no command match)");
+        log.info({ chatId, expected: groupJid }, "Ignored bot message from other group");
       }
       return;
     }
 
     if (!groupJid && isGroup) {
-      groupJid = chatId;
+      groupJid = chatId.split(":")[0];
       await saveState();
+      log.info({ groupJid }, "Learned group JID from incoming message");
+    }
+
+    if (!isStatusCheckCommand(body)) {
+      return;
     }
 
     const reply = buildStatusReply();
     await sock.sendMessage(chatId, { text: reply }, { quoted: msg });
     log.info({ from: chatId, body }, "Replied to status check command");
 
-    // Kick a refresh scan so status checks surface fresh SerpAPI prices.
     runScan({ forceRefresh: true, reason: "status-command" })
       .then(() => sendScanFollowUp(chatId))
       .catch((error) => {
@@ -674,16 +685,22 @@ async function connectWhatsApp() {
       creds: state.creds,
       keys: makeCacheableSignalKeyStore(state.keys, silent),
     },
+    browser: Browsers.ubuntu("Flight Deals Bot"),
     logger: silent,
     printQRInTerminal: false,
     markOnlineOnConnect: false,
+    emitOwnEvents: false,
+    fireInitQueries: false,
+    syncFullHistory: false,
+    shouldSyncHistoryMessage: () => false,
+    maxMsgRetryCount: 2,
     msgRetryCounterCache: retryCache,
   });
 
   sock.ev.on("creds.update", saveCreds);
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
-    // Baileys may deliver live group texts as "notify" or "append".
-    if (type !== "notify" && type !== "append") return;
+    // Only live notifications — "append" is history sync and floods the phone.
+    if (type !== "notify") return;
     for (const msg of messages) {
       try {
         await handleIncomingMessage(msg);
