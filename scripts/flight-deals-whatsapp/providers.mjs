@@ -596,13 +596,26 @@ export function hasFreeCheckedBag(baggagePrices) {
 }
 
 async function fetchGoogleFlights(params) {
-  const res = await fetch(
-    `https://serpapi.com/search.json?${new URLSearchParams(params)}`,
-  );
-  if (!res.ok) throw new Error(`SerpAPI HTTP ${res.status}`);
-  const payload = await res.json();
-  if (payload.error) throw new Error(payload.error);
-  return payload;
+  const timeoutMs = Number(process.env.SERPAPI_TIMEOUT_MS ?? "45000");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(
+      `https://serpapi.com/search.json?${new URLSearchParams(params)}`,
+      { signal: controller.signal },
+    );
+    if (!res.ok) throw new Error(`SerpAPI HTTP ${res.status}`);
+    const payload = await res.json();
+    if (payload.error) throw new Error(payload.error);
+    return payload;
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error(`SerpAPI timeout after ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**

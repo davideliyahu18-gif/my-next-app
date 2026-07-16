@@ -7,7 +7,7 @@
  */
 
 import { createRequire } from "node:module";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile, readdir, unlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +19,7 @@ import {
   searchDeals as fetchDeals,
   dealFingerprint,
   getSearchStatus,
+  thailandWatchConfig,
 } from "./providers.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -26,6 +27,7 @@ const ROOT = path.join(__dirname, "../..");
 const AUTH_DIR = path.join(__dirname, "auth");
 const SEEN_FILE = path.join(__dirname, "seen-deals.json");
 const STATE_FILE = path.join(__dirname, "bot-state.json");
+const TRIGGER_FILE = path.join(__dirname, "test-trigger.json");
 
 const require = createRequire(import.meta.url);
 const baileys = require("@whiskeysockets/baileys");
@@ -34,6 +36,7 @@ const {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
+  makeCacheableSignalKeyStore,
 } = baileys;
 
 async function loadEnvFile() {
@@ -46,8 +49,32 @@ async function loadEnvFile() {
     const idx = trimmed.indexOf("=");
     if (idx === -1) continue;
     const key = trimmed.slice(0, idx);
-    const value = trimmed.slice(idx + 1);
+    let value = trimmed.slice(idx + 1);
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
     if (!process.env[key]) process.env[key] = value;
+  }
+}
+
+/** Drop stale 1:1 session keys after a second WhatsApp connection (e.g. test script). */
+async function healSignalSessions() {
+  if (process.env.FLIGHT_DEALS_SKIP_SESSION_HEAL === "true") return;
+  try {
+    const files = await readdir(AUTH_DIR);
+    let removed = 0;
+    for (const name of files) {
+      if (name.startsWith("session-") && name.endsWith(".json")) {
+        await unlink(path.join(AUTH_DIR, name));
+        removed += 1;
+      }
+    }
+    if (removed) log.info({ removed }, "Healed WhatsApp signal sessions");
+  } catch (error) {
+    log.warn({ error }, "Session heal skipped");
   }
 }
 
@@ -72,6 +99,9 @@ let sock = null;
 /** @type {Map<string, { priceUsd: number, at: number, id: string }>} */
 let seenDeals = new Map();
 let scanRunning = false;
+let scanQueued = false;
+let startupScanDone = false;
+let whatsappConnected = false;
 let lastScanAt = 0;
 let lastScanFound = 0;
 let lastScanSent = 0;
@@ -352,38 +382,80 @@ function sameChatId(a, b) {
 function extractMessageText(msg) {
   const m = msg?.message;
   if (!m) return "";
+  const inner =
+    m.ephemeralMessage?.message ||
+    m.viewOnceMessage?.message ||
+    m.viewOnceMessageV2?.message ||
+    m;
   return (
-    m.conversation ||
-    m.extendedTextMessage?.text ||
-    m.imageMessage?.caption ||
-    m.videoMessage?.caption ||
-    m.buttonsResponseMessage?.selectedDisplayText ||
-    m.listResponseMessage?.title ||
-    m.templateButtonReplyMessage?.selectedDisplayText ||
+    inner.conversation ||
+    inner.extendedTextMessage?.text ||
+    inner.imageMessage?.caption ||
+    inner.videoMessage?.caption ||
+    inner.buttonsResponseMessage?.selectedDisplayText ||
+    inner.listResponseMessage?.title ||
+    inner.templateButtonReplyMessage?.selectedDisplayText ||
     ""
   );
 }
 
 function buildStatusReply() {
   const status = getSearchStatus();
+  const thCfg = thailandWatchConfig();
   const ago = lastScanAt
     ? `${Math.max(1, Math.round((Date.now() - lastScanAt) / 60_000))} דק׳`
     : "עדיין לא";
   const th = status.thailand;
   return [
-    "כן ✅ *מחפש*",
+    whatsappConnected ? "כן ✅ *מחפש*" : "⏳ *מתחבר…*",
     "",
     "רק *תאילנד* · *אמירטס* · *מזוודה כלולה*",
-    "תאריכים: *10/02/2027 – 10/03/2027*",
-    "לו״ז: *יציאה 15:10→07:35* · *חזרה בלילה*",
+    `תאריכים: *${formatDate(thCfg.outbound)} – ${formatDate(thCfg.returnDate)}*`,
+    `לו״ז: *יציאה ${thCfg.outboundDep}→${thCfg.outboundArr}* · *חזרה בלילה*`,
     th?.lowestIls != null || th?.lowest != null
       ? `מחיר נמוך כרגע: *₪${th.lowestIls ?? th.lowest}*`
       : "עדיין אין מחיר במאגר",
     `סריקה אחרונה: ${ago} | נמצאו ${lastScanFound} | נשלחו חדשים ${lastScanSent}`,
-    "כשהמחיר יירד — אשלח לכאן.",
+    scanRunning ? "🔄 מריץ חיפוש עכשיו…" : "כשהמחיר יירד — אשלח לכאן.",
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+async function sendScanFollowUp(chatId) {
+  if (!sock || !chatId) return;
+  const th = getSearchStatus().thailand;
+  if (th?.lowestIls == null && th?.lowest == null) return;
+  const price = th.lowestIls ?? th.lowest;
+  await sock.sendMessage(chatId, {
+    text: [
+      "🔎 *עדכון לאחר חיפוש*",
+      `מחיר נמוך: *₪${price}* · אמירטס · מזוודה · 15:10→07:35`,
+    ].join("\n"),
+  });
+}
+
+async function processTriggerFile() {
+  if (!existsSync(TRIGGER_FILE) || !sock || !groupJid) return;
+  try {
+    const raw = JSON.parse(await readFile(TRIGGER_FILE, "utf8"));
+    await unlink(TRIGGER_FILE);
+    const text =
+      raw.text ||
+      "✅ *הודעת בדיקה*\n\nהבוט פעיל ומחובר.";
+    await sendToGroup(text);
+    log.info("Sent queued test message");
+  } catch (error) {
+    log.warn({ error }, "Failed to process test trigger");
+  }
+}
+
+function startTriggerWatcher() {
+  setInterval(() => {
+    processTriggerFile().catch((error) => {
+      log.warn({ error }, "Trigger watcher error");
+    });
+  }, 5_000);
 }
 
 async function handleIncomingMessage(msg) {
@@ -424,10 +496,12 @@ async function handleIncomingMessage(msg) {
     await sock.sendMessage(chatId, { text: reply }, { quoted: msg });
     log.info({ from: chatId, body }, "Replied to status check command");
 
-    // Kick a refresh scan so status checks can surface new windows/deals.
-    runScan({ forceRefresh: true, reason: "status-command" }).catch((error) => {
-      log.warn({ error }, "Status-triggered scan failed");
-    });
+    // Kick a refresh scan so status checks surface fresh SerpAPI prices.
+    runScan({ forceRefresh: true, reason: "status-command" })
+      .then(() => sendScanFollowUp(chatId))
+      .catch((error) => {
+        log.warn({ error }, "Status-triggered scan failed");
+      });
   } catch (error) {
     log.warn({ error }, "Failed to handle incoming message");
   }
@@ -481,7 +555,7 @@ async function onGroupReady() {
         "מחפש *רק* טיסות תאילנד באמירטס *עם מזוודה כלולה*.",
         "לו״ז: יציאה *15:10→07:35* · חזרה *בלילה*.",
         "תאריכים קבועים: 10/02/2027–10/03/2027.",
-        "כתבו *בוט מחפש?* לבדיקת סטטוס.",
+        "כתבו *בוט מחפש* או *בוט מחפש?* לסטטוס וחיפוש מיידי.",
         "כשהמחיר יירד — אשלח לכאן.",
         cfg.demoMode ? "\n_מצב דמו פעיל._" : "",
       ]
@@ -492,7 +566,12 @@ async function onGroupReady() {
     await saveState();
   }
 
-  await runScan({ forceRefresh: true, reason: "group-ready" });
+  await processTriggerFile();
+
+  if (!startupScanDone) {
+    startupScanDone = true;
+    await runScan({ forceRefresh: true, reason: "group-ready" });
+  }
 }
 
 async function runScan({ forceRefresh = false, reason = "cron" } = {}) {
@@ -502,7 +581,8 @@ async function runScan({ forceRefresh = false, reason = "cron" } = {}) {
   }
 
   if (scanRunning) {
-    log.info("Scan already running, skipping");
+    if (forceRefresh || reason === "status-command") scanQueued = true;
+    log.info("Scan already running — %s", scanQueued ? "queued follow-up" : "skipping");
     return;
   }
 
@@ -554,20 +634,50 @@ async function runScan({ forceRefresh = false, reason = "cron" } = {}) {
     log.error({ error }, "Scan failed");
   } finally {
     scanRunning = false;
+    if (scanQueued) {
+      scanQueued = false;
+      setTimeout(() => {
+        runScan({ forceRefresh: true, reason: "queued" }).catch((error) => {
+          log.warn({ error }, "Queued scan failed");
+        });
+      }, 1_000);
+    }
   }
 }
 
 async function connectWhatsApp() {
   await mkdir(AUTH_DIR, { recursive: true });
+
+  if (sock) {
+    try {
+      sock.end(undefined);
+    } catch {
+      // ignore
+    }
+    sock = null;
+  }
+
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
   const { version } = await fetchLatestBaileysVersion();
   const phone = (process.env.WHATSAPP_PHONE ?? "").replace(/\D/g, "");
+  const silent = pino({ level: "silent" });
+  const retryCache = {
+    _data: new Map(),
+    get: (key) => retryCache._data.get(key),
+    set: (key, value) => retryCache._data.set(key, value),
+    del: (key) => retryCache._data.delete(key),
+  };
 
   sock = makeWASocket({
     version,
-    auth: state,
-    logger: pino({ level: "silent" }),
+    auth: {
+      creds: state.creds,
+      keys: makeCacheableSignalKeyStore(state.keys, silent),
+    },
+    logger: silent,
     printQRInTerminal: false,
+    markOnlineOnConnect: false,
+    msgRetryCounterCache: retryCache,
   });
 
   sock.ev.on("creds.update", saveCreds);
@@ -575,7 +685,11 @@ async function connectWhatsApp() {
     // Baileys may deliver live group texts as "notify" or "append".
     if (type !== "notify" && type !== "append") return;
     for (const msg of messages) {
-      await handleIncomingMessage(msg);
+      try {
+        await handleIncomingMessage(msg);
+      } catch (error) {
+        log.warn({ error }, "Message handler error");
+      }
     }
   });
 
@@ -611,13 +725,21 @@ async function connectWhatsApp() {
     }
 
     if (connection === "open") {
+      whatsappConnected = true;
       log.info("WhatsApp connected");
       if (groupJid) {
-        onGroupReady();
+        onGroupReady().catch((error) => {
+          log.warn({ error }, "onGroupReady failed");
+        });
       } else if (cfg.groupName) {
         resolveGroupByName().then((found) => {
-          if (found) onGroupReady();
-          else startGroupPolling();
+          if (found) {
+            onGroupReady().catch((error) => {
+              log.warn({ error }, "onGroupReady failed");
+            });
+          } else {
+            startGroupPolling();
+          }
         });
       } else {
         console.error("❌ הגדר WHATSAPP_GROUP_NAME או WHATSAPP_GROUP_CHAT_ID");
@@ -625,6 +747,7 @@ async function connectWhatsApp() {
     }
 
     if (connection === "close") {
+      whatsappConnected = false;
       const status = lastDisconnect?.error?.output?.statusCode;
       const shouldReconnect = status !== DisconnectReason.loggedOut;
       log.warn({ status }, "WhatsApp disconnected");
@@ -634,6 +757,13 @@ async function connectWhatsApp() {
 }
 
 async function main() {
+  process.on("uncaughtException", (error) => {
+    log.error({ error }, "uncaughtException — keeping bot alive");
+  });
+  process.on("unhandledRejection", (error) => {
+    log.error({ error }, "unhandledRejection — keeping bot alive");
+  });
+
   await loadEnvFile();
   cfg = envConfig();
   groupJid = cfg.groupJidEnv;
@@ -653,12 +783,24 @@ async function main() {
 
   await loadSeen();
   await loadState();
+  await healSignalSessions();
+  startTriggerWatcher();
   await connectWhatsApp();
 
   cron.schedule(cfg.cronExpr, () => {
     log.info("Cron triggered (%s)", cfg.cronExpr);
-    runScan({ reason: "cron" });
+    runScan({ reason: "cron" }).catch((error) => {
+      log.warn({ error }, "Cron scan failed");
+    });
   });
+
+  // Heartbeat — confirms process is alive between cron ticks.
+  setInterval(() => {
+    log.info(
+      { connected: whatsappConnected, groupJid: groupJid || null },
+      "Bot heartbeat",
+    );
+  }, 30 * 60_000);
 
   log.info("Flight deals bot started — cron: %s", cfg.cronExpr);
 }
