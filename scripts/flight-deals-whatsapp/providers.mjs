@@ -429,6 +429,7 @@ export function getSearchStatus() {
   const windows = preferredDateWindows();
   const next = windows[weekendRotate % Math.max(windows.length, 1)];
   const th = thailandWatchConfig();
+  const top = thailandCache.deals?.[0] ?? null;
   return {
     cachedDeals: serpCache.deals?.length ?? 0,
     cacheAgeMin: serpCache.at
@@ -444,8 +445,13 @@ export function getSearchStatus() {
       airports: th.airports,
       maxPriceIls: th.maxPriceIls,
       cached: thailandCache.deals?.length ?? 0,
-      lowestIls: thailandCache.deals?.[0]?.priceIls ?? null,
-      lowest: thailandCache.deals?.[0]?.priceIls ?? null,
+      lowestIls: top?.priceIls ?? null,
+      lowest: top?.priceIls ?? null,
+      scheduleLabelHe: top?.scheduleLabelHe ?? null,
+      baggageLabelHe: top?.baggageLabelHe ?? null,
+      airlineLabelHe: top?.airlineLabelHe ?? null,
+      bookingUrl: top?.bookingUrl ?? null,
+      deal: top,
     },
   };
 }

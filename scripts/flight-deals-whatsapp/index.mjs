@@ -423,7 +423,10 @@ function extractMessageText(msg) {
   );
 }
 
-function buildStatusReply() {
+let lastStatusCommandAt = 0;
+const STATUS_COMMAND_COOLDOWN_MS = 12_000;
+
+function buildStatusReply({ searching = false } = {}) {
   const status = getSearchStatus();
   const thCfg = thailandWatchConfig();
   const ago = lastScanAt
@@ -439,24 +442,70 @@ function buildStatusReply() {
     th?.lowestIls != null || th?.lowest != null
       ? `מחיר נמוך כרגע: *₪${th.lowestIls ?? th.lowest}*`
       : "עדיין אין מחיר במאגר",
-    `סריקה אחרונה: ${ago} | נמצאו ${lastScanFound} | נשלחו חדשים ${lastScanSent}`,
-    scanRunning ? "🔄 מריץ חיפוש עכשיו…" : "כשהמחיר יירד — אשלח לכאן.",
+    th?.scheduleLabelHe ? `🕕 ${th.scheduleLabelHe}` : "",
+    th?.baggageLabelHe ? `🧳 ${th.baggageLabelHe}` : "",
+    `סריקה אחרונה: ${ago}`,
+    searching || scanRunning
+      ? "🔄 *מריץ חיפוש עכשיו ב-Google Flights…*"
+      : "כתבו שוב *בוט מחפש* לעדכון מחיר.",
   ]
     .filter(Boolean)
     .join("\n");
 }
 
-async function sendScanFollowUp(chatId) {
-  if (!sock || !chatId) return;
-  const th = getSearchStatus().thailand;
-  if (th?.lowestIls == null && th?.lowest == null) return;
-  const price = th.lowestIls ?? th.lowest;
-  await sock.sendMessage(chatId, {
-    text: [
-      "🔎 *עדכון לאחר חיפוש*",
-      `מחיר נמוך: *₪${price}* · אמירטס · מזוודה · 15:10→07:35`,
-    ].join("\n"),
-  });
+async function sendCurrentDealResult(chatId, deals = null) {
+  if (!sock || !chatId) return false;
+  const status = getSearchStatus();
+  const deal = deals?.[0] || status.thailand?.deal;
+  if (!deal) {
+    await sock.sendMessage(chatId, {
+      text: "🔎 *תוצאת חיפוש*\nלא נמצאה כרגע טיסת אמירטס עם מזוודה בלו״ז המבוקש.",
+    });
+    return false;
+  }
+
+  const caption = [
+    "🔎 *תוצאת חיפוש עכשיו*",
+    "",
+    formatDealMessage(deal),
+  ].join("\n");
+
+  try {
+    await sock.sendMessage(chatId, { text: caption });
+    log.info({ priceIls: deal.priceIls, chatId }, "Sent current deal result");
+    return true;
+  } catch (error) {
+    log.warn({ error }, "Failed to send current deal result");
+    return false;
+  }
+}
+
+async function runStatusSearch(chatId) {
+  try {
+    await sock.sendMessage(chatId, {
+      text: buildStatusReply({ searching: true }),
+    });
+  } catch (error) {
+    log.warn({ error }, "Failed to send status ack");
+  }
+
+  try {
+    const deals = await runScan({
+      forceRefresh: true,
+      reason: "status-command",
+      reportCurrent: true,
+    });
+    await sendCurrentDealResult(chatId, deals);
+  } catch (error) {
+    log.warn({ error }, "Status-triggered scan failed");
+    try {
+      await sock.sendMessage(chatId, {
+        text: "⚠️ החיפוש נכשל כרגע. נסו שוב בעוד דקה.",
+      });
+    } catch {
+      // ignore
+    }
+  }
 }
 
 async function processTriggerFile() {
@@ -535,15 +584,20 @@ async function handleIncomingMessage(msg, upsertType = "notify") {
 
     if (!isStatusCheckCommand(body)) return;
 
-    const reply = buildStatusReply();
-    await sock.sendMessage(chatId, { text: reply }, { quoted: msg });
-    log.info({ from: chatId, body, upsertType }, "Replied to status check command");
+    // Ignore stale history echoes after reconnect.
+    if (upsertType === "append" && !isRecentMessage(msg)) return;
 
-    runScan({ forceRefresh: true, reason: "status-command" })
-      .then(() => sendScanFollowUp(chatId))
-      .catch((error) => {
-        log.warn({ error }, "Status-triggered scan failed");
-      });
+    const now = Date.now();
+    if (now - lastStatusCommandAt < STATUS_COMMAND_COOLDOWN_MS) {
+      log.info({ body }, "Status command cooldown — skipping duplicate");
+      return;
+    }
+    lastStatusCommandAt = now;
+
+    log.info({ from: chatId, body, upsertType }, "Status command received");
+    runStatusSearch(chatId).catch((error) => {
+      log.warn({ error }, "Status search failed");
+    });
   } catch (error) {
     log.warn({ error }, "Failed to handle incoming message");
   }
@@ -616,27 +670,32 @@ async function onGroupReady() {
   }
 }
 
-async function runScan({ forceRefresh = false, reason = "cron" } = {}) {
+async function runScan({
+  forceRefresh = false,
+  reason = "cron",
+  reportCurrent = false,
+} = {}) {
   if (!groupJid) {
     log.info("No group yet — skipping scan");
-    return;
+    return [];
   }
 
   if (scanRunning) {
     if (forceRefresh || reason === "status-command") scanQueued = true;
     log.info("Scan already running — %s", scanQueued ? "queued follow-up" : "skipping");
-    return;
+    const cached = getSearchStatus().thailand?.deal;
+    return cached ? [cached] : [];
   }
 
   if (!resolveProvider()) {
     log.warn("No flight provider configured");
-    return;
+    return [];
   }
 
   scanRunning = true;
+  let deals = [];
 
   try {
-    // If everything in cache was already sent, force the next date windows.
     const shouldForce =
       forceRefresh ||
       (Date.now() - lastForceRefreshAt > 90 * 60_000 &&
@@ -651,27 +710,38 @@ async function runScan({ forceRefresh = false, reason = "cron" } = {}) {
       reason,
       shouldForce ? ", force-refresh" : "",
     );
-    const deals = await fetchDeals({ forceRefresh: shouldForce });
+    deals = await fetchDeals({ forceRefresh: shouldForce });
     lastScanFound = deals.length;
     log.info("Found %d Thailand Emirates schedule options", deals.length);
 
     let sent = 0;
-    for (const deal of deals) {
-      if (!shouldNotifyDeal(deal)) continue;
-      markDealSeen(deal);
-      const ok = await sendToGroup(deal);
-      if (ok) {
-        sent += 1;
-        log.info({ deal: deal.id }, "Sent deal to group");
+    // Cron: only alert on new/drop. Status command reports the result separately.
+    if (!reportCurrent) {
+      for (const deal of deals) {
+        if (!shouldNotifyDeal(deal)) continue;
+        markDealSeen(deal);
+        const ok = await sendToGroup(deal);
+        if (ok) {
+          sent += 1;
+          log.info({ deal: deal.id }, "Sent deal to group");
+        }
+      }
+    } else if (deals[0]) {
+      const prev = seenDeals.get(dealFingerprint(deals[0]));
+      if (!prev) markDealSeen(deals[0]);
+      else if (
+        Number.isFinite(deals[0].priceIls) &&
+        Number.isFinite(prev.priceIls) &&
+        deals[0].priceIls < prev.priceIls
+      ) {
+        markDealSeen(deals[0]);
       }
     }
 
     lastScanSent = sent;
     lastScanAt = Date.now();
     await saveSeen();
-    log.info("Scan done — %d new messages sent", sent);
-
-    // Follow-up Europe window rolling no longer needed.
+    log.info("Scan done — %d new alert messages sent", sent);
   } catch (error) {
     log.error({ error }, "Scan failed");
   } finally {
@@ -685,6 +755,8 @@ async function runScan({ forceRefresh = false, reason = "cron" } = {}) {
       }, 1_000);
     }
   }
+
+  return deals;
 }
 
 function normalizeWhatsAppPhone(raw) {
