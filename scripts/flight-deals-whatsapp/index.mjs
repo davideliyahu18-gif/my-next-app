@@ -104,6 +104,7 @@ let scanQueued = false;
 let startupScanDone = false;
 let whatsappConnected = false;
 let pairingRefreshTimer = null;
+let pairingStarted = false;
 /** @type {Map<string, import("@whiskeysockets/baileys").proto.IMessage>} */
 const messageStore = new Map();
 let lastScanAt = 0;
@@ -697,50 +698,41 @@ function normalizeWhatsAppPhone(raw) {
 
 function printPairingInstructions(code, phone) {
   console.log("\n════════════════════════════════════════");
-  console.log("🔑 חיבור בלי QR — קוד מספר");
+  console.log("🔑 חיבור בלי QR — קוד בלבד");
   console.log("════════════════════════════════════════");
-  console.log(`מספר: ${phone}`);
-  console.log(`קוד:  ${code}`);
+  console.log(`חשבון: ${phone}`);
+  console.log(`קוד:   ${code}`);
   console.log("");
-  console.log("בטלפון:");
+  console.log("בטלפון (0549676816):");
   console.log("1. WhatsApp → הגדרות → מכשירים מקושרים");
-  console.log("2. מחק מכשיר ישן של הבוט (אם יש)");
-  console.log("3. קשר מכשיר → קישור עם מספר טלפון");
-  console.log(`4. הזן המספר ${phone} ואז את הקוד ${code}`);
+  console.log("2. מחק מכשירים ישנים של הבוט");
+  console.log("3. קשר מכשיר → מופיע QR");
+  console.log("4. למטה לחץ: קישור באמצעות מספר טלפון במקום");
+  console.log(`5. הזן רק את הקוד: ${code}  (8 תווים, אותיות+מספרים)`);
   console.log("");
-  console.log("(הקוד מתחדש כל ~2 דקות עד שמתחבר)");
+  console.log("⚠️ אל תחכה — הקוד תקף דקות ספורות בלבד");
+  console.log("⚠️ אם אין כפתור 'מספר טלפון במקום' — חייבים QR ממסך אחר");
   console.log("════════════════════════════════════════\n");
 }
 
-async function startPairingCodeFlow(activeSock, phone, registered) {
-  if (registered || !phone) return;
+async function startPairingCodeFlow(activeSock, phone, creds) {
+  if (creds?.registered || !phone) return;
 
-  const requestCode = async () => {
-    const code = await activeSock.requestPairingCode(phone);
-    printPairingInstructions(code, phone);
-    return code;
-  };
+  if (pairingStarted && creds?.pairingCode) {
+    printPairingInstructions(creds.pairingCode, phone);
+    return;
+  }
 
+  pairingStarted = true;
   try {
-    await requestCode();
+    const code =
+      creds?.pairingCode || (await activeSock.requestPairingCode(phone));
+    printPairingInstructions(code, phone);
   } catch (error) {
+    pairingStarted = false;
     log.warn({ error }, "Pairing code request failed");
     console.error("❌ לא הצלחתי ליצור קוד — בדוק ש-WHATSAPP_PHONE מוגדר נכון");
   }
-
-  if (pairingRefreshTimer) clearInterval(pairingRefreshTimer);
-  pairingRefreshTimer = setInterval(async () => {
-    if (whatsappConnected) {
-      clearInterval(pairingRefreshTimer);
-      pairingRefreshTimer = null;
-      return;
-    }
-    try {
-      await requestCode();
-    } catch (error) {
-      log.warn({ error }, "Pairing code refresh failed");
-    }
-  }, 90_000);
 }
 
 async function connectWhatsApp() {
@@ -807,12 +799,11 @@ async function connectWhatsApp() {
   let pairingRequested = false;
 
   if (pairingOnly && !state.creds.registered && phone) {
-    // Baileys pairing mode — no QR; code only (see README pairing section).
     setTimeout(() => {
-      startPairingCodeFlow(sock, phone, state.creds.registered).catch((error) => {
+      startPairingCodeFlow(sock, phone, state.creds).catch((error) => {
         log.warn({ error }, "Pairing flow failed");
       });
-    }, 2_000);
+    }, 3_000);
   }
 
   sock.ev.on("connection.update", async (update) => {
@@ -874,9 +865,12 @@ async function connectWhatsApp() {
     if (connection === "close") {
       whatsappConnected = false;
       const status = lastDisconnect?.error?.output?.statusCode;
-      const shouldReconnect = status !== DisconnectReason.loggedOut;
-      log.warn({ status }, "WhatsApp disconnected");
-      if (shouldReconnect) setTimeout(connectWhatsApp, 5_000);
+      const awaitingPairing =
+        pairingOnly && sock?.authState?.creds && !sock.authState.creds.registered;
+      const shouldReconnect =
+        status !== DisconnectReason.loggedOut && !awaitingPairing;
+      log.warn({ status, awaitingPairing }, "WhatsApp disconnected");
+      if (shouldReconnect) setTimeout(connectWhatsApp, 8_000);
     }
   });
 }
