@@ -184,16 +184,64 @@ function acquireInstanceLock() {
   });
 }
 
-function rememberHandledMessage(msg) {
+function wasHandledMessage(msg) {
   const id = msg?.key?.id;
   if (!id) return false;
-  if (handledMsgIds.has(id)) return true;
+  return handledMsgIds.has(id);
+}
+
+function markHandledMessage(msg) {
+  const id = msg?.key?.id;
+  if (!id) return;
   handledMsgIds.add(id);
   if (handledMsgIds.size > 800) {
     const first = handledMsgIds.keys().next().value;
     handledMsgIds.delete(first);
   }
-  return false;
+}
+
+let decryptFailCount = 0;
+let decryptFailWindowStart = 0;
+
+function noteDecryptFailure(chatId) {
+  const now = Date.now();
+  if (now - decryptFailWindowStart > 5 * 60_000) {
+    decryptFailWindowStart = now;
+    decryptFailCount = 0;
+  }
+  decryptFailCount += 1;
+  log.warn(
+    { chatId, decryptFailCount },
+    "Message arrived undecrypted — will retry; if this keeps happening sessions will auto-repair",
+  );
+  // After many failures, clear Signal sessions (keep creds) so keys re-handshake.
+  if (decryptFailCount >= 12) {
+    decryptFailCount = 0;
+    repairSignalSessions("decrypt-threshold").catch((error) => {
+      log.warn({ error }, "Auto session repair failed");
+    });
+  }
+}
+
+/** Clear corrupted Signal sessions without unlinking WhatsApp (keeps creds.json). */
+async function repairSignalSessions(reason = "manual") {
+  try {
+    const files = await readdir(AUTH_DIR);
+    let removed = 0;
+    for (const name of files) {
+      if (
+        name.startsWith("session-") ||
+        name.startsWith("sender-key-") ||
+        name.startsWith("sender-key-memory-")
+      ) {
+        await unlink(path.join(AUTH_DIR, name));
+        removed += 1;
+      }
+    }
+    log.warn({ reason, removed }, "Repaired Signal sessions (creds kept)");
+  } catch (error) {
+    log.warn({ error, reason }, "Session repair error");
+  }
 }
 
 const AIRPORT_LABELS = {
@@ -860,34 +908,46 @@ async function handlePersonalDm(chatId, body, pushName) {
 async function handleIncomingMessage(msg, upsertType = "notify") {
   try {
     if (msg.key?.fromMe) return;
-    if (rememberHandledMessage(msg)) return;
+    // Important: do NOT mark handled before decrypt succeeds.
+    // Failed decrypts often retry with the same id — marking early drops them forever.
+    if (wasHandledMessage(msg)) return;
 
     const chatId = msg.key?.remoteJid;
     if (!chatId) return;
 
     if (!msg.message) {
-      if (msg.messageStubType != null && chatId.endsWith("@g.us")) {
-        log.warn(
-          { chatId, stub: msg.messageStubType, upsertType },
-          "Group message could not be decrypted — run npm run flight-deals:repair-auth",
-        );
+      // Recent undecrypted messages — ask WA to retry; don't mark handled.
+      if (isRecentMessage(msg)) {
+        noteDecryptFailure(chatId);
+        try {
+          // Nudge retry pipeline (Baileys uses getMessage + msgRetryCounterCache).
+          if (sock?.readMessages && msg.key) {
+            await sock.readMessages([msg.key]).catch(() => {});
+          }
+        } catch {
+          // ignore
+        }
       }
       return;
     }
 
     storeMessage(msg);
 
-    // Only live notifies for commands. Append after reconnect is usually history.
-    if (upsertType !== "notify") return;
-
     const body = extractMessageText(msg);
     if (!body) return;
+
+    // Live notifies always. After reconnect, fresh messages sometimes arrive as append.
+    const live =
+      upsertType === "notify" ||
+      (upsertType === "append" && isRecentMessage(msg));
+    if (!live) return;
 
     const isGroup = chatId.endsWith("@g.us");
 
     // Private personal bot (DM)
     if (!isGroup) {
-      log.info({ from: chatId, body }, "Personal DM received");
+      markHandledMessage(msg);
+      log.info({ from: chatId, body, upsertType }, "Personal DM received");
       await handlePersonalDm(chatId, body, msg.pushName);
       return;
     }
@@ -905,14 +965,19 @@ async function handleIncomingMessage(msg, upsertType = "notify") {
       log.info({ groupJid }, "Learned group JID from incoming message");
     }
 
-    if (!isStatusCheckCommand(body)) return;
+    if (!isStatusCheckCommand(body)) {
+      // Non-command group traffic — don't mark, cheap to ignore again.
+      return;
+    }
 
     const now = Date.now();
     if (now - lastStatusCommandAt < STATUS_COMMAND_COOLDOWN_MS) {
+      markHandledMessage(msg);
       log.info({ body }, "Status command cooldown — skipping duplicate");
       return;
     }
     lastStatusCommandAt = now;
+    markHandledMessage(msg);
 
     log.info({ from: chatId, body, upsertType }, "Status command received");
     runStatusSearch(chatId).catch((error) => {
@@ -1150,13 +1215,20 @@ async function startPairingCodeFlow(activeSock, phone, creds) {
   }
 }
 
-function scheduleReconnect(delayMs = 8_000) {
+function scheduleReconnect(delayMs = 8_000, { repairSessions = false } = {}) {
   if (reconnectTimer) clearTimeout(reconnectTimer);
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
-    connectWhatsApp().catch((error) => {
+    (async () => {
+      if (repairSessions || reconnectFailures >= 2) {
+        await repairSignalSessions(
+          repairSessions ? "forced-reconnect" : "reconnect-backoff",
+        );
+      }
+      await connectWhatsApp();
+    })().catch((error) => {
       log.error({ error }, "Reconnect failed");
-      scheduleReconnect(12_000);
+      scheduleReconnect(12_000, { repairSessions: true });
     });
   }, delayMs);
 }
@@ -1205,15 +1277,20 @@ async function connectWhatsApp() {
       browser: Browsers.ubuntu("Chrome"),
       logger: silent,
       printQRInTerminal: false,
-      markOnlineOnConnect: false,
+      markOnlineOnConnect: true,
       emitOwnEvents: false,
       // Needed so group sender keys distribute; history sync stays off.
       fireInitQueries: true,
       syncFullHistory: false,
       shouldSyncHistoryMessage: () => false,
-      maxMsgRetryCount: 5,
+      maxMsgRetryCount: 8,
       msgRetryCounterCache: retryCache,
-      getMessage: async (key) => messageStore.get(msgKeyString(key)),
+      getMessage: async (key) => {
+        const cached = messageStore.get(msgKeyString(key));
+        if (cached) return cached;
+        // Returning undefined makes Baileys ask the phone to resend ciphertext.
+        return undefined;
+      },
     });
 
     sock.ev.on("creds.update", saveCreds);
@@ -1224,6 +1301,26 @@ async function connectWhatsApp() {
           await handleIncomingMessage(msg, type);
         } catch (error) {
           log.warn({ error }, "Message handler error");
+        }
+      }
+    });
+    // Some retries land as message updates with newly filled content.
+    sock.ev.on("messages.update", async (updates) => {
+      if (generation !== connectGeneration) return;
+      for (const upd of updates) {
+        try {
+          if (!upd?.update?.message || !upd?.key) continue;
+          await handleIncomingMessage(
+            {
+              key: upd.key,
+              message: upd.update.message,
+              messageTimestamp: Math.floor(Date.now() / 1000),
+              pushName: upd.update.pushName,
+            },
+            "notify",
+          );
+        } catch (error) {
+          log.warn({ error }, "messages.update handler error");
         }
       }
     });
@@ -1259,6 +1356,7 @@ async function connectWhatsApp() {
       if (connection === "open") {
         whatsappConnected = true;
         reconnectFailures = 0;
+        decryptFailCount = 0;
         connecting = false;
         if (pairingRefreshTimer) {
           clearInterval(pairingRefreshTimer);
@@ -1266,6 +1364,15 @@ async function connectWhatsApp() {
         }
         console.log("\n✅ WhatsApp מחובר בהצלחה!\n");
         log.info("WhatsApp connected");
+        // Refresh group sender keys so group commands decrypt reliably.
+        if (groupJid) {
+          sock
+            .groupMetadata(groupJid)
+            .then(() => log.info({ groupJid }, "Refreshed group metadata/keys"))
+            .catch((error) =>
+              log.warn({ error }, "groupMetadata refresh failed"),
+            );
+        }
         if (groupJid) {
           onGroupReady().catch((error) => {
             log.warn({ error }, "onGroupReady failed");
