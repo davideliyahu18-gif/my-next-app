@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
  * Green API command listener for LIVE + VIP groups.
- * Polls receiveNotification, runs /api/fifa-bot/command, replies in-chat.
- * Tuned for low latency: short long-poll, queue drain, single reply (no "wait" ping).
+ *
+ * Important: when the linked WhatsApp phone types in the group, Green emits
+ * `outgoingMessageReceived` (not incoming). We must handle both.
  */
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -11,6 +12,10 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "../..");
+
+/** @type {Set<string>} */
+const answered = new Set();
+const ANSWERED_MAX = 400;
 
 async function loadEnv() {
   for (const name of [".env.local", ".env"]) {
@@ -51,7 +56,6 @@ function cfg() {
       process.env.FIFA_WHATSAPP_MAIN_CHAT_ID || "120363410010039894@g.us",
     vipChat:
       process.env.FIFA_WHATSAPP_VIP_CHAT_ID || "120363427162994986@g.us",
-    // Short long-poll: returns immediately when a webhook arrives.
     receiveTimeout: Number(process.env.FIFA_BOT_RECEIVE_TIMEOUT || "5"),
   };
 }
@@ -105,18 +109,44 @@ function looksLikeCommand(raw) {
 
 function extractText(body) {
   if (!body || typeof body !== "object") return "";
+  const md = body.messageData || body;
+  if (typeof md.textMessage === "string") return md.textMessage;
+  if (typeof md.extendedTextMessage?.text === "string") {
+    return md.extendedTextMessage.text;
+  }
+  if (typeof md.caption === "string") return md.caption;
+  if (md.textMessageData?.textMessage) return md.textMessageData.textMessage;
+  if (md.extendedTextMessageData?.text) return md.extendedTextMessageData.text;
   if (typeof body.textMessage === "string") return body.textMessage;
-  if (typeof body.extendedTextMessage?.text === "string") {
-    return body.extendedTextMessage.text;
-  }
-  if (typeof body.caption === "string") return body.caption;
-  if (body.messageData?.textMessageData?.textMessage) {
-    return body.messageData.textMessageData.textMessage;
-  }
-  if (body.messageData?.extendedTextMessageData?.text) {
-    return body.messageData.extendedTextMessageData.text;
-  }
   return "";
+}
+
+function messageId(body) {
+  return (
+    body?.idMessage ||
+    body?.messageData?.idMessage ||
+    body?.senderData?.idMessage ||
+    ""
+  );
+}
+
+function normalizeKey(text) {
+  return String(text || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[?!.,]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+function remember(id) {
+  if (!id) return false;
+  if (answered.has(id)) return true;
+  answered.add(id);
+  if (answered.size > ANSWERED_MAX) {
+    const first = answered.values().next().value;
+    answered.delete(first);
+  }
+  return false;
 }
 
 async function sendGreen(c, chatId, message) {
@@ -166,46 +196,38 @@ async function receiveOne(c, timeoutSec) {
   return JSON.parse(text);
 }
 
-/** @returns {Promise<boolean>} true if a command reply was sent */
-async function handleNotification(c, note) {
-  const receiptId = note?.receiptId;
-  const body = note?.body || note;
+function isCommandWebhook(typeWebhook) {
+  return (
+    typeWebhook === "incomingMessageReceived" ||
+    typeWebhook === "incomingMessage" ||
+    // Phone-typed messages on the linked device
+    typeWebhook === "outgoingMessageReceived" ||
+    typeWebhook === "outgoingMessage"
+  );
+}
+
+/** Skip our own API replies so we don't command-loop on bot output. */
+function isFromApi(body) {
+  const t = body?.typeWebhook || "";
+  if (t === "outgoingAPIMessageReceived") return true;
+  // Bot replies are multi-line / formatted — only exact short command keys fire.
+  return false;
+}
+
+async function replyToCommand(c, chatId, text, id) {
+  const key =
+    id ||
+    `${String(chatId).split("@")[0]}:${normalizeKey(text)}:${Math.floor(Date.now() / 90000)}`;
+  if (remember(key)) return;
+  console.log(
+    new Date().toISOString(),
+    "CMD",
+    chatId.slice(-14),
+    text.slice(0, 40),
+  );
+  const started = Date.now();
   try {
-    const typeWebhook = body?.typeWebhook || "";
-    if (
-      typeWebhook &&
-      typeWebhook !== "incomingMessageReceived" &&
-      typeWebhook !== "incomingMessage"
-    ) {
-      return false;
-    }
-
-    const senderData = body?.senderData || {};
-    const chatId =
-      senderData.chatId ||
-      body?.chatId ||
-      body?.messageData?.chatId ||
-      "";
-    if (!isOurGroup(c, chatId)) return false;
-
-    if (body?.messageData?.typeMessage === "reactionMessage") return false;
-
-    const text = extractText(body?.messageData || body);
-    if (!text || !looksLikeCommand(text)) return false;
-
-    console.log(
-      new Date().toISOString(),
-      "CMD",
-      chatId.slice(-14),
-      text.slice(0, 40),
-    );
-
-    // Delete + resolve reply in parallel, then one WhatsApp send (no "wait" ping).
-    const started = Date.now();
-    const [, reply] = await Promise.all([
-      deleteNotification(c, receiptId),
-      runCommand(c, text),
-    ]);
+    const reply = await runCommand(c, text);
     await sendGreen(c, chatId, reply);
     console.log(
       new Date().toISOString(),
@@ -213,27 +235,120 @@ async function handleNotification(c, note) {
       `${Date.now() - started}ms`,
       text.slice(0, 24),
     );
-    return true;
   } catch (error) {
     console.error(new Date().toISOString(), "command fail", String(error));
-    try {
-      const senderData = body?.senderData || {};
-      const chatId = senderData.chatId || body?.chatId || "";
-      if (isOurGroup(c, chatId)) {
-        await sendGreen(
-          c,
-          chatId,
-          "⚠️ לא הצלחתי לענות עכשיו. נסו שוב בעוד רגע.",
-        );
-      }
-    } catch {
-      /* ignore */
-    }
-    return false;
+    await sendGreen(
+      c,
+      chatId,
+      "⚠️ לא הצלחתי לענות עכשיו. נסו שוב בעוד רגע.",
+    ).catch(() => undefined);
+  }
+}
+
+async function handleNotification(c, note) {
+  const receiptId = note?.receiptId;
+  const body = note?.body || note;
+  try {
+    const typeWebhook = body?.typeWebhook || "";
+    if (typeWebhook && !isCommandWebhook(typeWebhook)) return;
+    if (isFromApi(body)) return;
+
+    const senderData = body?.senderData || {};
+    const chatId =
+      senderData.chatId ||
+      body?.chatId ||
+      body?.messageData?.chatId ||
+      "";
+    if (!isOurGroup(c, chatId)) return;
+
+    const typeMessage = body?.messageData?.typeMessage || body?.typeMessage;
+    if (typeMessage === "reactionMessage") return;
+
+    const text = extractText(body);
+    if (!text || !looksLikeCommand(text)) return;
+
+    // Ignore long bot-formatted messages that happen to contain a keyword.
+    if (text.includes("\n") && text.length > 40) return;
+
+    const id = messageId(body);
+    // Delete first so queue stays clear, then answer.
+    await deleteNotification(c, receiptId);
+    await replyToCommand(c, chatId, text, id);
   } finally {
-    // Idempotent if already deleted on the fast path.
     await deleteNotification(c, receiptId);
   }
+}
+
+function messageText(m) {
+  return (
+    m?.textMessage ||
+    m?.extendedTextMessage?.text ||
+    m?.caption ||
+    ""
+  );
+}
+
+function isFreshCommandMessage(m) {
+  const text = messageText(m);
+  if (!text || !looksLikeCommand(text)) return false;
+  // Skip bot-formatted replies.
+  if (text.includes("\n") && text.length > 40) return false;
+  const ts = Number(m.timestamp || 0);
+  if (ts && Date.now() / 1000 - ts > 120) return false;
+  return true;
+}
+
+/** Fallback when webhooks are delayed: scan recent phone/group messages. */
+async function pollRecentMessages(c) {
+  const endpoints = [
+    `lastIncomingMessages/${c.token}?minutes=5`,
+    `lastOutgoingMessages/${c.token}?minutes=5`,
+  ];
+  for (const ep of endpoints) {
+    const res = await fetch(`${c.apiHost}/waInstance${c.instance}/${ep}`, {
+      cache: "no-store",
+    });
+    if (!res.ok) continue;
+    const rows = await res.json().catch(() => []);
+    if (!Array.isArray(rows)) continue;
+    for (const m of rows) {
+      const chatId = m.chatId || m.chatId_ || "";
+      if (!isOurGroup(c, chatId)) continue;
+      if (!isFreshCommandMessage(m)) continue;
+      await replyToCommand(c, chatId, messageText(m), m.idMessage || "");
+    }
+  }
+
+  for (const chatId of [c.mainChat, c.vipChat]) {
+    const url = `${c.apiHost}/waInstance${c.instance}/getChatHistory/${c.token}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chatId, count: 6 }),
+      cache: "no-store",
+    });
+    if (!res.ok) continue;
+    const rows = await res.json().catch(() => []);
+    if (!Array.isArray(rows)) continue;
+    for (const m of rows.slice(0, 6)) {
+      if (!isFreshCommandMessage(m)) continue;
+      await replyToCommand(c, chatId, messageText(m), m.idMessage || "");
+    }
+  }
+}
+
+async function ensureGreenReceiveSettings(c) {
+  const url = `${c.apiHost}/waInstance${c.instance}/setSettings/${c.token}`;
+  await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      incomingWebhook: "yes",
+      outgoingMessageWebhook: "yes",
+      outgoingAPIMessageWebhook: "no",
+      outgoingWebhook: "yes",
+    }),
+  }).catch(() => undefined);
 }
 
 async function main() {
@@ -243,15 +358,29 @@ async function main() {
     console.error("Missing GREEN_API_INSTANCE / GREEN_API_TOKEN");
     process.exit(1);
   }
-  console.log("FIFA command listener starting (fast)");
+
+  await ensureGreenReceiveSettings(c);
+
+  console.log("FIFA command listener starting (fast + phone-outgoing)");
   console.log(" site=", c.site);
   console.log(" main=", c.mainChat);
   console.log(" vip=", c.vipChat);
   console.log(" receiveTimeout=", c.receiveTimeout);
 
+  // Parallel safety net every 2s — catches phone-typed commands quickly.
+  void (async () => {
+    for (;;) {
+      try {
+        await pollRecentMessages(c);
+      } catch (error) {
+        console.error(new Date().toISOString(), "recent poll", String(error));
+      }
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  })();
+
   for (;;) {
     try {
-      // Long-poll until something arrives, then drain the whole queue with timeout=0.
       let note = await receiveOne(c, c.receiveTimeout);
       while (note) {
         await handleNotification(c, note);
