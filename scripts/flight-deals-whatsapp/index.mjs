@@ -103,6 +103,7 @@ let scanRunning = false;
 let scanQueued = false;
 let startupScanDone = false;
 let whatsappConnected = false;
+let pairingRefreshTimer = null;
 /** @type {Map<string, import("@whiskeysockets/baileys").proto.IMessage>} */
 const messageStore = new Map();
 let lastScanAt = 0;
@@ -685,6 +686,63 @@ async function runScan({ forceRefresh = false, reason = "cron" } = {}) {
   }
 }
 
+function normalizeWhatsAppPhone(raw) {
+  let phone = String(raw ?? "").replace(/\D/g, "");
+  // Israeli local 05xxxxxxxx → 9725xxxxxxxx
+  if (phone.startsWith("0") && phone.length >= 9) {
+    phone = `972${phone.slice(1)}`;
+  }
+  return phone;
+}
+
+function printPairingInstructions(code, phone) {
+  console.log("\n════════════════════════════════════════");
+  console.log("🔑 חיבור בלי QR — קוד מספר");
+  console.log("════════════════════════════════════════");
+  console.log(`מספר: ${phone}`);
+  console.log(`קוד:  ${code}`);
+  console.log("");
+  console.log("בטלפון:");
+  console.log("1. WhatsApp → הגדרות → מכשירים מקושרים");
+  console.log("2. מחק מכשיר ישן של הבוט (אם יש)");
+  console.log("3. קשר מכשיר → קישור עם מספר טלפון");
+  console.log(`4. הזן המספר ${phone} ואז את הקוד ${code}`);
+  console.log("");
+  console.log("(הקוד מתחדש כל ~2 דקות עד שמתחבר)");
+  console.log("════════════════════════════════════════\n");
+}
+
+async function startPairingCodeFlow(activeSock, phone, registered) {
+  if (registered || !phone) return;
+
+  const requestCode = async () => {
+    const code = await activeSock.requestPairingCode(phone);
+    printPairingInstructions(code, phone);
+    return code;
+  };
+
+  try {
+    await requestCode();
+  } catch (error) {
+    log.warn({ error }, "Pairing code request failed");
+    console.error("❌ לא הצלחתי ליצור קוד — בדוק ש-WHATSAPP_PHONE מוגדר נכון");
+  }
+
+  if (pairingRefreshTimer) clearInterval(pairingRefreshTimer);
+  pairingRefreshTimer = setInterval(async () => {
+    if (whatsappConnected) {
+      clearInterval(pairingRefreshTimer);
+      pairingRefreshTimer = null;
+      return;
+    }
+    try {
+      await requestCode();
+    } catch (error) {
+      log.warn({ error }, "Pairing code refresh failed");
+    }
+  }, 90_000);
+}
+
 async function connectWhatsApp() {
   await mkdir(AUTH_DIR, { recursive: true });
 
@@ -699,7 +757,10 @@ async function connectWhatsApp() {
 
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
   const { version } = await fetchLatestBaileysVersion();
-  const phone = (process.env.WHATSAPP_PHONE ?? "").replace(/\D/g, "");
+  const pairingOnly = process.env.FLIGHT_DEALS_PAIRING_ONLY === "true";
+  const phone = normalizeWhatsAppPhone(
+    process.env.WHATSAPP_PAIR_PHONE || process.env.WHATSAPP_PHONE,
+  );
   const silent = pino({ level: "silent" });
   const retryCache = {
     _data: new Map(),
@@ -716,7 +777,7 @@ async function connectWhatsApp() {
     },
     browser: Browsers.ubuntu("Flight Deals Bot"),
     logger: silent,
-    printQRInTerminal: false,
+    printQRInTerminal: !pairingOnly,
     markOnlineOnConnect: false,
     emitOwnEvents: false,
     fireInitQueries: false,
@@ -745,10 +806,19 @@ async function connectWhatsApp() {
 
   let pairingRequested = false;
 
+  if (pairingOnly && !state.creds.registered && phone) {
+    // Baileys pairing mode — no QR; code only (see README pairing section).
+    setTimeout(() => {
+      startPairingCodeFlow(sock, phone, state.creds.registered).catch((error) => {
+        log.warn({ error }, "Pairing flow failed");
+      });
+    }, 2_000);
+  }
+
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
-    if (qr) {
+    if (qr && !pairingOnly) {
       const qrLink = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(qr)}`;
       const pairLink = `https://wa.me/`;
       console.log("\n════════════════════════════════════════");
@@ -776,6 +846,11 @@ async function connectWhatsApp() {
 
     if (connection === "open") {
       whatsappConnected = true;
+      if (pairingRefreshTimer) {
+        clearInterval(pairingRefreshTimer);
+        pairingRefreshTimer = null;
+      }
+      console.log("\n✅ WhatsApp מחובר בהצלחה!\n");
       log.info("WhatsApp connected");
       if (groupJid) {
         onGroupReady().catch((error) => {
