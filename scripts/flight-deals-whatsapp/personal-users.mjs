@@ -11,9 +11,9 @@ export const PERSONAL_USERS_FILE = path.join(__dirname, "personal-users.json");
 
 /** @typedef {{
  *  active: boolean,
- *  watch: "thailand",
+ *  watches: string[],
  *  maxPriceIls: number,
- *  lastAlertPriceIls: number|null,
+ *  lastAlertByWatch: Record<string, number|null>,
  *  joinedAt: number,
  *  updatedAt: number,
  *  pushName?: string|null,
@@ -22,8 +22,10 @@ export const PERSONAL_USERS_FILE = path.join(__dirname, "personal-users.json");
 /** @type {Map<string, PersonalUser>} */
 const users = new Map();
 
+const DEFAULT_WATCHES = ["thailand", "budapest"];
+
 function defaultMaxPriceIls() {
-  return Number(process.env.FLIGHT_DEALS_THAILAND_MAX_PRICE_ILS ?? "4500");
+  return Number(process.env.FLIGHT_DEALS_PERSONAL_MAX_PRICE_ILS ?? "4500");
 }
 
 function normalizeUserJid(jid) {
@@ -32,6 +34,29 @@ function normalizeUserJid(jid) {
   const base = String(jid).split(":")[0];
   if (base.includes("@")) return base;
   return `${base}@s.whatsapp.net`;
+}
+
+function normalizeWatches(value) {
+  const list = Array.isArray(value) ? value : DEFAULT_WATCHES;
+  const cleaned = [...new Set(list.map((w) => String(w).toLowerCase()).filter(Boolean))];
+  return cleaned.length ? cleaned : [...DEFAULT_WATCHES];
+}
+
+function normalizeLastAlertByWatch(raw, legacyPrice = null) {
+  const out = { thailand: null, budapest: null };
+  if (raw && typeof raw === "object") {
+    for (const key of Object.keys(out)) {
+      if (raw[key] == null) continue;
+      const n = Number(raw[key]);
+      out[key] = Number.isFinite(n) ? n : null;
+    }
+  }
+  // Migrate old single lastAlertPriceIls → thailand slot.
+  if (legacyPrice != null && out.thailand == null) {
+    const n = Number(legacyPrice);
+    if (Number.isFinite(n)) out.thailand = n;
+  }
+  return out;
 }
 
 export async function loadPersonalUsers() {
@@ -43,10 +68,12 @@ export async function loadPersonalUsers() {
       if (!jid || !user || typeof user !== "object") continue;
       users.set(normalizeUserJid(jid), {
         active: user.active !== false,
-        watch: "thailand",
+        watches: normalizeWatches(user.watches ?? user.watch),
         maxPriceIls: Number(user.maxPriceIls ?? defaultMaxPriceIls()),
-        lastAlertPriceIls:
-          user.lastAlertPriceIls == null ? null : Number(user.lastAlertPriceIls),
+        lastAlertByWatch: normalizeLastAlertByWatch(
+          user.lastAlertByWatch,
+          user.lastAlertPriceIls,
+        ),
         joinedAt: Number(user.joinedAt ?? Date.now()),
         updatedAt: Number(user.updatedAt ?? Date.now()),
         pushName: user.pushName ?? null,
@@ -75,14 +102,19 @@ export async function upsertPersonalUser(jid, patch = {}) {
   const prev = users.get(key);
   const next = {
     active: true,
-    watch: "thailand",
+    watches: [...DEFAULT_WATCHES],
     maxPriceIls: defaultMaxPriceIls(),
-    lastAlertPriceIls: null,
+    lastAlertByWatch: { thailand: null, budapest: null },
     joinedAt: Date.now(),
     updatedAt: Date.now(),
     pushName: null,
     ...(prev ?? {}),
     ...patch,
+    watches: normalizeWatches(patch.watches ?? prev?.watches),
+    lastAlertByWatch: normalizeLastAlertByWatch(
+      patch.lastAlertByWatch ?? prev?.lastAlertByWatch,
+      patch.lastAlertPriceIls ?? prev?.lastAlertPriceIls,
+    ),
     updatedAt: Date.now(),
   };
   users.set(key, next);
@@ -92,36 +124,44 @@ export async function upsertPersonalUser(jid, patch = {}) {
 
 export function personalHelpText() {
   return [
-    "👋 *בוט אישי לטיסות תאילנד*",
+    "👋 *בוט אישי לטיסות*",
     "",
     "אני מתריע *רק אליך בפרטי* — לא בקבוצה.",
     "",
     "*פקודות:*",
-    "• *התחל* — הצטרפות למעקב אמירטס + מזוודה",
+    "• *התחל* — הצטרפות למעקב",
     "• *עצור* — ביטול התראות",
     "• *סטטוס* / *מחפש* — חיפוש מחיר עכשיו",
     "• *תקציב 3200* — מקסימום בשקלים",
     "• *עזרה* — התפריט הזה",
     "",
     "מעקב קבוע:",
-    "🇹🇭 תאילנד · 10/02/2027–10/03/2027",
-    "🕕 יציאה 15:10→07:35 · חזרה בלילה",
-    "🧳 אמירטס + מזוודה כלולה",
+    "🇹🇭 תאילנד · 10/02/2027–10/03/2027 · אמירטס + מזוודה",
+    "🇭🇺 בודפשט · 11/11/2026–15/11/2026",
   ].join("\n");
 }
 
-export function personalStatusText(user, lowestIls = null) {
+export function personalStatusText(user, status = {}) {
   if (!user?.active) {
     return "אתה לא במעקב כרגע. כתוב *התחל* כדי להצטרף.";
   }
+  const th = status.thailand?.lowestIls;
+  const bud = status.budapest?.lowestIls;
   return [
     "✅ *מעקב אישי פעיל*",
-    "🇹🇭 תאילנד · אמירטס · מזוודה · 15:10→07:35",
     `💰 תקרת תקציב: *₪${Math.round(user.maxPriceIls)}*`,
-    user.lastAlertPriceIls != null
-      ? `🔔 התראה אחרונה: *₪${Math.round(user.lastAlertPriceIls)}*`
-      : "🔔 עדיין לא נשלחה התראת מחיר",
-    lowestIls != null ? `📉 מחיר נוכחי במעקב: *₪${Math.round(lowestIls)}*` : "",
+    "",
+    "🇹🇭 תאילנד · אמירטס · מזוודה · 15:10→07:35",
+    th != null ? `   מחיר נוכחי: *₪${Math.round(th)}*` : "   עדיין אין מחיר",
+    user.lastAlertByWatch?.thailand != null
+      ? `   התראה אחרונה: ₪${Math.round(user.lastAlertByWatch.thailand)}`
+      : "",
+    "",
+    "🇭🇺 בודפשט · 11/11/2026–15/11/2026",
+    bud != null ? `   מחיר נוכחי: *₪${Math.round(bud)}*` : "   עדיין אין מחיר",
+    user.lastAlertByWatch?.budapest != null
+      ? `   התראה אחרונה: ₪${Math.round(user.lastAlertByWatch.budapest)}`
+      : "",
     "",
     "כתוב *מחפש* לחיפוש מיידי.",
   ]
@@ -188,12 +228,19 @@ export function parsePersonalCommand(text) {
 
 export function shouldAlertPersonalUser(user, deal) {
   if (!user?.active || !deal) return false;
-  if (deal.watch !== "thailand") return false;
+  const watch = String(deal.watch ?? "");
+  if (!user.watches?.includes(watch)) return false;
   const price = Number(deal.priceIls ?? deal.priceUsd);
   if (!Number.isFinite(price) || price <= 0) return false;
   if (price > Number(user.maxPriceIls)) return false;
 
-  if (user.lastAlertPriceIls == null) return true;
-  const dropIls = Number(process.env.FLIGHT_DEALS_THAILAND_PRICE_DROP_ILS ?? "100");
-  return price <= Number(user.lastAlertPriceIls) - dropIls;
+  const last = user.lastAlertByWatch?.[watch];
+  if (last == null) return true;
+
+  const dropEnv =
+    watch === "budapest"
+      ? process.env.FLIGHT_DEALS_BUDAPEST_PRICE_DROP_ILS
+      : process.env.FLIGHT_DEALS_THAILAND_PRICE_DROP_ILS;
+  const dropIls = Number(dropEnv ?? (watch === "budapest" ? "50" : "100"));
+  return price <= Number(last) - dropIls;
 }

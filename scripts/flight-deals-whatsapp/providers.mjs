@@ -16,6 +16,7 @@ let skyCooldownUntil = 0;
 const placeCache = new Map();
 let serpCache = { at: 0, deals: null };
 let thailandCache = { at: 0, deals: null };
+let budapestCache = { at: 0, deals: null };
 
 /** Permanent Thailand watch — DD/MM/YYYY 10/02/2027–10/03/2027 */
 export function thailandWatchConfig() {
@@ -49,6 +50,25 @@ export function thailandWatchConfig() {
     outboundArr: process.env.FLIGHT_DEALS_THAILAND_OUT_ARR ?? "07:35",
     /** Return must leave Bangkok at night (20:00–05:59). */
     returnNightOnly: process.env.FLIGHT_DEALS_THAILAND_RETURN_NIGHT !== "false",
+  };
+}
+
+/** Permanent Budapest watch — 11/11/2026–15/11/2026 */
+export function budapestWatchConfig() {
+  const ilsToUsd = Number(process.env.FLIGHT_DEALS_ILS_TO_USD ?? "3.7");
+  const maxPriceIls = Number(
+    process.env.FLIGHT_DEALS_BUDAPEST_MAX_PRICE_ILS ?? "2000",
+  );
+  return {
+    outbound: process.env.FLIGHT_DEALS_BUDAPEST_OUTBOUND ?? "2026-11-11",
+    returnDate: process.env.FLIGHT_DEALS_BUDAPEST_RETURN ?? "2026-11-15",
+    airports: String(process.env.FLIGHT_DEALS_BUDAPEST_AIRPORTS ?? "BUD")
+      .split(",")
+      .map((s) => s.trim().toUpperCase())
+      .filter(Boolean),
+    currency: "ILS",
+    maxPriceIls,
+    ilsToUsd,
   };
 }
 
@@ -420,11 +440,27 @@ export function getCachedDealCount() {
   return serpCache.deals?.length ?? 0;
 }
 
+function watchStatusSnapshot(cfg, cache) {
+  const top = cache.deals?.[0] ?? null;
+  return {
+    outbound: cfg.outbound,
+    returnDate: cfg.returnDate,
+    airports: cfg.airports,
+    maxPriceIls: cfg.maxPriceIls,
+    cached: cache.deals?.length ?? 0,
+    lowestIls: top?.priceIls ?? null,
+    lowest: top?.priceIls ?? null,
+    scheduleLabelHe: top?.scheduleLabelHe ?? null,
+    baggageLabelHe: top?.baggageLabelHe ?? null,
+    airlineLabelHe: top?.airlineLabelHe ?? null,
+    bookingUrl: top?.bookingUrl ?? null,
+    deal: top,
+  };
+}
+
 export function getSearchStatus() {
   const windows = preferredDateWindows();
   const next = windows[weekendRotate % Math.max(windows.length, 1)];
-  const th = thailandWatchConfig();
-  const top = thailandCache.deals?.[0] ?? null;
   return {
     cachedDeals: serpCache.deals?.length ?? 0,
     cacheAgeMin: serpCache.at
@@ -434,21 +470,15 @@ export function getSearchStatus() {
       ? `${next.label} ${next.outbound_date}→${next.return_date}`
       : null,
     skyCooldown: Date.now() < skyCooldownUntil,
-    thailand: {
-      outbound: th.outbound,
-      returnDate: th.returnDate,
-      airports: th.airports,
-      maxPriceIls: th.maxPriceIls,
-      cached: thailandCache.deals?.length ?? 0,
-      lowestIls: top?.priceIls ?? null,
-      lowest: top?.priceIls ?? null,
-      scheduleLabelHe: top?.scheduleLabelHe ?? null,
-      baggageLabelHe: top?.baggageLabelHe ?? null,
-      airlineLabelHe: top?.airlineLabelHe ?? null,
-      bookingUrl: top?.bookingUrl ?? null,
-      deal: top,
-    },
+    thailand: watchStatusSnapshot(thailandWatchConfig(), thailandCache),
+    budapest: watchStatusSnapshot(budapestWatchConfig(), budapestCache),
   };
+}
+
+/** Best cached deal per permanent watch (for status replies). */
+export function getCachedWatchDeals() {
+  const status = getSearchStatus();
+  return [status.thailand?.deal, status.budapest?.deal].filter(Boolean);
 }
 
 const THAILAND_META = {
@@ -461,8 +491,21 @@ const THAILAND_META = {
 const AIRLINE_LABELS_HE = {
   EK: "אמירטס",
   EY: "איתיחאד",
+  LY: "אל על",
+  W6: "וויז אייר",
+  W9: "וויז אייר",
+  FR: "ריאנאייר",
+  U2: "איזיג׳ט",
+  A3: "אייג׳יאן",
+  RO: "טארום",
+  LO: "לוט",
+  OS: "אוסטריאן",
+  LH: "לופטהנזה",
   Emirates: "אמירטס",
   Etihad: "איתיחאד",
+  "El Al": "אל על",
+  Wizz: "וויז אייר",
+  Ryanair: "ריאנאייר",
 };
 
 function itineraryAirlineCodes(item) {
@@ -878,6 +921,129 @@ async function searchThailandWatch({ forceRefresh = false } = {}) {
   return merged;
 }
 
+function genericAirlineLabelHe(item) {
+  const codes = [...new Set(itineraryAirlineCodes(item))];
+  for (const code of codes) {
+    if (AIRLINE_LABELS_HE[code]) return AIRLINE_LABELS_HE[code];
+  }
+  const name = String(item?.flights?.[0]?.airline ?? "").trim();
+  if (!name) return null;
+  for (const [key, label] of Object.entries(AIRLINE_LABELS_HE)) {
+    if (name.toLowerCase().includes(key.toLowerCase())) return label;
+  }
+  return name;
+}
+
+function outboundScheduleLabelHe(item) {
+  const { dep, arr } = itineraryEndpoints(item);
+  if (dep && arr) return `יציאה ${dep}→${arr}`;
+  return null;
+}
+
+/** Permanent Budapest watch — TLV→BUD fixed Nov 11–15 (no airline/bag filter). */
+async function searchBudapestWatch({ forceRefresh = false } = {}) {
+  const apiKey = process.env.SERPAPI_API_KEY;
+  if (!apiKey) return [];
+
+  const cacheMs = Number(process.env.SERPAPI_CACHE_MS ?? String(6 * 60 * 60_000));
+  if (
+    !forceRefresh &&
+    budapestCache.deals &&
+    Date.now() - budapestCache.at < cacheMs
+  ) {
+    return budapestCache.deals;
+  }
+
+  const cfg = budapestWatchConfig();
+  const deals = [];
+
+  for (const airport of cfg.airports) {
+    try {
+      const payload = await fetchGoogleFlights({
+        engine: "google_flights",
+        departure_id: ORIGIN,
+        arrival_id: airport,
+        outbound_date: cfg.outbound,
+        return_date: cfg.returnDate,
+        type: "1",
+        currency: cfg.currency,
+        hl: "en",
+        gl: "il",
+        api_key: apiKey,
+      });
+
+      const flights = [
+        ...(payload.best_flights ?? []),
+        ...(payload.other_flights ?? []),
+      ];
+
+      let best = null;
+      for (const item of flights) {
+        const priceIls = Number(item.price);
+        if (!Number.isFinite(priceIls) || priceIls <= 0) continue;
+        if (priceIls > cfg.maxPriceIls) continue;
+        if (!best || priceIls < best.priceIls) {
+          best = { item, priceIls };
+        }
+      }
+
+      if (!best) {
+        console.log(
+          `[budapest] ${airport}: no fares ≤₪${cfg.maxPriceIls} on ${cfg.outbound}→${cfg.returnDate}`,
+        );
+        continue;
+      }
+
+      const bookingUrl =
+        payload?.search_metadata?.google_flights_url ||
+        `https://www.google.com/travel/flights?hl=he&gl=il&curr=ILS#flt=${ORIGIN}.${airport}.${cfg.outbound}*${airport}.${ORIGIN}.${cfg.returnDate}`;
+      const priceIls = best.priceIls;
+      const priceUsd = Number((priceIls / cfg.ilsToUsd).toFixed(2));
+
+      deals.push({
+        id: buildDealId(ORIGIN, airport, cfg.outbound, cfg.returnDate, priceIls),
+        origin: ORIGIN,
+        destination: airport,
+        destinationNameHe: "בודפשט",
+        countryNameHe: "הונגריה",
+        departureDate: cfg.outbound,
+        returnDate: cfg.returnDate,
+        priceUsd,
+        priceIls,
+        currency: "ILS",
+        bookingUrl,
+        imageUrl: null,
+        watch: "budapest",
+        airlineLabelHe: genericAirlineLabelHe(best.item),
+        baggageIncluded: false,
+        baggageLabelHe: null,
+        scheduleLabelHe: outboundScheduleLabelHe(best.item),
+        bookWith: null,
+      });
+    } catch (error) {
+      console.warn("[budapest]", airport, error);
+    }
+  }
+
+  const merged = mergeDeals([deals]).sort(
+    (a, b) => (a.priceIls ?? a.priceUsd) - (b.priceIls ?? b.priceUsd),
+  );
+  if (!merged.length && budapestCache.deals?.length) {
+    console.warn("[budapest] empty refresh — keeping previous good result");
+    return budapestCache.deals;
+  }
+  budapestCache = { at: Date.now(), deals: merged };
+  console.log(
+    `[budapest] ${cfg.outbound}→${cfg.returnDate}` +
+      ` airports=${cfg.airports.join(",")}` +
+      ` → ${merged.length} deals ≤₪${cfg.maxPriceIls}` +
+      (merged[0]
+        ? ` (lowest ₪${merged[0].priceIls} ${merged[0].airlineLabelHe || ""})`
+        : ""),
+  );
+  return merged;
+}
+
 async function resolvePlace(query) {
   if (placeCache.has(query)) return placeCache.get(query);
   const res = await fetch(
@@ -1040,18 +1206,28 @@ export async function searchDeals({ forceRefresh = false } = {}) {
     );
   }
 
-  // Europe weekend hunting disabled — only permanent Thailand EK/EY watch.
+  // Permanent watches only: Thailand (EK+bags) + Budapest fixed dates.
   if (provider === "demo") {
-    const th = await searchThailandWatch({ forceRefresh: true });
-    return th.length ? th : demoDeals();
+    const [th, bud] = await Promise.all([
+      searchThailandWatch({ forceRefresh: true }),
+      searchBudapestWatch({ forceRefresh: true }),
+    ]);
+    const merged = mergeDeals([th, bud]);
+    return merged.length ? merged : demoDeals();
   }
 
-  const thailandResult = await Promise.allSettled([
+  const results = await Promise.allSettled([
     searchThailandWatch({ forceRefresh }),
+    searchBudapestWatch({ forceRefresh }),
   ]);
-  if (thailandResult[0].status === "rejected") {
-    console.warn("[thailand]", thailandResult[0].reason);
-    return [];
+
+  const lists = [];
+  for (const [i, label] of [
+    [0, "thailand"],
+    [1, "budapest"],
+  ]) {
+    if (results[i].status === "fulfilled") lists.push(results[i].value);
+    else console.warn(`[${label}]`, results[i].reason);
   }
-  return thailandResult[0].value;
+  return mergeDeals(lists);
 }

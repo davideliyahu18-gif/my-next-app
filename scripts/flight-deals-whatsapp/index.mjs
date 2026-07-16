@@ -18,7 +18,9 @@ import {
   searchDeals as fetchDeals,
   dealFingerprint,
   getSearchStatus,
+  getCachedWatchDeals,
   thailandWatchConfig,
+  budapestWatchConfig,
 } from "./providers.mjs";
 import {
   loadPersonalUsers,
@@ -290,6 +292,7 @@ function formatDealMessage(deal) {
   const dest = hebrewDestination(deal);
   const country = hebrewCountry(deal);
   const isThailand = deal.watch === "thailand";
+  const isBudapest = deal.watch === "budapest";
   const ils = Number.isFinite(deal.priceIls)
     ? Math.round(deal.priceIls)
     : Math.round(deal.priceUsd * 3.7);
@@ -298,22 +301,28 @@ function formatDealMessage(deal) {
     : deal.priceUsd.toFixed(0);
   const outDay = hebrewDay(deal.departureDate);
   const backDay = hebrewDay(deal.returnDate);
+  const header = isThailand
+    ? "🇹🇭 *מעקב תאילנד · אמירטס · מזוודה*"
+    : isBudapest
+      ? "🇭🇺 *מעקב בודפשט*"
+      : "🔥 *מכירה מצוינת!*";
+  const footer = isThailand
+    ? "✈️ מתל אביב · יציאה 15:10→07:35 · חזרה בלילה · אמירטס + מזוודה"
+    : isBudapest
+      ? "✈️ מתל אביב · 11/11/2026–15/11/2026 · מעקב קבוע"
+      : `✈️ מתל אביב · עד ${cfg.maxPrice}$`;
   return [
-    isThailand ? "🇹🇭 *מעקב תאילנד · אמירטס · מזוודה*" : "🔥 *מכירה מצוינת!*",
+    header,
     "",
     country ? `*${dest}, ${country}*` : `*${dest}*`,
     `📅 יציאה ${outDay}: ${formatDate(deal.departureDate)}`,
     `📅 חזרה ${backDay}: ${formatDate(deal.returnDate)}`,
-    isThailand && deal.scheduleLabelHe
-      ? `🕕 *לוח זמנים:* ${deal.scheduleLabelHe}`
-      : "",
+    deal.scheduleLabelHe ? `🕕 *לוח זמנים:* ${deal.scheduleLabelHe}` : "",
     `💰 *₪${ils}* (כ־$${usd}) *הלוך ושוב*`,
-    isThailand && deal.airlineLabelHe ? `🛫 חברת תעופה: *${deal.airlineLabelHe}*` : "",
+    deal.airlineLabelHe ? `🛫 חברת תעופה: *${deal.airlineLabelHe}*` : "",
     isThailand ? `🧳 *מזוודה כלולה*` : "",
     isThailand && deal.baggageLabelHe ? `   (${deal.baggageLabelHe})` : "",
-    isThailand
-      ? `✈️ מתל אביב · יציאה 15:10→07:35 · חזרה בלילה · אמירטס + מזוודה`
-      : `✈️ מתל אביב · רביעי→שני / חמישי→ראשון · יולי–דצמבר · עד ${cfg.maxPrice}$`,
+    footer,
     deal.bookingUrl ? `\n🔗 קישור להזמנה:\n${deal.bookingUrl}` : "",
   ]
     .filter(Boolean)
@@ -342,7 +351,7 @@ async function sendToGroup(content) {
 }
 
 async function notifyPersonalSubscribers(deal) {
-  if (!deal || deal.watch !== "thailand") return 0;
+  if (!deal?.watch) return 0;
   const price = Number(deal.priceIls ?? deal.priceUsd);
   let sent = 0;
   for (const [jid, user] of listActivePersonalUsers()) {
@@ -359,8 +368,12 @@ async function notifyPersonalSubscribers(deal) {
     );
     if (ok) {
       sent += 1;
-      await upsertPersonalUser(jid, { lastAlertPriceIls: price });
-      log.info({ jid, priceIls: price }, "Personal alert sent");
+      const lastAlertByWatch = {
+        ...(user.lastAlertByWatch ?? {}),
+        [deal.watch]: price,
+      };
+      await upsertPersonalUser(jid, { lastAlertByWatch });
+      log.info({ jid, watch: deal.watch, priceIls: price }, "Personal alert sent");
     }
     await sleep(400);
   }
@@ -421,15 +434,18 @@ function shouldNotifyDeal(deal) {
   const prev = seenDeals.get(fp);
   if (!prev) return true;
 
-  // Thailand fixed watch: re-alert on meaningful ILS price drops.
-  if (deal.watch === "thailand") {
-    const dropIls = Number(process.env.FLIGHT_DEALS_THAILAND_PRICE_DROP_ILS ?? "100");
+  // Fixed watches: re-alert on meaningful ILS price drops.
+  if (deal.watch === "thailand" || deal.watch === "budapest") {
+    const dropEnv =
+      deal.watch === "budapest"
+        ? process.env.FLIGHT_DEALS_BUDAPEST_PRICE_DROP_ILS
+        : process.env.FLIGHT_DEALS_THAILAND_PRICE_DROP_ILS;
+    const dropIls = Number(dropEnv ?? (deal.watch === "budapest" ? "50" : "100"));
     const next = Number(deal.priceIls ?? deal.priceUsd);
     const prevPrice = Number(prev.priceIls ?? prev.priceUsd);
     return next <= prevPrice - dropIls;
   }
 
-  // Europe deals: only brand-new fingerprints.
   return false;
 }
 
@@ -526,22 +542,29 @@ const STATUS_COMMAND_COOLDOWN_MS = 12_000;
 function buildStatusReply({ searching = false, personal = false } = {}) {
   const status = getSearchStatus();
   const thCfg = thailandWatchConfig();
+  const budCfg = budapestWatchConfig();
   const ago = lastScanAt
     ? `${Math.max(1, Math.round((Date.now() - lastScanAt) / 60_000))} דק׳`
     : "עדיין לא";
   const th = status.thailand;
+  const bud = status.budapest;
   return [
     whatsappConnected ? "כן ✅ *מחפש*" : "⏳ *מתחבר…*",
     personal ? "🔔 *בוט אישי* — התראות רק אליך" : "",
     "",
-    "רק *תאילנד* · *אמירטס* · *מזוודה כלולה*",
+    "🇹🇭 *תאילנד* · אמירטס · מזוודה",
     `תאריכים: *${formatDate(thCfg.outbound)} – ${formatDate(thCfg.returnDate)}*`,
     `לו״ז: *יציאה ${thCfg.outboundDep}→${thCfg.outboundArr}* · *חזרה בלילה*`,
-    th?.lowestIls != null || th?.lowest != null
-      ? `מחיר נמוך כרגע: *₪${th.lowestIls ?? th.lowest}*`
-      : "עדיין אין מחיר במאגר",
-    th?.scheduleLabelHe ? `🕕 ${th.scheduleLabelHe}` : "",
-    th?.baggageLabelHe ? `🧳 ${th.baggageLabelHe}` : "",
+    th?.lowestIls != null
+      ? `מחיר: *₪${th.lowestIls}*`
+      : "עדיין אין מחיר תאילנד",
+    "",
+    "🇭🇺 *בודפשט*",
+    `תאריכים: *${formatDate(budCfg.outbound)} – ${formatDate(budCfg.returnDate)}*`,
+    bud?.lowestIls != null
+      ? `מחיר: *₪${bud.lowestIls}*${bud.airlineLabelHe ? ` · ${bud.airlineLabelHe}` : ""}`
+      : "עדיין אין מחיר בודפשט",
+    "",
     `סריקה אחרונה: ${ago}`,
     searching || scanRunning
       ? "🔄 *מריץ חיפוש עכשיו ב-Google Flights…*"
@@ -553,26 +576,47 @@ function buildStatusReply({ searching = false, personal = false } = {}) {
     .join("\n");
 }
 
+function pickWatchDeals(deals = null) {
+  const fromScan = Array.isArray(deals) ? deals : [];
+  const byWatch = new Map();
+  for (const deal of fromScan) {
+    if (!deal?.watch) continue;
+    const prev = byWatch.get(deal.watch);
+    if (
+      !prev ||
+      Number(deal.priceIls ?? deal.priceUsd) < Number(prev.priceIls ?? prev.priceUsd)
+    ) {
+      byWatch.set(deal.watch, deal);
+    }
+  }
+  for (const deal of getCachedWatchDeals()) {
+    if (!byWatch.has(deal.watch)) byWatch.set(deal.watch, deal);
+  }
+  return ["thailand", "budapest"].map((w) => byWatch.get(w)).filter(Boolean);
+}
+
 async function sendCurrentDealResult(chatId, deals = null) {
   if (!sock || !chatId) return false;
-  const status = getSearchStatus();
-  const deal = deals?.[0] || status.thailand?.deal;
-  if (!deal) {
+  const watchDeals = pickWatchDeals(deals);
+  if (!watchDeals.length) {
     await sock.sendMessage(chatId, {
-      text: "🔎 *תוצאת חיפוש*\nלא נמצאה כרגע טיסת אמירטס עם מזוודה בלו״ז המבוקש.",
+      text: "🔎 *תוצאת חיפוש*\nלא נמצאו כרגע טיסות במעקבים הקבועים.",
     });
     return false;
   }
 
-  const caption = [
-    "🔎 *תוצאת חיפוש עכשיו*",
-    "",
-    formatDealMessage(deal),
-  ].join("\n");
-
   try {
-    await sock.sendMessage(chatId, { text: caption });
-    log.info({ priceIls: deal.priceIls, chatId }, "Sent current deal result");
+    for (const deal of watchDeals) {
+      const caption = ["🔎 *תוצאת חיפוש עכשיו*", "", formatDealMessage(deal)].join(
+        "\n",
+      );
+      await sock.sendMessage(chatId, { text: caption });
+      log.info(
+        { priceIls: deal.priceIls, watch: deal.watch, chatId },
+        "Sent current deal result",
+      );
+      await sleep(350);
+    }
     return true;
   } catch (error) {
     log.warn({ error }, "Failed to send current deal result");
@@ -678,7 +722,7 @@ async function handlePersonalDm(chatId, body, pushName) {
       [
         "✅ *נרשמת למעקב אישי!*",
         "",
-        personalStatusText(user, getSearchStatus().thailand?.lowestIls),
+        personalStatusText(user, getSearchStatus()),
         "",
         "כשמחיר טוב יופיע — אשלח *רק אליך*.",
       ].join("\n"),
@@ -704,7 +748,7 @@ async function handlePersonalDm(chatId, body, pushName) {
     });
     await sendChat(
       chatId,
-      `✅ עודכן תקציב ל־*₪${Math.round(maxPriceIls)}*\n\n${personalStatusText(user, getSearchStatus().thailand?.lowestIls)}`,
+      `✅ עודכן תקציב ל־*₪${Math.round(maxPriceIls)}*\n\n${personalStatusText(user, getSearchStatus())}`,
     );
     return;
   }
@@ -718,10 +762,7 @@ async function handlePersonalDm(chatId, body, pushName) {
       );
       return;
     }
-    await sendChat(
-      chatId,
-      personalStatusText(user, getSearchStatus().thailand?.lowestIls),
-    );
+    await sendChat(chatId, personalStatusText(user, getSearchStatus()));
     runStatusSearch(chatId).catch((error) => {
       log.warn({ error }, "Personal status search failed");
     });
@@ -878,14 +919,12 @@ async function runScan({
         await sleep(500);
       }
       if (scanRunning) {
-        const cached = getSearchStatus().thailand?.deal;
-        return cached ? [cached] : [];
+        return getCachedWatchDeals();
       }
     } else {
       if (forceRefresh) scanQueued = true;
       log.info("Scan already running — %s", scanQueued ? "queued follow-up" : "skipping");
-      const cached = getSearchStatus().thailand?.deal;
-      return cached ? [cached] : [];
+      return getCachedWatchDeals();
     }
   }
 
@@ -908,13 +947,18 @@ async function runScan({
     if (shouldForce) lastForceRefreshAt = Date.now();
 
     log.info(
-      "Scanning Thailand Emirates schedule watch (%s%s)",
+      "Scanning permanent watches Thailand+Budapest (%s%s)",
       reason,
       shouldForce ? ", force-refresh" : "",
     );
     deals = await fetchDeals({ forceRefresh: shouldForce });
     lastScanFound = deals.length;
-    log.info("Found %d Thailand Emirates schedule options", deals.length);
+    log.info(
+      "Found %d watch options (TH=%d BUD=%d)",
+      deals.length,
+      deals.filter((d) => d.watch === "thailand").length,
+      deals.filter((d) => d.watch === "budapest").length,
+    );
 
     let sent = 0;
     // Cron: alert group + personal DMs on new/drop.
@@ -929,21 +973,23 @@ async function runScan({
         const ok = await sendToGroup(deal);
         if (ok) {
           sent += 1;
-          log.info({ deal: deal.id }, "Sent deal to group");
+          log.info({ deal: deal.id, watch: deal.watch }, "Sent deal to group");
         }
       }
-    } else if (deals[0]) {
-      const prev = seenDeals.get(dealFingerprint(deals[0]));
-      if (!prev) markDealSeen(deals[0]);
-      else if (
-        Number.isFinite(deals[0].priceIls) &&
-        Number.isFinite(prev.priceIls) &&
-        deals[0].priceIls < prev.priceIls
-      ) {
-        markDealSeen(deals[0]);
+    } else {
+      const tops = pickWatchDeals(deals);
+      for (const deal of tops) {
+        const prev = seenDeals.get(dealFingerprint(deal));
+        if (!prev) markDealSeen(deal);
+        else if (
+          Number.isFinite(deal.priceIls) &&
+          Number.isFinite(prev.priceIls) &&
+          deal.priceIls < prev.priceIls
+        ) {
+          markDealSeen(deal);
+        }
+        sent += await notifyPersonalSubscribers(deal);
       }
-      // Also nudge personal subscribers on meaningful drops during status scans.
-      sent += await notifyPersonalSubscribers(deals[0]);
     }
 
     lastScanSent = sent;
@@ -1224,8 +1270,11 @@ async function main() {
     );
   }, 30 * 60_000);
 
+  const bud = budapestWatchConfig();
   log.info(
-    "Thailand Emirates watch ready — cron %s | group %s",
+    "Watches ready — Thailand + Budapest %s→%s | cron %s | group %s",
+    bud.outbound,
+    bud.returnDate,
     cfg.cronExpr,
     groupJid || cfg.groupName || "?",
   );
