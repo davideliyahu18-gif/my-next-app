@@ -352,30 +352,45 @@ async function sendToGroup(content) {
   return sendChat(groupJid, content);
 }
 
-async function notifyPersonalSubscribers(deal) {
-  if (!deal?.watch) return 0;
-  const price = Number(deal.priceIls ?? deal.priceUsd);
+/** One DM per subscriber with all matching deals (no per-destination spam). */
+async function notifyPersonalSubscribers(dealsInput) {
+  const deals = (Array.isArray(dealsInput) ? dealsInput : [dealsInput]).filter(
+    (d) => d?.watch,
+  );
+  if (!deals.length) return 0;
+
   let sent = 0;
   for (const [jid, user] of listActivePersonalUsers()) {
-    if (!shouldAlertPersonalUser(user, deal)) continue;
-    const ok = await sendChat(
-      jid,
-      [
-        "🔔 *התראה אישית*",
-        "",
+    const matched = deals.filter((deal) => shouldAlertPersonalUser(user, deal));
+    if (!matched.length) continue;
+
+    const body = [
+      matched.length > 1 ? "🔔 *התראות אישיות*" : "🔔 *התראה אישית*",
+      "",
+      ...matched.flatMap((deal, i) => [
+        ...(i > 0 ? ["────────", ""] : []),
         formatDealMessage(deal),
-        "",
-        "_כדי להפסיק: כתוב *עצור*_",
-      ].join("\n"),
-    );
+      ]),
+      "",
+      "_כדי להפסיק: כתוב *עצור*_",
+    ].join("\n");
+
+    const ok = await sendChat(jid, body);
     if (ok) {
       sent += 1;
-      const lastAlertByWatch = {
-        ...(user.lastAlertByWatch ?? {}),
-        [deal.watch]: price,
-      };
+      const lastAlertByWatch = { ...(user.lastAlertByWatch ?? {}) };
+      for (const deal of matched) {
+        lastAlertByWatch[deal.watch] = Number(deal.priceIls ?? deal.priceUsd);
+      }
       await upsertPersonalUser(jid, { lastAlertByWatch });
-      log.info({ jid, watch: deal.watch, priceIls: price }, "Personal alert sent");
+      log.info(
+        {
+          jid,
+          watches: matched.map((d) => d.watch),
+          prices: matched.map((d) => d.priceIls),
+        },
+        "Personal alert sent",
+      );
     }
     await sleep(400);
   }
@@ -613,17 +628,26 @@ async function sendCurrentDealResult(chatId, deals = null, watchesFilter = null)
   }
 
   try {
-    for (const deal of watchDeals) {
-      const caption = ["🔎 *תוצאת חיפוש עכשיו*", "", formatDealMessage(deal)].join(
-        "\n",
-      );
-      await sock.sendMessage(chatId, { text: caption });
-      log.info(
-        { priceIls: deal.priceIls, watch: deal.watch, chatId },
-        "Sent current deal result",
-      );
-      await sleep(350);
-    }
+    // Single message for all selected watches — no per-destination spam.
+    const caption = [
+      watchDeals.length > 1
+        ? "🔎 *תוצאות חיפוש עכשיו*"
+        : "🔎 *תוצאת חיפוש עכשיו*",
+      "",
+      ...watchDeals.flatMap((deal, i) => [
+        ...(i > 0 ? ["────────", ""] : []),
+        formatDealMessage(deal),
+      ]),
+    ].join("\n");
+    await sock.sendMessage(chatId, { text: caption });
+    log.info(
+      {
+        chatId,
+        watches: watchDeals.map((d) => d.watch),
+        prices: watchDeals.map((d) => d.priceIls),
+      },
+      "Sent current deal result",
+    );
     return true;
   } catch (error) {
     log.warn({ error }, "Failed to send current deal result");
@@ -631,14 +655,28 @@ async function sendCurrentDealResult(chatId, deals = null, watchesFilter = null)
   }
 }
 
-async function runStatusSearch(chatId, watchesFilter = null) {
+async function runStatusSearch(
+  chatId,
+  watchesFilter = null,
+  { quietAck = false } = {},
+) {
   const personal = Boolean(chatId && !String(chatId).endsWith("@g.us"));
-  try {
-    await sock.sendMessage(chatId, {
-      text: buildStatusReply({ searching: true, personal }),
-    });
-  } catch (error) {
-    log.warn({ error }, "Failed to send status ack");
+  if (!quietAck) {
+    try {
+      const ack = personal
+        ? [
+            "🔄 *מחפש…*",
+            watchesFilter?.length
+              ? `יעדים: ${formatWatchesHe(watchesFilter)}`
+              : "",
+          ]
+            .filter(Boolean)
+            .join("\n")
+        : buildStatusReply({ searching: true, personal: false });
+      await sock.sendMessage(chatId, { text: ack });
+    } catch (error) {
+      log.warn({ error }, "Failed to send status ack");
+    }
   }
 
   try {
@@ -728,15 +766,14 @@ async function handlePersonalDm(chatId, body, pushName) {
       chatId,
       [
         "✅ *נרשמת למעקב אישי!*",
+        `📍 יעדים: *${formatWatchesHe(user.watches)}*`,
         "",
-        personalStatusText(user, getSearchStatus()),
-        "",
-        "בחירת יעד: *רק תאילנד* / *רק בודפשט* / *הכל*",
-        "כשמחיר טוב יופיע — אשלח *רק אליך*.",
+        "בחירה: *רק תאילנד* / *רק בודפשט* / *הכל*",
+        "מחפש מחירים עכשיו…",
       ].join("\n"),
     );
-    // Immediate personal search
-    runStatusSearch(chatId, user.watches).catch((error) => {
+    // Immediate personal search (one combined message for all watches)
+    runStatusSearch(chatId, user.watches, { quietAck: true }).catch((error) => {
       log.warn({ error }, "Personal start search failed");
     });
     return;
@@ -758,13 +795,11 @@ async function handlePersonalDm(chatId, body, pushName) {
       chatId,
       [
         `✅ היעדים עודכנו: *${formatWatchesHe(user.watches)}*`,
-        "",
-        personalStatusText(user, getSearchStatus()),
-        "",
-        "מכאן אשלח התראות *רק* על היעדים שבחרת.",
+        "מחפש מחירים ליעדים שבחרת…",
       ].join("\n"),
     );
-    runStatusSearch(chatId, user.watches).catch((error) => {
+    // One combined result — not a separate message per destination.
+    runStatusSearch(chatId, user.watches, { quietAck: true }).catch((error) => {
       log.warn({ error }, "Personal watch-change search failed");
     });
     return;
@@ -815,7 +850,7 @@ async function handlePersonalDm(chatId, body, pushName) {
       );
       return;
     }
-    await sendChat(chatId, personalStatusText(user, getSearchStatus()));
+    // Ack + one combined result (no separate status + per-destination cards).
     runStatusSearch(chatId, user.watches).catch((error) => {
       log.warn({ error }, "Personal status search failed");
     });
@@ -1017,10 +1052,10 @@ async function runScan({
     // Cron: alert group + personal DMs on new/drop.
     // Status command reports the result to the requester separately.
     if (!reportCurrent) {
-      for (const deal of deals) {
-        const personalSent = await notifyPersonalSubscribers(deal);
-        sent += personalSent;
+      // One personal DM per subscriber with all matching watches.
+      sent += await notifyPersonalSubscribers(deals);
 
+      for (const deal of deals) {
         if (!shouldNotifyDeal(deal)) continue;
         markDealSeen(deal);
         const ok = await sendToGroup(deal);
@@ -1041,8 +1076,9 @@ async function runScan({
         ) {
           markDealSeen(deal);
         }
-        sent += await notifyPersonalSubscribers(deal);
       }
+      // Batch personal nudges into one DM (not one per destination).
+      sent += await notifyPersonalSubscribers(tops);
     }
 
     lastScanSent = sent;
