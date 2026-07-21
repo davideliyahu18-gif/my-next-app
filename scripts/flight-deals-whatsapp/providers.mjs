@@ -25,6 +25,8 @@ const placeCache = new Map();
 let serpCache = { at: 0, deals: null };
 let thailandCache = { at: 0, deals: null };
 let budapestCache = { at: 0, deals: null };
+/** Last confirmed Emirates + free-bag Thailand deal (exact watch). */
+let emiratesDealCache = { at: 0, deal: null };
 let serpCooldownUntil = 0;
 
 async function loadPersistedDeals() {
@@ -36,6 +38,12 @@ async function loadPersistedDeals() {
     }
     if (Array.isArray(raw?.budapest) && raw.budapest.length) {
       budapestCache = { at: Number(raw.budapestAt ?? Date.now()), deals: raw.budapest };
+    }
+    if (raw?.emirates && typeof raw.emirates === "object") {
+      emiratesDealCache = {
+        at: Number(raw.emiratesAt ?? Date.now()),
+        deal: raw.emirates,
+      };
     }
   } catch {
     // ignore
@@ -52,6 +60,8 @@ async function persistDeals() {
           thailandAt: thailandCache.at || Date.now(),
           budapest: budapestCache.deals ?? [],
           budapestAt: budapestCache.at || Date.now(),
+          emirates: emiratesDealCache.deal ?? null,
+          emiratesAt: emiratesDealCache.at || null,
         },
         null,
         2,
@@ -982,10 +992,17 @@ async function searchThailandWatch({ forceRefresh = false } = {}) {
     (a, b) => (a.priceIls ?? a.priceUsd) - (b.priceIls ?? b.priceUsd),
   );
   if (!merged.length && thailandCache.deals?.length) {
-    console.warn("[thailand] empty refresh — keeping previous good result");
-    return thailandCache.deals;
+    // Keep previous good result only if it is a real Emirates+bag deal.
+    const kept = thailandCache.deals.filter((d) => isEmiratesBagDeal(d));
+    if (kept.length) {
+      console.warn("[thailand] empty refresh — keeping previous Emirates+bag");
+      return kept;
+    }
+    console.warn("[thailand] empty refresh — no Emirates+bag cache to keep");
+    return [];
   }
   thailandCache = { at: Date.now(), deals: merged };
+  if (merged[0]) await rememberEmiratesDeal(merged[0]);
   await persistDeals();
   console.log(
     `[thailand] Emirates + bag ${cfg.outbound}→${cfg.returnDate}` +
@@ -1523,9 +1540,35 @@ async function searchThailandViaTravelpayouts() {
   }
 }
 
+function isTravelpayoutsDeal(deal) {
+  return (
+    deal?.provider === "travelpayouts" || deal?.bookWith === "travelpayouts"
+  );
+}
+
+/** True only for the fixed Emirates + free checked-bag Thailand watch deal. */
+export function isEmiratesBagDeal(deal) {
+  if (!deal || deal.watch !== "thailand") return false;
+  if (isTravelpayoutsDeal(deal)) return false;
+  if (!deal.baggageIncluded) return false;
+  const label = String(deal.airlineLabelHe ?? "").toLowerCase();
+  const airline = String(deal.airline ?? deal.airlineCode ?? "").toUpperCase();
+  return (
+    airline === "EK" ||
+    label.includes("אמירטס") ||
+    label.includes("emirates")
+  );
+}
+
+async function rememberEmiratesDeal(deal) {
+  if (!isEmiratesBagDeal(deal)) return;
+  emiratesDealCache = { at: Date.now(), deal };
+  await persistDeals();
+}
+
 /**
- * Fixed Thailand command: 10/02/2027–10/03/2027 · Emirates · free checked bag.
- * Prefer SerpAPI deep schedule+bag match; fall back to Travelpayouts cache.
+ * Command אמירטס / תאילנד — returns ONLY the fixed Emirates+bag deal.
+ * Never mixes in Budapest or non-Emirates Travelpayouts fares.
  */
 export async function searchThailandFixedWatch({ forceRefresh = true } = {}) {
   await ensurePersistedLoaded();
@@ -1538,29 +1581,24 @@ export async function searchThailandFixedWatch({ forceRefresh = true } = {}) {
     console.warn("[thailand-fixed] deep Emirates+bag search failed", error);
   }
 
-  const isTravelpayouts = (d) =>
-    d?.provider === "travelpayouts" || d?.bookWith === "travelpayouts";
-
-  const withBag = deep.filter((d) => d?.baggageIncluded && !isTravelpayouts(d));
-  if (withBag.length) {
+  const emirates = deep.filter((d) => isEmiratesBagDeal(d));
+  if (emirates.length) {
+    await rememberEmiratesDeal(emirates[0]);
     console.log(
-      `[thailand-fixed] Emirates+bag hit ₪${withBag[0].priceIls} ${cfg.outbound}→${cfg.returnDate}`,
+      `[thailand-fixed] Emirates+bag ₪${emirates[0].priceIls} ${cfg.outbound}→${cfg.returnDate}`,
     );
-    return withBag;
+    return [emirates[0]];
   }
 
-  const deepOnly = deep.filter((d) => !isTravelpayouts(d));
-  if (deepOnly.length) {
-    console.log(
-      `[thailand-fixed] deep hit ₪${deepOnly[0].priceIls} (bag flag=${Boolean(deepOnly[0].baggageIncluded)})`,
+  if (emiratesDealCache.deal && isEmiratesBagDeal(emiratesDealCache.deal)) {
+    console.warn(
+      `[thailand-fixed] live miss — serving last Emirates+bag ₪${emiratesDealCache.deal.priceIls}`,
     );
-    return deepOnly;
+    return [emiratesDealCache.deal];
   }
 
-  console.warn(
-    "[thailand-fixed] no live Emirates+bag fare — Travelpayouts fallback",
-  );
-  return searchThailandViaTravelpayouts();
+  console.warn("[thailand-fixed] no Emirates+bag deal available");
+  return [];
 }
 
 async function searchBudapestViaTravelpayouts() {

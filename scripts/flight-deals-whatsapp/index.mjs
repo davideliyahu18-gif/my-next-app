@@ -17,6 +17,7 @@ import {
   resolveProvider,
   searchDeals as fetchDeals,
   searchThailandFixedWatch,
+  isEmiratesBagDeal,
   dealFingerprint,
   getSearchStatus,
   getCachedWatchDeals,
@@ -404,12 +405,16 @@ function formatDealMessage(deal) {
   const country = hebrewCountry(deal);
   const isThailand = deal.watch === "thailand";
   const isBudapest = deal.watch === "budapest";
+  const isEmirates =
+    isThailand &&
+    (deal.baggageIncluded === true ||
+      String(deal.airlineLabelHe ?? "").includes("אמירטס") ||
+      String(deal.airline ?? "").toUpperCase() === "EK") &&
+    deal.provider !== "travelpayouts" &&
+    deal.bookWith !== "travelpayouts";
   const ils = Number.isFinite(deal.priceIls)
     ? Math.round(deal.priceIls)
     : Math.round(deal.priceUsd * 3.7);
-  const usd = Number.isFinite(deal.priceIls)
-    ? (deal.priceIls / 3.7).toFixed(0)
-    : deal.priceUsd.toFixed(0);
   const outDay = hebrewDay(deal.departureDate);
   const backDay = hebrewDay(deal.returnDate);
   const header = isThailand
@@ -417,11 +422,15 @@ function formatDealMessage(deal) {
     : isBudapest
       ? "🇭🇺 *בודפשט*"
       : "🔥 *מכירה מצוינת!*";
-  const sub = isThailand
+  const sub = isEmirates
     ? "אמירטס · מזוודה כלולה"
-    : isBudapest
-      ? deal.airlineLabelHe || "טיסה זמינה"
-      : "";
+    : isThailand
+      ? [deal.airlineLabelHe, deal.baggageIncluded ? "מזוודה כלולה" : null]
+          .filter(Boolean)
+          .join(" · ") || "טיסה זמינה"
+      : isBudapest
+        ? deal.airlineLabelHe || "טיסה זמינה"
+        : "";
   return [
     header,
     sub,
@@ -429,8 +438,10 @@ function formatDealMessage(deal) {
     `📅 חזרה ${backDay} ${formatDate(deal.returnDate)}`,
     deal.scheduleLabelHe ? `🕕 ${deal.scheduleLabelHe}` : "",
     `💰 *₪${ils}* הלוך ושוב`,
-    isThailand && deal.baggageIncluded ? `🧳 *מזוודה כלולה*` : "",
-    deal.baggageLabelHe ? `🧳 ${deal.baggageLabelHe}` : "",
+    isEmirates || (isThailand && deal.baggageIncluded)
+      ? `🧳 *מזוודה כלולה*`
+      : "",
+    !isEmirates && deal.baggageLabelHe ? `🧳 ${deal.baggageLabelHe}` : "",
     !isThailand && !isBudapest && deal.airlineLabelHe
       ? `🛫 ${deal.airlineLabelHe}`
       : "",
@@ -960,7 +971,7 @@ async function runThailandFixedSearch(chatId) {
   try {
     await sock.sendMessage(chatId, {
       text: [
-        "🇹🇭 *מחפש תאילנד — מעקב קבוע*",
+        "🇹🇭 *מחפש דיל אמירטס בלבד*",
         `תאריכים: *${formatDate(cfg.outbound)} – ${formatDate(cfg.returnDate)}*`,
         `חברה: *אמירטס* · *מזוודה כלולה*`,
         `לו״ז: *יציאה ${cfg.outboundDep}→${cfg.outboundArr}* · *חזרה בלילה*`,
@@ -986,24 +997,35 @@ async function runThailandFixedSearch(chatId) {
       scanRunning = false;
     }
 
-    if (!deals.length) {
+    const deal = Array.isArray(deals)
+      ? deals.find((d) => isEmiratesBagDeal(d)) || null
+      : null;
+
+    if (!deal) {
       await sock.sendMessage(chatId, {
         text: [
-          "🇹🇭 *תאילנד — אין תוצאה כרגע*",
+          "🇹🇭 *אין כרגע דיל אמירטס*",
           `תאריכים: *${formatDate(cfg.outbound)} – ${formatDate(cfg.returnDate)}*`,
-          "חיפשתי אמירטס + מזוודה כלולה.",
-          "נסו שוב בעוד כמה דקות.",
+          "חיפשתי *רק* אמירטס + מזוודה כלולה (בלי יעדים/חברות אחרות).",
+          "נסו שוב מאוחר יותר — כשיימצא דיל אמירטס הוא יופיע כאן לבד.",
         ].join("\n"),
       });
       return;
     }
 
-    await sendCurrentDealResult(chatId, deals, ["thailand"]);
+    // One message, one Emirates deal only — never Budapest / other airlines.
+    await sock.sendMessage(chatId, {
+      text: ["🔎 *דיל אמירטס*", "", formatDealMessage(deal)].join("\n"),
+    });
+    log.info(
+      { chatId, priceIls: deal.priceIls, id: deal.id },
+      "Sent Emirates-only deal",
+    );
   } catch (error) {
     log.warn({ error }, "Thailand fixed search failed");
     try {
       await sock.sendMessage(chatId, {
-        text: "⚠️ חיפוש תאילנד נכשל כרגע. נסו שוב בעוד דקה.",
+        text: "⚠️ חיפוש אמירטס נכשל כרגע. נסו שוב בעוד דקה.",
       });
     } catch {
       // ignore
