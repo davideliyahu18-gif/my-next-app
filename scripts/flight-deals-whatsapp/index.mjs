@@ -18,6 +18,7 @@ import {
   searchDeals as fetchDeals,
   searchThailandFixedWatch,
   isEmiratesBagDeal,
+  getSerpApiStatus,
   dealFingerprint,
   getSearchStatus,
   getCachedWatchDeals,
@@ -1002,12 +1003,19 @@ async function runThailandFixedSearch(chatId) {
       : null;
 
     if (!deal) {
+      const serp = getSerpApiStatus();
+      const why = !serp.configured
+        ? "אין חיבור ל־Google Flights (SerpAPI) לאימות אמירטס."
+        : serp.coolingDown
+          ? `Google Flights חסום זמנית (מכסה/המתנה ~${Math.ceil(serp.coolDownSeconds / 60)} דק׳).`
+          : "מכסת Google Flights החודשית נגמרה — בלי זה אי אפשר לאמת אמירטס + מזוודה.";
       await sock.sendMessage(chatId, {
         text: [
-          "🇹🇭 *אין כרגע דיל אמירטס*",
+          "🇹🇭 *אין כרגע דיל אמירטס אמיתי*",
           `תאריכים: *${formatDate(cfg.outbound)} – ${formatDate(cfg.returnDate)}*`,
-          "חיפשתי *רק* אמירטס + מזוודה כלולה (בלי יעדים/חברות אחרות).",
-          "נסו שוב מאוחר יותר — כשיימצא דיל אמירטס הוא יופיע כאן לבד.",
+          "מציגים *רק* אמירטס + מזוודה כלולה — לא איתיחאד / לא מטמון כללי.",
+          why,
+          "כשיחזור חיפוש אמיתי — הדיל יופיע כאן לבד.",
         ].join("\n"),
       });
       return;

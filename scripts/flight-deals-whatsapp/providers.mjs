@@ -530,6 +530,16 @@ function watchStatusSnapshot(cfg, cache) {
   };
 }
 
+export function getSerpApiStatus() {
+  const remainingMs = Math.max(0, serpCooldownUntil - Date.now());
+  const key = Boolean(process.env.SERPAPI_API_KEY);
+  return {
+    configured: key,
+    coolingDown: remainingMs > 0,
+    coolDownSeconds: Math.ceil(remainingMs / 1000),
+  };
+}
+
 export function getSearchStatus() {
   const windows = preferredDateWindows();
   const next = windows[weekendRotate % Math.max(windows.length, 1)];
