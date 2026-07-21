@@ -1280,13 +1280,31 @@ async function searchAmadeus() {
  * Cheap free provider — Travelpayouts / Aviasales Data API.
  * Great for fixed-date watches. Less precise than SerpAPI for bags/schedule.
  */
-async function fetchTravelpayoutsPricesForDates({
+function toMonth(isoDate) {
+  const s = String(isoDate ?? "");
+  return s.length >= 7 ? s.slice(0, 7) : s;
+}
+
+function rowDate(iso) {
+  const s = String(iso ?? "");
+  return s.length >= 10 ? s.slice(0, 10) : s;
+}
+
+function daysBetween(a, b) {
+  const ta = Date.parse(`${a}T12:00:00Z`);
+  const tb = Date.parse(`${b}T12:00:00Z`);
+  if (!Number.isFinite(ta) || !Number.isFinite(tb)) return 999;
+  return Math.abs(Math.round((ta - tb) / 86400000));
+}
+
+async function fetchTravelpayoutsPricesForDatesOnce({
   origin,
   destination,
   departureAt,
   returnAt,
   currency = "ils",
   limit = 30,
+  market = "il",
 }) {
   const token = process.env.TRAVELPAYOUTS_TOKEN;
   if (!token) throw new Error("Missing TRAVELPAYOUTS_TOKEN");
@@ -1302,6 +1320,7 @@ async function fetchTravelpayoutsPricesForDates({
     limit: String(limit),
     page: "1",
     unique: "false",
+    market,
     token,
   });
   const res = await fetch(
@@ -1314,6 +1333,85 @@ async function fetchTravelpayoutsPricesForDates({
     throw new Error(payload.error ?? "Travelpayouts failed");
   }
   return Array.isArray(payload.data) ? payload.data : [];
+}
+
+/**
+ * Aviasales Data API is a recent-search cache: exact YYYY-MM-DD often returns
+ * empty even when the month has fares. Try exact dates, then month fallback.
+ */
+async function fetchTravelpayoutsPricesForDates({
+  origin,
+  destination,
+  departureAt,
+  returnAt,
+  currency = "ils",
+  limit = 50,
+}) {
+  const exact = await fetchTravelpayoutsPricesForDatesOnce({
+    origin,
+    destination,
+    departureAt,
+    returnAt,
+    currency,
+    limit,
+  });
+  if (exact.length) return { rows: exact, mode: "exact" };
+
+  const monthOut = toMonth(departureAt);
+  const monthBack = toMonth(returnAt);
+  const monthly = await fetchTravelpayoutsPricesForDatesOnce({
+    origin,
+    destination,
+    departureAt: monthOut,
+    returnAt: monthBack,
+    currency,
+    limit,
+  });
+  return { rows: monthly, mode: monthly.length ? "month" : "empty" };
+}
+
+function pickTravelpayoutsBest(rows, {
+  targetOut,
+  targetBack,
+  maxPriceIls,
+  preferredAirlines = [],
+  maxDateDriftDays = 14,
+}) {
+  const preferred = new Set(
+    preferredAirlines.map((a) => String(a).toUpperCase()).filter(Boolean),
+  );
+  const ranked = [...rows]
+    .map((row) => {
+      const priceIls = Number(row.price);
+      const airline = String(row.airline ?? row.airline_code ?? "")
+        .trim()
+        .toUpperCase();
+      const depDate = rowDate(row.departure_at ?? row.depart_date);
+      const retDate = rowDate(row.return_at ?? row.return_date);
+      const drift =
+        daysBetween(depDate, targetOut) + daysBetween(retDate, targetBack);
+      const exact =
+        depDate === targetOut && retDate === targetBack ? 0 : 1;
+      return { row, priceIls, airline, depDate, retDate, drift, exact };
+    })
+    .filter(
+      (x) =>
+        Number.isFinite(x.priceIls) &&
+        x.priceIls > 0 &&
+        x.priceIls <= maxPriceIls &&
+        x.depDate &&
+        x.retDate &&
+        x.drift <= maxDateDriftDays,
+    )
+    .sort((a, b) => {
+      if (a.exact !== b.exact) return a.exact - b.exact;
+      if (a.drift !== b.drift) return a.drift - b.drift;
+      const aPref = preferred.has(a.airline) ? 0 : 1;
+      const bPref = preferred.has(b.airline) ? 0 : 1;
+      if (aPref !== bPref) return aPref - bPref;
+      return a.priceIls - b.priceIls;
+    });
+  return ranked[0] ?? null;
 }
 
 function travelpayoutsAirlineLabel(code) {
@@ -1346,7 +1444,7 @@ async function searchThailandViaTravelpayouts() {
   const cfg = thailandWatchConfig();
   const airport = cfg.airports[0] || "BKK";
   try {
-    const rows = await fetchTravelpayoutsPricesForDates({
+    const { rows, mode } = await fetchTravelpayoutsPricesForDates({
       origin: ORIGIN,
       destination: airport,
       departureAt: cfg.outbound,
@@ -1355,47 +1453,48 @@ async function searchThailandViaTravelpayouts() {
       limit: 50,
     });
 
-    const preferredAirlines = new Set(cfg.airlines.map((a) => a.toUpperCase()));
-    const ranked = [...rows]
-      .map((row) => {
-        const priceIls = Number(row.price);
-        const airline = String(row.airline ?? row.airline_code ?? "")
-          .trim()
-          .toUpperCase();
-        return { row, priceIls, airline };
-      })
-      .filter(
-        (x) =>
-          Number.isFinite(x.priceIls) &&
-          x.priceIls > 0 &&
-          x.priceIls <= cfg.maxPriceIls,
-      )
-      .sort((a, b) => {
-        const aPref = preferredAirlines.has(a.airline) ? 0 : 1;
-        const bPref = preferredAirlines.has(b.airline) ? 0 : 1;
-        if (aPref !== bPref) return aPref - bPref;
-        return a.priceIls - b.priceIls;
-      });
-
-    const best = ranked[0];
+    let best = pickTravelpayoutsBest(rows, {
+      targetOut: cfg.outbound,
+      targetBack: cfg.returnDate,
+      maxPriceIls: cfg.maxPriceIls,
+      preferredAirlines: cfg.airlines,
+      maxDateDriftDays: 21,
+    });
     if (!best) {
-      console.log(`[travelpayouts/thailand] no fares ≤₪${cfg.maxPriceIls}`);
+      best = pickTravelpayoutsBest(rows, {
+        targetOut: cfg.outbound,
+        targetBack: cfg.returnDate,
+        maxPriceIls: cfg.maxPriceIls,
+        preferredAirlines: cfg.airlines,
+        maxDateDriftDays: 366,
+      });
+    }
+    if (!best) {
+      console.log(
+        `[travelpayouts/thailand] no fares ≤₪${cfg.maxPriceIls} (${mode}, ${rows.length} cached)`,
+      );
       return thailandCache.deals?.length ? thailandCache.deals : [];
     }
 
     const dep = rowDepartureLocal(best.row);
     const priceIls = best.priceIls;
     const priceUsd = Number((priceIls / cfg.ilsToUsd).toFixed(2));
-    const linkDateOut = cfg.outbound.replace(/-/g, "").slice(2);
-    const linkDateBack = cfg.returnDate.replace(/-/g, "").slice(2);
+    const outDate = best.depDate;
+    const backDate = best.retDate;
+    const linkDateOut = outDate.replace(/-/g, "").slice(2);
+    const linkDateBack = backDate.replace(/-/g, "").slice(2);
+    const dateNote =
+      outDate === cfg.outbound && backDate === cfg.returnDate
+        ? null
+        : `תאריכי מטמון ${outDate}→${backDate} (יעד ${cfg.outbound}→${cfg.returnDate})`;
     const deal = {
-      id: buildDealId(ORIGIN, airport, cfg.outbound, cfg.returnDate, priceIls),
+      id: buildDealId(ORIGIN, airport, outDate, backDate, priceIls),
       origin: ORIGIN,
       destination: airport,
       destinationNameHe: "בנגקוק",
       countryNameHe: "תאילנד",
-      departureDate: cfg.outbound,
-      returnDate: cfg.returnDate,
+      departureDate: outDate,
+      returnDate: backDate,
       priceUsd,
       priceIls,
       currency: "ILS",
@@ -1405,7 +1504,9 @@ async function searchThailandViaTravelpayouts() {
       airlineLabelHe: travelpayoutsAirlineLabel(best.airline),
       baggageIncluded: false,
       baggageLabelHe: "מטמון Aviasales · בדקו מזוודה לפני הזמנה",
-      scheduleLabelHe: dep ? `יציאה ~${dep}` : null,
+      scheduleLabelHe:
+        [dep ? `יציאה ~${dep}` : null, dateNote].filter(Boolean).join(" · ") ||
+        null,
       bookWith: "travelpayouts",
       provider: "travelpayouts",
     };
@@ -1413,7 +1514,7 @@ async function searchThailandViaTravelpayouts() {
     thailandCache = { at: Date.now(), deals: [deal] };
     await persistDeals();
     console.log(
-      `[travelpayouts/thailand] ${cfg.outbound}→${cfg.returnDate} ₪${priceIls} ${deal.airlineLabelHe || best.airline}`,
+      `[travelpayouts/thailand] ${outDate}→${backDate} ₪${priceIls} ${deal.airlineLabelHe || best.airline} (${mode})`,
     );
     return [deal];
   } catch (error) {
@@ -1427,46 +1528,57 @@ async function searchBudapestViaTravelpayouts() {
   const cfg = budapestWatchConfig();
   const airport = cfg.airports[0] || "BUD";
   try {
-    const rows = await fetchTravelpayoutsPricesForDates({
+    const { rows, mode } = await fetchTravelpayoutsPricesForDates({
       origin: ORIGIN,
       destination: airport,
       departureAt: cfg.outbound,
       returnAt: cfg.returnDate,
       currency: "ils",
-      limit: 30,
+      limit: 50,
     });
 
-    let best = null;
-    for (const row of rows) {
-      const priceIls = Number(row.price);
-      if (!Number.isFinite(priceIls) || priceIls <= 0 || priceIls > cfg.maxPriceIls) {
-        continue;
-      }
-      if (!best || priceIls < best.priceIls) {
-        best = {
-          priceIls,
-          airline: String(row.airline ?? "").toUpperCase(),
-          dep: rowDepartureLocal(row),
-        };
-      }
+    let best = pickTravelpayoutsBest(rows, {
+      targetOut: cfg.outbound,
+      targetBack: cfg.returnDate,
+      maxPriceIls: cfg.maxPriceIls,
+      preferredAirlines: [],
+      maxDateDriftDays: 10,
+    });
+    if (!best) {
+      best = pickTravelpayoutsBest(rows, {
+        targetOut: cfg.outbound,
+        targetBack: cfg.returnDate,
+        maxPriceIls: cfg.maxPriceIls,
+        preferredAirlines: [],
+        maxDateDriftDays: 366,
+      });
     }
 
     if (!best) {
-      console.log(`[travelpayouts/budapest] no fares ≤₪${cfg.maxPriceIls}`);
+      console.log(
+        `[travelpayouts/budapest] no fares ≤₪${cfg.maxPriceIls} (${mode}, ${rows.length} cached)`,
+      );
       return budapestCache.deals?.length ? budapestCache.deals : [];
     }
 
+    const depLocal = rowDepartureLocal(best.row);
     const priceUsd = Number((best.priceIls / cfg.ilsToUsd).toFixed(2));
-    const linkDateOut = cfg.outbound.replace(/-/g, "").slice(2);
-    const linkDateBack = cfg.returnDate.replace(/-/g, "").slice(2);
+    const outDate = best.depDate;
+    const backDate = best.retDate;
+    const linkDateOut = outDate.replace(/-/g, "").slice(2);
+    const linkDateBack = backDate.replace(/-/g, "").slice(2);
+    const dateNote =
+      outDate === cfg.outbound && backDate === cfg.returnDate
+        ? null
+        : `תאריכי מטמון ${outDate}→${backDate} (יעד ${cfg.outbound}→${cfg.returnDate})`;
     const deal = {
-      id: buildDealId(ORIGIN, airport, cfg.outbound, cfg.returnDate, best.priceIls),
+      id: buildDealId(ORIGIN, airport, outDate, backDate, best.priceIls),
       origin: ORIGIN,
       destination: airport,
       destinationNameHe: "בודפשט",
       countryNameHe: "הונגריה",
-      departureDate: cfg.outbound,
-      returnDate: cfg.returnDate,
+      departureDate: outDate,
+      returnDate: backDate,
       priceUsd,
       priceIls: best.priceIls,
       currency: "ILS",
@@ -1476,7 +1588,10 @@ async function searchBudapestViaTravelpayouts() {
       airlineLabelHe: travelpayoutsAirlineLabel(best.airline),
       baggageIncluded: false,
       baggageLabelHe: null,
-      scheduleLabelHe: best.dep ? `יציאה ~${best.dep}` : null,
+      scheduleLabelHe:
+        [depLocal ? `יציאה ~${depLocal}` : null, dateNote]
+          .filter(Boolean)
+          .join(" · ") || null,
       bookWith: "travelpayouts",
       provider: "travelpayouts",
     };
@@ -1484,7 +1599,7 @@ async function searchBudapestViaTravelpayouts() {
     budapestCache = { at: Date.now(), deals: [deal] };
     await persistDeals();
     console.log(
-      `[travelpayouts/budapest] ${cfg.outbound}→${cfg.returnDate} ₪${best.priceIls} ${deal.airlineLabelHe || best.airline}`,
+      `[travelpayouts/budapest] ${outDate}→${backDate} ₪${best.priceIls} ${deal.airlineLabelHe || best.airline} (${mode})`,
     );
     return [deal];
   } catch (error) {
