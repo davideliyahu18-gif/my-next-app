@@ -1,5 +1,6 @@
 /**
- * Private personal subscribers — each user chats with the bot in DM.
+ * Per-user subscribers — commands work in the group (and still in DM).
+ * Settings are keyed by the sender's WhatsApp JID.
  */
 import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -134,14 +135,13 @@ export async function upsertPersonalUser(jid, patch = {}) {
 
 export function personalHelpText() {
   return [
-    "👋 *בוט אישי לטיסות*",
+    "👋 *בוט טיסות — פקודות*",
     "",
-    "אני מתריע *רק אליך בפרטי* — לא בקבוצה.",
+    "כתבו *בקבוצה* (או בפרטי):",
     "",
-    "*פקודות:*",
     "• *התחל* — הצטרפות למעקב",
     "• *עצור* — ביטול התראות",
-    "• *סטטוס* / *מחפש* — חיפוש מחיר עכשיו",
+    "• *סטטוס* / *מחפש* / *בוט מחפש* — חיפוש מחיר עכשיו",
     "• *תקציב 3200* — מקסימום בשקלים",
     "• *רק תאילנד* / *רק בודפשט* / *הכל* — בחירת יעד",
     "• *יעדים* — מה פעיל אצלך",
@@ -251,17 +251,22 @@ export function parseWatchSelection(text) {
   return null;
 }
 
-/**
- * Parse a private DM command.
- * @returns {{ type: string, maxPriceIls?: number, watches?: string[] } | null}
- */
-export function parsePersonalCommand(text) {
-  const t = String(text ?? "")
+export function normalizeCommandText(text) {
+  return String(text ?? "")
     .replace(/[\u200e\u200f\u202a-\u202e]/g, "")
     .replace(/[?؟！!.,，、~`'"]/g, "")
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
+}
+
+/**
+ * @param {string} text
+ * @param {{ looseStatus?: boolean }} [opts]
+ * @returns {{ type: string, maxPriceIls?: number, watches?: string[] } | null}
+ */
+export function parsePersonalCommand(text, { looseStatus = true } = {}) {
+  const t = normalizeCommandText(text);
   if (!t) return null;
 
   if (
@@ -298,9 +303,11 @@ export function parsePersonalCommand(text) {
   if (
     t === "סטטוס" ||
     t === "מצב" ||
+    t === "status" ||
+    t === "מחפש" ||
     t.includes("בוט מחפש") ||
-    t.includes("מחפש") ||
-    t === "status"
+    (t.startsWith("בוט ") && t.includes("טיסות")) ||
+    (looseStatus && t.includes("מחפש"))
   ) {
     return { type: "status" };
   }
@@ -309,12 +316,20 @@ export function parsePersonalCommand(text) {
   if (budget) {
     return { type: "budget", maxPriceIls: Number(budget[1]) };
   }
-  const budget2 = t.match(/^(\d{3,5})\s*(?:שקל|שח|₪)?$/);
-  if (budget2 && Number(budget2[1]) >= 500 && Number(budget2[1]) <= 20000) {
-    return { type: "budget", maxPriceIls: Number(budget2[1]) };
+  // Bare numbers only in DM — too noisy for group chat.
+  if (looseStatus) {
+    const budget2 = t.match(/^(\d{3,5})\s*(?:שקל|שח|₪)?$/);
+    if (budget2 && Number(budget2[1]) >= 500 && Number(budget2[1]) <= 20000) {
+      return { type: "budget", maxPriceIls: Number(budget2[1]) };
+    }
   }
 
   return null;
+}
+
+/** Strict parser for group chat — avoids false positives on casual messages. */
+export function parseGroupCommand(text) {
+  return parsePersonalCommand(text, { looseStatus: false });
 }
 
 export function shouldAlertPersonalUser(user, deal) {

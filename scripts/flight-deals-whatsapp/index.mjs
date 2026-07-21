@@ -28,6 +28,7 @@ import {
   getPersonalUser,
   listActivePersonalUsers,
   parsePersonalCommand,
+  parseGroupCommand,
   personalHelpText,
   personalStatusText,
   shouldAlertPersonalUser,
@@ -638,24 +639,6 @@ async function saveState() {
   );
 }
 
-function normalizeHebrewCommand(text) {
-  return String(text ?? "")
-    .replace(/[\u200e\u200f\u202a-\u202e]/g, "")
-    .replace(/[?؟！!.,，、~`'"]/g, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
-}
-
-function isStatusCheckCommand(text) {
-  const t = normalizeHebrewCommand(text);
-  if (!t) return false;
-  if (t === "בוט") return true;
-  if (t.includes("בוט") && t.includes("מחפש")) return true;
-  if (t.startsWith("בוט ") && t.includes("טיסות")) return true;
-  return false;
-}
-
 function msgKeyString(key) {
   return `${key.remoteJid}:${key.id}:${key.fromMe}:${key.participant || ""}`;
 }
@@ -902,80 +885,109 @@ async function isTargetGroup(chatId) {
   }
 }
 
-async function handlePersonalDm(chatId, body, pushName) {
-  const cmd = parsePersonalCommand(body);
+function senderJidFromMsg(msg) {
+  const participant =
+    msg.key?.participant ||
+    msg.participant ||
+    msg.key?.participantPn ||
+    msg.key?.participantAlt;
+  if (participant) return String(participant).split(":")[0];
+  return String(msg.key?.remoteJid ?? "").split(":")[0];
+}
+
+/**
+ * Handle bot commands. Replies go to replyChatId (group or DM).
+ * User settings are keyed by userId (sender in group, chat in DM).
+ */
+async function handleUserCommand({
+  replyChatId,
+  userId,
+  body,
+  pushName,
+  inGroup = false,
+}) {
+  const cmd = inGroup
+    ? parseGroupCommand(body)
+    : parsePersonalCommand(body);
   if (!cmd) {
-    await sendChat(
-      chatId,
-      "לא הבנתי 🙂\nכתוב *עזרה* לתפריט, או *התחל* להצטרף למעקב.",
-    );
-    return;
+    if (!inGroup) {
+      await sendChat(
+        replyChatId,
+        "לא הבנתי 🙂\nכתוב *עזרה* לתפריט, או *התחל* להצטרף למעקב.",
+      );
+    }
+    return false;
   }
 
   if (cmd.type === "help") {
-    await sendChat(chatId, personalHelpText());
-    return;
+    await sendChat(replyChatId, personalHelpText());
+    return true;
   }
 
   if (cmd.type === "start") {
-    const user = await upsertPersonalUser(chatId, {
+    const user = await upsertPersonalUser(userId, {
       active: true,
       pushName: pushName || null,
     });
     await sendChat(
-      chatId,
+      replyChatId,
       [
-        "✅ *נרשמת למעקב אישי!*",
+        "✅ *נרשמת למעקב!*",
         `📍 יעדים: *${formatWatchesHe(user.watches)}*`,
         "",
         "בחירה: *רק תאילנד* / *רק בודפשט* / *הכל*",
         "מחפש מחירים עכשיו…",
       ].join("\n"),
     );
-    // Immediate personal search (one combined message for all watches)
-    runStatusSearch(chatId, user.watches, { quietAck: true }).catch((error) => {
-      log.warn({ error }, "Personal start search failed");
-    });
-    return;
+    runStatusSearch(replyChatId, user.watches, { quietAck: true }).catch(
+      (error) => {
+        log.warn({ error }, "Start search failed");
+      },
+    );
+    return true;
   }
 
   if (cmd.type === "stop") {
-    await upsertPersonalUser(chatId, { active: false });
-    await sendChat(chatId, "🛑 המעקב האישי הופסק.\nכתוב *התחל* כדי לחזור.");
-    return;
+    await upsertPersonalUser(userId, { active: false });
+    await sendChat(
+      replyChatId,
+      "🛑 המעקב הופסק.\nכתוב *התחל* כדי לחזור.",
+    );
+    return true;
   }
 
   if (cmd.type === "set-watches") {
-    const user = await upsertPersonalUser(chatId, {
+    const user = await upsertPersonalUser(userId, {
       active: true,
       pushName: pushName || null,
       watches: cmd.watches,
     });
     await sendChat(
-      chatId,
+      replyChatId,
       [
         `✅ היעדים עודכנו: *${formatWatchesHe(user.watches)}*`,
         "מחפש מחירים ליעדים שבחרת…",
       ].join("\n"),
     );
-    // One combined result — not a separate message per destination.
-    runStatusSearch(chatId, user.watches, { quietAck: true }).catch((error) => {
-      log.warn({ error }, "Personal watch-change search failed");
-    });
-    return;
+    runStatusSearch(replyChatId, user.watches, { quietAck: true }).catch(
+      (error) => {
+        log.warn({ error }, "Watch-change search failed");
+      },
+    );
+    return true;
   }
 
   if (cmd.type === "watches") {
-    const user = getPersonalUser(chatId);
+    const user = getPersonalUser(userId);
     if (!user?.active) {
       await sendChat(
-        chatId,
+        replyChatId,
         "עוד לא נרשמת.\nכתוב *התחל*, ואז *רק תאילנד* / *רק בודפשט* / *הכל*.",
       );
-      return;
+      return true;
     }
     await sendChat(
-      chatId,
+      replyChatId,
       [
         `📍 היעדים שלך עכשיו: *${formatWatchesHe(user.watches)}*`,
         "",
@@ -985,36 +997,41 @@ async function handlePersonalDm(chatId, body, pushName) {
         "• *הכל*",
       ].join("\n"),
     );
-    return;
+    return true;
   }
 
   if (cmd.type === "budget") {
     const maxPriceIls = Math.max(500, Math.min(20000, Number(cmd.maxPriceIls)));
-    const user = await upsertPersonalUser(chatId, {
+    const user = await upsertPersonalUser(userId, {
       active: true,
       maxPriceIls,
     });
     await sendChat(
-      chatId,
+      replyChatId,
       `✅ עודכן תקציב ל־*₪${Math.round(maxPriceIls)}*\n\n${personalStatusText(user, getSearchStatus())}`,
     );
-    return;
+    return true;
   }
 
   if (cmd.type === "status") {
-    const user = getPersonalUser(chatId);
-    if (!user?.active) {
+    const user = getPersonalUser(userId);
+    const watches =
+      user?.active && user.watches?.length ? user.watches : DEFAULT_WATCHES;
+    // In the group, allow מחפש/בוט מחפש without prior התחל.
+    if (!inGroup && !user?.active) {
       await sendChat(
-        chatId,
-        "עוד לא נרשמת.\nכתוב *התחל* כדי לקבל התראות אישיות.",
+        replyChatId,
+        "עוד לא נרשמת.\nכתוב *התחל* כדי לקבל התראות.",
       );
-      return;
+      return true;
     }
-    // Ack + one combined result (no separate status + per-destination cards).
-    runStatusSearch(chatId, user.watches).catch((error) => {
-      log.warn({ error }, "Personal status search failed");
+    runStatusSearch(replyChatId, watches).catch((error) => {
+      log.warn({ error }, "Status search failed");
     });
+    return true;
   }
+
+  return false;
 }
 
 async function handleIncomingMessage(msg, upsertType = "notify") {
@@ -1056,11 +1073,17 @@ async function handleIncomingMessage(msg, upsertType = "notify") {
 
     const isGroup = chatId.endsWith("@g.us");
 
-    // Private personal bot (DM)
+    // Private DM — full command set
     if (!isGroup) {
       markHandledMessage(msg);
       log.info({ from: chatId, body, upsertType }, "Personal DM received");
-      await handlePersonalDm(chatId, body, msg.pushName);
+      await handleUserCommand({
+        replyChatId: chatId,
+        userId: chatId,
+        body,
+        pushName: msg.pushName,
+        inGroup: false,
+      });
       return;
     }
 
@@ -1077,7 +1100,8 @@ async function handleIncomingMessage(msg, upsertType = "notify") {
       log.info({ groupJid }, "Learned group JID from incoming message");
     }
 
-    if (!isStatusCheckCommand(body)) {
+    const groupCmd = parseGroupCommand(body);
+    if (!groupCmd) {
       // Non-command group traffic — don't mark, cheap to ignore again.
       return;
     }
@@ -1085,15 +1109,23 @@ async function handleIncomingMessage(msg, upsertType = "notify") {
     const now = Date.now();
     if (now - lastStatusCommandAt < STATUS_COMMAND_COOLDOWN_MS) {
       markHandledMessage(msg);
-      log.info({ body }, "Status command cooldown — skipping duplicate");
+      log.info({ body }, "Group command cooldown — skipping duplicate");
       return;
     }
     lastStatusCommandAt = now;
     markHandledMessage(msg);
 
-    log.info({ from: chatId, body, upsertType }, "Status command received");
-    runStatusSearch(chatId).catch((error) => {
-      log.warn({ error }, "Status search failed");
+    const senderJid = senderJidFromMsg(msg);
+    log.info(
+      { from: chatId, senderJid, body, upsertType, cmd: groupCmd.type },
+      "Group command received",
+    );
+    await handleUserCommand({
+      replyChatId: chatId.split(":")[0],
+      userId: senderJid,
+      body,
+      pushName: msg.pushName,
+      inGroup: true,
     });
   } catch (error) {
     log.warn({ error }, "Failed to handle incoming message");
@@ -1149,7 +1181,7 @@ async function onGroupReady() {
         "🇹🇭 תאילנד · אמירטס + מזוודה · 10/02/2027–10/03/2027",
         "🇭🇺 בודפשט · 11/11/2026–15/11/2026",
         "",
-        "כתבו *בוט מחפש* לעדכון מיידי.",
+        "כתבו *עזרה* לתפריט, או *בוט מחפש* לעדכון מיידי.",
         cfg.demoMode ? "\n_מצב דמו פעיל._" : "",
       ]
         .filter(Boolean)
