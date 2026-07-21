@@ -485,13 +485,22 @@ async function sendChat(chatId, content) {
   if (!sock || !chatId) return false;
   const text =
     typeof content === "string" ? content : formatDealMessage(content);
+  const target = String(chatId).split(":")[0];
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
-      await sock.sendMessage(chatId, { text });
+      await sock.sendMessage(target, { text });
+      log.info(
+        { chatId: target, attempt, chars: text.length },
+        "sendChat ok",
+      );
       return true;
     } catch (error) {
       const status = error?.output?.statusCode || error?.data;
-      log.warn({ error, chatId, attempt, status }, "sendChat failed");
+      log.warn({ error, chatId: target, attempt, status }, "sendChat failed");
+      // After group send failure, refresh keys once then retry.
+      if (target.endsWith("@g.us") && attempt === 1) {
+        await refreshGroupKeys().catch(() => {});
+      }
       if (attempt < 3) await sleep(1500 * attempt);
     }
   }
@@ -989,8 +998,12 @@ async function runThailandFixedSearch(chatId, { skipAck = false } = {}) {
   }
 
   try {
-    for (let i = 0; i < 120 && scanRunning; i += 1) {
+    // Wait briefly if another scan is running — don't hang for a minute.
+    for (let i = 0; i < 20 && scanRunning; i += 1) {
       await sleep(500);
+    }
+    if (scanRunning) {
+      log.warn("Emirates search starting while another scan still runs");
     }
     scanRunning = true;
     let deals = [];
@@ -1012,20 +1025,27 @@ async function runThailandFixedSearch(chatId, { skipAck = false } = {}) {
         ? "אין חיבור ל־Google Flights (SerpAPI) לאימות אמירטס."
         : serp.coolingDown
           ? `Google Flights חסום זמנית (מכסה/המתנה ~${Math.ceil(serp.coolDownSeconds / 60)} דק׳).`
-          : "מכסת Google Flights החודשית נגמרה — בלי זה אי אפשר לאמת אמירטס + מזוודה.";
-      await sendChat(chatId, [
+          : "מכסת Google Flights החודשית נגמרה (0/250) — בלי זה אי אפשר לאמת אמירטס + מזוודה.";
+      const ok = await sendChat(
+        chatId,
+        [
           "🇹🇭 *אין כרגע דיל אמירטס אמיתי*",
           `תאריכים: *${formatDate(cfg.outbound)} – ${formatDate(cfg.returnDate)}*`,
-          "מציגים *רק* אמירטס + מזוודה כלולה — לא איתיחאד / לא מטמון כללי.",
+          "הבוט *כן קיבל* את ההודעה — פשוט אין תוצאה אמיתית להציג.",
           why,
-          "כשיחזור חיפוש אמיתי — הדיל יופיע כאן לבד.",
-        ].join("\n"));
+          "כשמכסת Google תתחדש — הדיל יופיע כאן לבד.",
+        ].join("\n"),
+      );
+      log.info({ chatId, ok }, "Sent Emirates empty reply");
       return;
     }
 
-    await sendChat(chatId, ["🔎 *דיל אמירטס*", "", formatDealMessage(deal)].join("\n"));
+    const ok = await sendChat(
+      chatId,
+      ["🔎 *דיל אמירטס*", "", formatDealMessage(deal)].join("\n"),
+    );
     log.info(
-      { chatId, priceIls: deal.priceIls, id: deal.id },
+      { chatId, ok, priceIls: deal.priceIls, id: deal.id },
       "Sent Emirates-only deal",
     );
   } catch (error) {
@@ -1064,7 +1084,12 @@ async function handleUserCommand({
   }
 
   if (cmd.type === "search-thailand") {
-    await sendChat(replyChatId, "✅ *קיבלתי: אמירטס* — מחפש עכשיו…");
+    const ackOk = await sendChat(
+      replyChatId,
+      "✅ *קיבלתי: אמירטס* — מחפש עכשיו דיל אמירטס אמיתי…",
+    );
+    log.info({ replyChatId, ackOk }, "אמירטס ack sent");
+    // Don't block behind other scans more than a few seconds.
     runThailandFixedSearch(replyChatId, { skipAck: true }).catch((error) => {
       log.warn({ error }, "Thailand command failed");
     });
