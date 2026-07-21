@@ -368,8 +368,9 @@ function formatDealMessage(deal) {
     `📅 חזרה ${backDay} ${formatDate(deal.returnDate)}`,
     deal.scheduleLabelHe ? `🕕 ${deal.scheduleLabelHe}` : "",
     `💰 *₪${ils}* הלוך ושוב`,
-    isThailand && deal.baggageLabelHe ? `🧳 ${deal.baggageLabelHe}` : "",
-    !isThailand && deal.airlineLabelHe && !isBudapest
+    isThailand && deal.baggageIncluded ? `🧳 *מזוודה כלולה*` : "",
+    deal.baggageLabelHe ? `🧳 ${deal.baggageLabelHe}` : "",
+    !isThailand && !isBudapest && deal.airlineLabelHe
       ? `🛫 ${deal.airlineLabelHe}`
       : "",
     deal.bookingUrl ? `🔗 ${deal.bookingUrl}` : "",
