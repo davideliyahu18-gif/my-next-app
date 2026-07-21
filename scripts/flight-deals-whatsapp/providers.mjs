@@ -260,8 +260,18 @@ function filterPreferredDeals(deals) {
 }
 
 export function resolveProvider() {
-  // Thailand watch uses SerpAPI Google Flights only.
   if (process.env.FLIGHT_DEALS_DEMO === "true") return "demo";
+  const forced = String(process.env.FLIGHT_DEALS_PROVIDER ?? "")
+    .trim()
+    .toLowerCase();
+  if (forced === "travelpayouts" || forced === "aviasales") {
+    return process.env.TRAVELPAYOUTS_TOKEN ? "travelpayouts" : null;
+  }
+  if (forced === "serpapi") {
+    return process.env.SERPAPI_API_KEY ? "serpapi" : null;
+  }
+  // Prefer cheap Travelpayouts when available; SerpAPI is optional deep source.
+  if (process.env.TRAVELPAYOUTS_TOKEN) return "travelpayouts";
   if (process.env.SERPAPI_API_KEY) return "serpapi";
   return null;
 }
@@ -1266,16 +1276,232 @@ async function searchAmadeus() {
   return filterPreferredDeals(deals).sort((a, b) => a.priceUsd - b.priceUsd);
 }
 
+/**
+ * Cheap free provider — Travelpayouts / Aviasales Data API.
+ * Great for fixed-date watches. Less precise than SerpAPI for bags/schedule.
+ */
+async function fetchTravelpayoutsPricesForDates({
+  origin,
+  destination,
+  departureAt,
+  returnAt,
+  currency = "ils",
+  limit = 30,
+}) {
+  const token = process.env.TRAVELPAYOUTS_TOKEN;
+  if (!token) throw new Error("Missing TRAVELPAYOUTS_TOKEN");
+  const params = new URLSearchParams({
+    origin,
+    destination,
+    departure_at: departureAt,
+    return_at: returnAt,
+    one_way: "false",
+    sorting: "price",
+    direct: "false",
+    currency,
+    limit: String(limit),
+    page: "1",
+    unique: "false",
+    token,
+  });
+  const res = await fetch(
+    `https://api.travelpayouts.com/aviasales/v3/prices_for_dates?${params}`,
+    { headers: { "X-Access-Token": token, Accept: "application/json" } },
+  );
+  if (!res.ok) throw new Error(`Travelpayouts HTTP ${res.status}`);
+  const payload = await res.json();
+  if (payload.success === false) {
+    throw new Error(payload.error ?? "Travelpayouts failed");
+  }
+  return Array.isArray(payload.data) ? payload.data : [];
+}
+
+function travelpayoutsAirlineLabel(code) {
+  const c = String(code ?? "").toUpperCase();
+  return (
+    {
+      EK: "אמירטס",
+      FZ: "פליי דובאי",
+      EY: "איתיחאד",
+      LY: "אל על",
+      W6: "וויז אייר",
+      W9: "וויז אייר",
+      FR: "ריאנאייר",
+      U2: "איזיג׳ט",
+      A3: "אייג׳יאן",
+      BA: "בריטיש",
+      LH: "לופטהנזה",
+    }[c] || c || null
+  );
+}
+
+function rowDepartureLocal(row) {
+  const raw = String(row.departure_at ?? row.depart_date ?? "");
+  const m = raw.match(/T(\d{2}:\d{2})/);
+  return m ? m[1] : null;
+}
+
+async function searchThailandViaTravelpayouts() {
+  await ensurePersistedLoaded();
+  const cfg = thailandWatchConfig();
+  const airport = cfg.airports[0] || "BKK";
+  try {
+    const rows = await fetchTravelpayoutsPricesForDates({
+      origin: ORIGIN,
+      destination: airport,
+      departureAt: cfg.outbound,
+      returnAt: cfg.returnDate,
+      currency: "ils",
+      limit: 50,
+    });
+
+    const preferredAirlines = new Set(cfg.airlines.map((a) => a.toUpperCase()));
+    const ranked = [...rows]
+      .map((row) => {
+        const priceIls = Number(row.price);
+        const airline = String(row.airline ?? row.airline_code ?? "")
+          .trim()
+          .toUpperCase();
+        return { row, priceIls, airline };
+      })
+      .filter(
+        (x) =>
+          Number.isFinite(x.priceIls) &&
+          x.priceIls > 0 &&
+          x.priceIls <= cfg.maxPriceIls,
+      )
+      .sort((a, b) => {
+        const aPref = preferredAirlines.has(a.airline) ? 0 : 1;
+        const bPref = preferredAirlines.has(b.airline) ? 0 : 1;
+        if (aPref !== bPref) return aPref - bPref;
+        return a.priceIls - b.priceIls;
+      });
+
+    const best = ranked[0];
+    if (!best) {
+      console.log(`[travelpayouts/thailand] no fares ≤₪${cfg.maxPriceIls}`);
+      return thailandCache.deals?.length ? thailandCache.deals : [];
+    }
+
+    const dep = rowDepartureLocal(best.row);
+    const priceIls = best.priceIls;
+    const priceUsd = Number((priceIls / cfg.ilsToUsd).toFixed(2));
+    const linkDateOut = cfg.outbound.replace(/-/g, "").slice(2);
+    const linkDateBack = cfg.returnDate.replace(/-/g, "").slice(2);
+    const deal = {
+      id: buildDealId(ORIGIN, airport, cfg.outbound, cfg.returnDate, priceIls),
+      origin: ORIGIN,
+      destination: airport,
+      destinationNameHe: "בנגקוק",
+      countryNameHe: "תאילנד",
+      departureDate: cfg.outbound,
+      returnDate: cfg.returnDate,
+      priceUsd,
+      priceIls,
+      currency: "ILS",
+      bookingUrl: `https://www.aviasales.com/search/${ORIGIN}${linkDateOut}${airport}${linkDateBack}1`,
+      imageUrl: null,
+      watch: "thailand",
+      airlineLabelHe: travelpayoutsAirlineLabel(best.airline),
+      baggageIncluded: false,
+      baggageLabelHe: "מטמון Aviasales · בדקו מזוודה לפני הזמנה",
+      scheduleLabelHe: dep ? `יציאה ~${dep}` : null,
+      bookWith: "travelpayouts",
+      provider: "travelpayouts",
+    };
+
+    thailandCache = { at: Date.now(), deals: [deal] };
+    await persistDeals();
+    console.log(
+      `[travelpayouts/thailand] ${cfg.outbound}→${cfg.returnDate} ₪${priceIls} ${deal.airlineLabelHe || best.airline}`,
+    );
+    return [deal];
+  } catch (error) {
+    console.warn("[travelpayouts/thailand]", error);
+    return thailandCache.deals?.length ? thailandCache.deals : [];
+  }
+}
+
+async function searchBudapestViaTravelpayouts() {
+  await ensurePersistedLoaded();
+  const cfg = budapestWatchConfig();
+  const airport = cfg.airports[0] || "BUD";
+  try {
+    const rows = await fetchTravelpayoutsPricesForDates({
+      origin: ORIGIN,
+      destination: airport,
+      departureAt: cfg.outbound,
+      returnAt: cfg.returnDate,
+      currency: "ils",
+      limit: 30,
+    });
+
+    let best = null;
+    for (const row of rows) {
+      const priceIls = Number(row.price);
+      if (!Number.isFinite(priceIls) || priceIls <= 0 || priceIls > cfg.maxPriceIls) {
+        continue;
+      }
+      if (!best || priceIls < best.priceIls) {
+        best = {
+          priceIls,
+          airline: String(row.airline ?? "").toUpperCase(),
+          dep: rowDepartureLocal(row),
+        };
+      }
+    }
+
+    if (!best) {
+      console.log(`[travelpayouts/budapest] no fares ≤₪${cfg.maxPriceIls}`);
+      return budapestCache.deals?.length ? budapestCache.deals : [];
+    }
+
+    const priceUsd = Number((best.priceIls / cfg.ilsToUsd).toFixed(2));
+    const linkDateOut = cfg.outbound.replace(/-/g, "").slice(2);
+    const linkDateBack = cfg.returnDate.replace(/-/g, "").slice(2);
+    const deal = {
+      id: buildDealId(ORIGIN, airport, cfg.outbound, cfg.returnDate, best.priceIls),
+      origin: ORIGIN,
+      destination: airport,
+      destinationNameHe: "בודפשט",
+      countryNameHe: "הונגריה",
+      departureDate: cfg.outbound,
+      returnDate: cfg.returnDate,
+      priceUsd,
+      priceIls: best.priceIls,
+      currency: "ILS",
+      bookingUrl: `https://www.aviasales.com/search/${ORIGIN}${linkDateOut}${airport}${linkDateBack}1`,
+      imageUrl: null,
+      watch: "budapest",
+      airlineLabelHe: travelpayoutsAirlineLabel(best.airline),
+      baggageIncluded: false,
+      baggageLabelHe: null,
+      scheduleLabelHe: best.dep ? `יציאה ~${best.dep}` : null,
+      bookWith: "travelpayouts",
+      provider: "travelpayouts",
+    };
+
+    budapestCache = { at: Date.now(), deals: [deal] };
+    await persistDeals();
+    console.log(
+      `[travelpayouts/budapest] ${cfg.outbound}→${cfg.returnDate} ₪${best.priceIls} ${deal.airlineLabelHe || best.airline}`,
+    );
+    return [deal];
+  } catch (error) {
+    console.warn("[travelpayouts/budapest]", error);
+    return budapestCache.deals?.length ? budapestCache.deals : [];
+  }
+}
+
 export async function searchDeals({ forceRefresh = false } = {}) {
   await ensurePersistedLoaded();
   const provider = resolveProvider();
   if (!provider) {
     throw new Error(
-      "הגדר SERPAPI_API_KEY ו/או SKYSCANNER_RAPIDAPI_KEY, או FLIGHT_DEALS_DEMO=true",
+      "הגדר TRAVELPAYOUTS_TOKEN (מומלץ/חינם) או SERPAPI_API_KEY, או FLIGHT_DEALS_DEMO=true",
     );
   }
 
-  // Permanent watches only: Thailand (EK+bags) + Budapest fixed dates.
   if (provider === "demo") {
     const [th, bud] = await Promise.all([
       searchThailandWatch({ forceRefresh: true }),
@@ -1285,8 +1511,42 @@ export async function searchDeals({ forceRefresh = false } = {}) {
     return merged.length ? merged : demoDeals();
   }
 
-  // If rate-limited, serve last known good deals immediately.
+  if (provider === "travelpayouts") {
+    const results = await Promise.allSettled([
+      searchThailandViaTravelpayouts(),
+      searchBudapestViaTravelpayouts(),
+    ]);
+    const lists = [];
+    for (const [i, label] of [
+      [0, "thailand"],
+      [1, "budapest"],
+    ]) {
+      if (results[i].status === "fulfilled") lists.push(results[i].value);
+      else console.warn(`[${label}]`, results[i].reason);
+    }
+    const merged = mergeDeals(lists);
+    if (merged.length) return merged;
+    const cached = [
+      ...(thailandCache.deals ?? []),
+      ...(budapestCache.deals ?? []),
+    ];
+    return cached.length ? mergeDeals([cached]) : [];
+  }
+
+  // SerpAPI path — auto-fallback to Travelpayouts when rate-limited/empty.
   if (Date.now() < serpCooldownUntil) {
+    if (process.env.TRAVELPAYOUTS_TOKEN) {
+      console.warn("[serpapi] cooling down — switching to Travelpayouts");
+      const results = await Promise.allSettled([
+        searchThailandViaTravelpayouts(),
+        searchBudapestViaTravelpayouts(),
+      ]);
+      const lists = results
+        .filter((r) => r.status === "fulfilled")
+        .map((r) => r.value);
+      const merged = mergeDeals(lists);
+      if (merged.length) return merged;
+    }
     const cached = [
       ...(thailandCache.deals ?? []),
       ...(budapestCache.deals ?? []),
@@ -1314,6 +1574,18 @@ export async function searchDeals({ forceRefresh = false } = {}) {
   }
   const merged = mergeDeals(lists);
   if (!merged.length) {
+    if (process.env.TRAVELPAYOUTS_TOKEN) {
+      console.warn("[serpapi] empty — trying Travelpayouts fallback");
+      const fb = await Promise.allSettled([
+        searchThailandViaTravelpayouts(),
+        searchBudapestViaTravelpayouts(),
+      ]);
+      const fbLists = fb
+        .filter((r) => r.status === "fulfilled")
+        .map((r) => r.value);
+      const fbMerged = mergeDeals(fbLists);
+      if (fbMerged.length) return fbMerged;
+    }
     const cached = [
       ...(thailandCache.deals ?? []),
       ...(budapestCache.deals ?? []),
