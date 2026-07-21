@@ -128,6 +128,7 @@ let reconnectTimer = null;
 let connecting = false;
 let connectGeneration = 0;
 let reconnectFailures = 0;
+let whatsappWasDisconnected = false;
 /** @type {Map<string, import("@whiskeysockets/baileys").proto.IMessage>} */
 const messageStore = new Map();
 const handledMsgIds = new Set();
@@ -728,7 +729,8 @@ function isRecentMessage(msg) {
   const ts = Number(msg.messageTimestamp || 0);
   if (!ts) return false;
   const ms = ts > 1e12 ? ts : ts * 1000;
-  return Date.now() - ms < 3 * 60_000;
+  // After reconnect, decrypt retries can arrive several minutes late.
+  return Date.now() - ms < 10 * 60_000;
 }
 
 function sameChatId(a, b) {
@@ -967,21 +969,23 @@ function senderJidFromMsg(msg) {
   return String(msg.key?.remoteJid ?? "").split(":")[0];
 }
 
-async function runThailandFixedSearch(chatId) {
+async function runThailandFixedSearch(chatId, { skipAck = false } = {}) {
   const cfg = thailandWatchConfig();
-  try {
-    await sock.sendMessage(chatId, {
-      text: [
-        "🇹🇭 *מחפש דיל אמירטס בלבד*",
+  if (!skipAck) {
+    const ackOk = await sendChat(
+      chatId,
+      [
+        "✅ *קיבלתי: אמירטס*",
+        "🇹🇭 מחפש דיל אמירטס אמיתי בלבד",
         `תאריכים: *${formatDate(cfg.outbound)} – ${formatDate(cfg.returnDate)}*`,
-        `חברה: *אמירטס* · *מזוודה כלולה*`,
-        `לו״ז: *יציאה ${cfg.outboundDep}→${cfg.outboundArr}* · *חזרה בלילה*`,
+        `מזוודה כלולה · יציאה ${cfg.outboundDep}→${cfg.outboundArr}`,
         "",
         "🔄 רגע…",
       ].join("\n"),
-    });
-  } catch (error) {
-    log.warn({ error }, "Failed to send Thailand search ack");
+    );
+    if (!ackOk) {
+      log.warn({ chatId }, "Failed to ack אמירטס command in group");
+    }
   }
 
   try {
@@ -1009,35 +1013,24 @@ async function runThailandFixedSearch(chatId) {
         : serp.coolingDown
           ? `Google Flights חסום זמנית (מכסה/המתנה ~${Math.ceil(serp.coolDownSeconds / 60)} דק׳).`
           : "מכסת Google Flights החודשית נגמרה — בלי זה אי אפשר לאמת אמירטס + מזוודה.";
-      await sock.sendMessage(chatId, {
-        text: [
+      await sendChat(chatId, [
           "🇹🇭 *אין כרגע דיל אמירטס אמיתי*",
           `תאריכים: *${formatDate(cfg.outbound)} – ${formatDate(cfg.returnDate)}*`,
           "מציגים *רק* אמירטס + מזוודה כלולה — לא איתיחאד / לא מטמון כללי.",
           why,
           "כשיחזור חיפוש אמיתי — הדיל יופיע כאן לבד.",
-        ].join("\n"),
-      });
+        ].join("\n"));
       return;
     }
 
-    // One message, one Emirates deal only — never Budapest / other airlines.
-    await sock.sendMessage(chatId, {
-      text: ["🔎 *דיל אמירטס*", "", formatDealMessage(deal)].join("\n"),
-    });
+    await sendChat(chatId, ["🔎 *דיל אמירטס*", "", formatDealMessage(deal)].join("\n"));
     log.info(
       { chatId, priceIls: deal.priceIls, id: deal.id },
       "Sent Emirates-only deal",
     );
   } catch (error) {
     log.warn({ error }, "Thailand fixed search failed");
-    try {
-      await sock.sendMessage(chatId, {
-        text: "⚠️ חיפוש אמירטס נכשל כרגע. נסו שוב בעוד דקה.",
-      });
-    } catch {
-      // ignore
-    }
+    await sendChat(chatId, "⚠️ חיפוש אמירטס נכשל כרגע. נסו שוב בעוד דקה.");
   }
 }
 
@@ -1071,7 +1064,8 @@ async function handleUserCommand({
   }
 
   if (cmd.type === "search-thailand") {
-    runThailandFixedSearch(replyChatId).catch((error) => {
+    await sendChat(replyChatId, "✅ *קיבלתי: אמירטס* — מחפש עכשיו…");
+    runThailandFixedSearch(replyChatId, { skipAck: true }).catch((error) => {
       log.warn({ error }, "Thailand command failed");
     });
     return true;
@@ -1200,6 +1194,12 @@ async function handleIncomingMessage(msg, upsertType = "notify") {
     if (!msg.message) {
       // Recent undecrypted messages — ask WA to retry; don't mark handled.
       if (isRecentMessage(msg)) {
+        if (chatId.endsWith("@g.us") && sameChatId(chatId, groupJid)) {
+          log.warn(
+            { chatId, id: msg.key?.id, participant: msg.key?.participant },
+            "Undecrypted group message — requesting retry",
+          );
+        }
         noteDecryptFailure(chatId);
         try {
           // Nudge retry pipeline (Baileys uses getMessage + msgRetryCounterCache).
@@ -1262,7 +1262,8 @@ async function handleIncomingMessage(msg, upsertType = "notify") {
     const now = Date.now();
     if (now - lastStatusCommandAt < STATUS_COMMAND_COOLDOWN_MS) {
       markHandledMessage(msg);
-      log.info({ body }, "Group command cooldown — skipping duplicate");
+      log.info({ body, cmd: groupCmd.type }, "Group command cooldown");
+      await sendChat(chatId.split(":")[0], "⏳ עוד רגע — מחפש כבר…");
       return;
     }
     lastStatusCommandAt = now;
@@ -1282,6 +1283,17 @@ async function handleIncomingMessage(msg, upsertType = "notify") {
     });
   } catch (error) {
     log.warn({ error }, "Failed to handle incoming message");
+  }
+}
+
+async function refreshGroupKeys() {
+  if (!sock || !groupJid) return;
+  try {
+    await sock.groupFetchAllParticipating();
+    await sock.groupMetadata(groupJid);
+    log.info({ groupJid }, "Refreshed group metadata/keys");
+  } catch (error) {
+    log.warn({ error, groupJid }, "refreshGroupKeys failed");
   }
 }
 
@@ -1662,36 +1674,36 @@ async function connectWhatsApp() {
         }
         console.log("\n✅ WhatsApp מחובר בהצלחה!\n");
         log.info("WhatsApp connected");
-        // Refresh group sender keys so group commands decrypt reliably.
-        if (groupJid) {
-          sock
-            .groupMetadata(groupJid)
-            .then(() => log.info({ groupJid }, "Refreshed group metadata/keys"))
-            .catch((error) =>
-              log.warn({ error }, "groupMetadata refresh failed"),
-            );
-        }
-        if (groupJid) {
-          onGroupReady().catch((error) => {
-            log.warn({ error }, "onGroupReady failed");
-          });
-        } else if (cfg.groupName) {
-          resolveGroupByName().then((found) => {
+        (async () => {
+          if (whatsappWasDisconnected) {
+            whatsappWasDisconnected = false;
+            log.warn("Reconnect after drop — repairing Signal sessions");
+            await repairSignalSessions("reconnect-open");
+          }
+          await refreshGroupKeys();
+          if (groupJid) {
+            onGroupReady().catch((error) => {
+              log.warn({ error }, "onGroupReady failed");
+            });
+          } else if (cfg.groupName) {
+            const found = await resolveGroupByName();
             if (found) {
+              await refreshGroupKeys();
               onGroupReady().catch((error) => {
                 log.warn({ error }, "onGroupReady failed");
               });
             } else {
               startGroupPolling();
             }
-          });
-        } else {
-          console.error("❌ הגדר WHATSAPP_GROUP_NAME או WHATSAPP_GROUP_CHAT_ID");
-        }
+          } else {
+            console.error("❌ הגדר WHATSAPP_GROUP_NAME או WHATSAPP_GROUP_CHAT_ID");
+          }
+        })().catch((error) => log.warn({ error }, "post-connect setup failed"));
       }
 
       if (connection === "close") {
         whatsappConnected = false;
+        whatsappWasDisconnected = true;
         connecting = false;
         const status = lastDisconnect?.error?.output?.statusCode;
         const awaitingPairing =
@@ -1726,7 +1738,9 @@ async function connectWhatsApp() {
           scheduleReconnect(60_000, { repairSessions: true });
           return;
         }
-        scheduleReconnect(Math.min(30_000, 5_000 + reconnectFailures * 2_000));
+        scheduleReconnect(Math.min(30_000, 5_000 + reconnectFailures * 2_000), {
+          repairSessions: reconnectFailures >= 1,
+        });
       }
     });
   } catch (error) {
