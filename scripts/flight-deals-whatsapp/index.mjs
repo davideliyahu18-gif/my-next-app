@@ -104,7 +104,7 @@ function envConfig() {
     amadeusBase: process.env.AMADEUS_API_BASE ?? "https://test.api.amadeus.com",
     amadeusId: process.env.AMADEUS_CLIENT_ID ?? "",
     amadeusSecret: process.env.AMADEUS_CLIENT_SECRET ?? "",
-    cronExpr: process.env.FLIGHT_DEALS_SCAN_CRON ?? "*/10 * * * *",
+    cronExpr: process.env.FLIGHT_DEALS_SCAN_CRON ?? "*/30 * * * *",
   };
 }
 
@@ -352,31 +352,58 @@ function formatDealMessage(deal) {
   const outDay = hebrewDay(deal.departureDate);
   const backDay = hebrewDay(deal.returnDate);
   const header = isThailand
-    ? "🇹🇭 *מעקב תאילנד · אמירטס · מזוודה*"
+    ? "🇹🇭 *תאילנד · בנגקוק*"
     : isBudapest
-      ? "🇭🇺 *מעקב בודפשט*"
+      ? "🇭🇺 *בודפשט*"
       : "🔥 *מכירה מצוינת!*";
-  const footer = isThailand
-    ? "✈️ מתל אביב · יציאה 15:10→07:35 · חזרה בלילה · אמירטס + מזוודה"
+  const sub = isThailand
+    ? "אמירטס · מזוודה כלולה"
     : isBudapest
-      ? "✈️ מתל אביב · 11/11/2026–15/11/2026 · מעקב קבוע"
-      : `✈️ מתל אביב · עד ${cfg.maxPrice}$`;
+      ? deal.airlineLabelHe || "טיסה זמינה"
+      : "";
   return [
     header,
-    "",
-    country ? `*${dest}, ${country}*` : `*${dest}*`,
-    `📅 יציאה ${outDay}: ${formatDate(deal.departureDate)}`,
-    `📅 חזרה ${backDay}: ${formatDate(deal.returnDate)}`,
-    deal.scheduleLabelHe ? `🕕 *לוח זמנים:* ${deal.scheduleLabelHe}` : "",
-    `💰 *₪${ils}* (כ־$${usd}) *הלוך ושוב*`,
-    deal.airlineLabelHe ? `🛫 חברת תעופה: *${deal.airlineLabelHe}*` : "",
-    isThailand ? `🧳 *מזוודה כלולה*` : "",
-    isThailand && deal.baggageLabelHe ? `   (${deal.baggageLabelHe})` : "",
-    footer,
-    deal.bookingUrl ? `\n🔗 קישור להזמנה:\n${deal.bookingUrl}` : "",
+    sub,
+    `📅 יציאה ${outDay} ${formatDate(deal.departureDate)}`,
+    `📅 חזרה ${backDay} ${formatDate(deal.returnDate)}`,
+    deal.scheduleLabelHe ? `🕕 ${deal.scheduleLabelHe}` : "",
+    `💰 *₪${ils}* הלוך ושוב`,
+    isThailand && deal.baggageLabelHe ? `🧳 ${deal.baggageLabelHe}` : "",
+    !isThailand && deal.airlineLabelHe && !isBudapest
+      ? `🛫 ${deal.airlineLabelHe}`
+      : "",
+    deal.bookingUrl ? `🔗 ${deal.bookingUrl}` : "",
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function formatWatchUpdateMessage(deals = []) {
+  const watchDeals = pickWatchDeals(deals);
+  const now = new Date();
+  const hh = String((now.getUTCHours() + 3) % 24).padStart(2, "0");
+  const mm = String(now.getUTCMinutes()).padStart(2, "0");
+  if (!watchDeals.length) {
+    return [
+      `✈️ *עדכון טיסות* · ${hh}:${mm}`,
+      "━━━━━━━━━━━━━━",
+      "",
+      "עדיין אין התאמות במעקבים הקבועים.",
+      "לעדכון: *בוט מחפש*",
+    ].join("\n");
+  }
+  return [
+    `✈️ *עדכון טיסות* · ${hh}:${mm}`,
+    "━━━━━━━━━━━━━━",
+    "",
+    ...watchDeals.flatMap((deal, i) => [
+      ...(i > 0 ? ["", "────────", ""] : []),
+      formatDealMessage(deal),
+    ]),
+    "",
+    "━━━━━━━━━━━━━━",
+    "לעדכון: *בוט מחפש*",
+  ].join("\n");
 }
 
 async function sendChat(chatId, content) {
@@ -602,7 +629,7 @@ function extractMessageText(msg) {
 }
 
 let lastStatusCommandAt = 0;
-const STATUS_COMMAND_COOLDOWN_MS = 12_000;
+const STATUS_COMMAND_COOLDOWN_MS = 8_000;
 
 function buildStatusReply({ searching = false, personal = false } = {}) {
   const status = getSearchStatus();
@@ -1033,11 +1060,11 @@ async function onGroupReady() {
       [
         "✅ *הבוט מחובר!*",
         "",
-        "מחפש *רק* טיסות תאילנד באמירטס *עם מזוודה כלולה*.",
-        "לו״ז: יציאה *15:10→07:35* · חזרה *בלילה*.",
-        "תאריכים קבועים: 10/02/2027–10/03/2027.",
-        "כתבו *בוט מחפש* או *בוט מחפש?* לסטטוס וחיפוש מיידי.",
-        "כשהמחיר יירד — אשלח לכאן.",
+        "מעקבים קבועים:",
+        "🇹🇭 תאילנד · אמירטס + מזוודה · 10/02/2027–10/03/2027",
+        "🇭🇺 בודפשט · 11/11/2026–15/11/2026",
+        "",
+        "כתבו *בוט מחפש* לעדכון מיידי.",
         cfg.demoMode ? "\n_מצב דמו פעיל._" : "",
       ]
         .filter(Boolean)
@@ -1051,7 +1078,10 @@ async function onGroupReady() {
 
   if (!startupScanDone) {
     startupScanDone = true;
-    await runScan({ forceRefresh: true, reason: "group-ready" });
+    const deals = await runScan({ forceRefresh: true, reason: "group-ready" });
+    // Always post a clean Thailand + Budapest card after reconnect/start.
+    await sendToGroup(formatWatchUpdateMessage(deals));
+    log.info("Posted startup Thailand+Budapest update to group");
   }
 }
 
@@ -1401,15 +1431,32 @@ async function connectWhatsApp() {
         log.warn({ status, awaitingPairing }, "WhatsApp disconnected");
 
         if (status === DisconnectReason.loggedOut) {
-          console.error("❌ WhatsApp התנתק לצמיתות (logged out). הריצו: npm run flight-deals:relink");
-          process.exit(1);
+          console.error(
+            "❌ WhatsApp התנתק (logged out) — מנקה auth ומחכה ל-QR חדש…",
+          );
+          try {
+            if (existsSync(AUTH_DIR)) {
+              const files = await readdir(AUTH_DIR);
+              for (const name of files) {
+                await unlink(path.join(AUTH_DIR, name)).catch(() => {});
+              }
+            }
+          } catch (error) {
+            log.warn({ error }, "Failed to wipe auth after logout");
+          }
+          reconnectFailures = 0;
+          pairingStarted = false;
+          scheduleReconnect(3_000, { repairSessions: false });
+          return;
         }
         if (awaitingPairing) return;
 
         reconnectFailures += 1;
-        if (reconnectFailures >= 8) {
-          console.error("❌ יותר מדי ניסיונות חיבור שנכשלו. יוצא.");
-          process.exit(1);
+        if (reconnectFailures >= 12) {
+          console.error("❌ יותר מדי ניסיונות חיבור שנכשלו — ממתין ומנסה שוב…");
+          reconnectFailures = 0;
+          scheduleReconnect(60_000, { repairSessions: true });
+          return;
         }
         scheduleReconnect(Math.min(30_000, 5_000 + reconnectFailures * 2_000));
       }

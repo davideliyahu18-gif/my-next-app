@@ -51,3 +51,4 @@ scripts/flight-deals-whatsapp/qr-link.txt
 scripts/flight-deals-whatsapp/test-trigger.json
 scripts/flight-deals-whatsapp/bot.lock
 scripts/flight-deals-whatsapp/personal-users.json
+scripts/flight-deals-whatsapp/last-deals.json

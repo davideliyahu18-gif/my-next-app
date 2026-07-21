@@ -1,3 +1,11 @@
+import { readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const LAST_DEALS_FILE = path.join(__dirname, "last-deals.json");
+
 const ORIGIN = process.env.FLIGHT_DEALS_ORIGIN ?? "TLV";
 const HOST = "sky-scrapper.p.rapidapi.com";
 /** Europe Knowledge Graph id — surfaces more cheap regional destinations. */
@@ -17,6 +25,50 @@ const placeCache = new Map();
 let serpCache = { at: 0, deals: null };
 let thailandCache = { at: 0, deals: null };
 let budapestCache = { at: 0, deals: null };
+let serpCooldownUntil = 0;
+
+async function loadPersistedDeals() {
+  if (!existsSync(LAST_DEALS_FILE)) return;
+  try {
+    const raw = JSON.parse(await readFile(LAST_DEALS_FILE, "utf8"));
+    if (Array.isArray(raw?.thailand) && raw.thailand.length) {
+      thailandCache = { at: Number(raw.thailandAt ?? Date.now()), deals: raw.thailand };
+    }
+    if (Array.isArray(raw?.budapest) && raw.budapest.length) {
+      budapestCache = { at: Number(raw.budapestAt ?? Date.now()), deals: raw.budapest };
+    }
+  } catch {
+    // ignore
+  }
+}
+
+async function persistDeals() {
+  try {
+    await writeFile(
+      LAST_DEALS_FILE,
+      JSON.stringify(
+        {
+          thailand: thailandCache.deals ?? [],
+          thailandAt: thailandCache.at || Date.now(),
+          budapest: budapestCache.deals ?? [],
+          budapestAt: budapestCache.at || Date.now(),
+        },
+        null,
+        2,
+      ) + "\n",
+    );
+  } catch {
+    // ignore
+  }
+}
+
+// Warm caches from disk ASAP (top-level await not available in all contexts — lazy).
+let persistedLoaded = false;
+async function ensurePersistedLoaded() {
+  if (persistedLoaded) return;
+  persistedLoaded = true;
+  await loadPersistedDeals();
+}
 
 /** Permanent Thailand watch — DD/MM/YYYY 10/02/2027–10/03/2027 */
 export function thailandWatchConfig() {
@@ -640,6 +692,11 @@ export function hasFreeCheckedBag(baggagePrices) {
 }
 
 async function fetchGoogleFlights(params) {
+  if (Date.now() < serpCooldownUntil) {
+    throw new Error(
+      `SerpAPI cooling down ${Math.ceil((serpCooldownUntil - Date.now()) / 1000)}s after rate-limit`,
+    );
+  }
   const timeoutMs = Number(process.env.SERPAPI_TIMEOUT_MS ?? "45000");
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -648,9 +705,18 @@ async function fetchGoogleFlights(params) {
       `https://serpapi.com/search.json?${new URLSearchParams(params)}`,
       { signal: controller.signal },
     );
+    if (res.status === 429) {
+      serpCooldownUntil = Date.now() + 30 * 60_000;
+      throw new Error("SerpAPI HTTP 429 — rate limited, cooling 30m");
+    }
     if (!res.ok) throw new Error(`SerpAPI HTTP ${res.status}`);
     const payload = await res.json();
-    if (payload.error) throw new Error(payload.error);
+    if (payload.error) {
+      if (/rate|limit|quota/i.test(String(payload.error))) {
+        serpCooldownUntil = Date.now() + 30 * 60_000;
+      }
+      throw new Error(payload.error);
+    }
     return payload;
   } catch (error) {
     if (error?.name === "AbortError") {
@@ -910,6 +976,7 @@ async function searchThailandWatch({ forceRefresh = false } = {}) {
     return thailandCache.deals;
   }
   thailandCache = { at: Date.now(), deals: merged };
+  await persistDeals();
   console.log(
     `[thailand] Emirates + bag ${cfg.outbound}→${cfg.returnDate}` +
       ` airports=${cfg.airports.join(",")}` +
@@ -1033,6 +1100,7 @@ async function searchBudapestWatch({ forceRefresh = false } = {}) {
     return budapestCache.deals;
   }
   budapestCache = { at: Date.now(), deals: merged };
+  await persistDeals();
   console.log(
     `[budapest] ${cfg.outbound}→${cfg.returnDate}` +
       ` airports=${cfg.airports.join(",")}` +
@@ -1199,6 +1267,7 @@ async function searchAmadeus() {
 }
 
 export async function searchDeals({ forceRefresh = false } = {}) {
+  await ensurePersistedLoaded();
   const provider = resolveProvider();
   if (!provider) {
     throw new Error(
@@ -1216,6 +1285,20 @@ export async function searchDeals({ forceRefresh = false } = {}) {
     return merged.length ? merged : demoDeals();
   }
 
+  // If rate-limited, serve last known good deals immediately.
+  if (Date.now() < serpCooldownUntil) {
+    const cached = [
+      ...(thailandCache.deals ?? []),
+      ...(budapestCache.deals ?? []),
+    ];
+    if (cached.length) {
+      console.warn(
+        `[serpapi] cooling down — serving ${cached.length} cached deals`,
+      );
+      return mergeDeals([cached]);
+    }
+  }
+
   const results = await Promise.allSettled([
     searchThailandWatch({ forceRefresh }),
     searchBudapestWatch({ forceRefresh }),
@@ -1229,5 +1312,16 @@ export async function searchDeals({ forceRefresh = false } = {}) {
     if (results[i].status === "fulfilled") lists.push(results[i].value);
     else console.warn(`[${label}]`, results[i].reason);
   }
-  return mergeDeals(lists);
+  const merged = mergeDeals(lists);
+  if (!merged.length) {
+    const cached = [
+      ...(thailandCache.deals ?? []),
+      ...(budapestCache.deals ?? []),
+    ];
+    if (cached.length) {
+      console.warn(`[serpapi] empty live search — using ${cached.length} cached`);
+      return mergeDeals([cached]);
+    }
+  }
+  return merged;
 }
