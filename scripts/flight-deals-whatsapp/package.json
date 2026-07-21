@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node index.mjs"
+    "start": "node supervise.mjs",
+    "start:once": "node index.mjs"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.18",

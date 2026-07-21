@@ -43,6 +43,7 @@ const SEEN_FILE = path.join(__dirname, "seen-deals.json");
 const STATE_FILE = path.join(__dirname, "bot-state.json");
 const TRIGGER_FILE = path.join(__dirname, "test-trigger.json");
 const LOCK_FILE = path.join(__dirname, "bot.lock");
+const HEARTBEAT_FILE = path.join(__dirname, "bot-heartbeat.json");
 
 const require = createRequire(import.meta.url);
 const baileys = require("@whiskeysockets/baileys");
@@ -142,24 +143,59 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function acquireInstanceLock() {
+function pidAlive(pid) {
+  if (!pid || !Number.isFinite(pid)) return false;
   try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function acquireInstanceLock() {
+  const tryCreate = () => {
     lockFd = openSync(LOCK_FILE, "wx");
     writeSync(lockFd, String(process.pid));
+  };
+
+  try {
+    tryCreate();
   } catch (error) {
     if (error?.code === "EEXIST") {
+      let otherPid = 0;
       let other = "";
       try {
-        other = ` (pid ${require("node:fs").readFileSync(LOCK_FILE, "utf8").trim()})`;
+        other = require("node:fs").readFileSync(LOCK_FILE, "utf8").trim();
+        otherPid = Number(other);
       } catch {
         // ignore
       }
-      console.error(
-        `❌ הבוט כבר רץ${other}. עצור אותו לפני הפעלה מחדש:\n   pkill -f 'flight-deals-whatsapp/index.mjs'`,
-      );
-      process.exit(1);
+      // Stale lock after a crash — reclaim so the watchdog can bring us back.
+      if (!pidAlive(otherPid)) {
+        try {
+          unlinkSync(LOCK_FILE);
+        } catch {
+          // ignore
+        }
+        try {
+          tryCreate();
+          console.warn(
+            `⚠️  נעילה ישנה (pid ${other || "?"}) נוקתה — ממשיכים.`,
+          );
+        } catch (retryError) {
+          console.error("❌ לא הצלחתי לנעול אחרי ניקוי נעילה ישנה", retryError);
+          process.exit(1);
+        }
+      } else {
+        console.error(
+          `❌ הבוט כבר רץ (pid ${other}). עצור אותו לפני הפעלה מחדש:\n   pkill -f 'flight-deals-whatsapp/(index|supervise)\\.mjs'`,
+        );
+        process.exit(1);
+      }
+    } else {
+      throw error;
     }
-    throw error;
   }
   const release = () => {
     try {
@@ -183,6 +219,29 @@ function acquireInstanceLock() {
     release();
     process.exit(0);
   });
+}
+
+async function writeHeartbeat(extra = {}) {
+  try {
+    await writeFile(
+      HEARTBEAT_FILE,
+      JSON.stringify(
+        {
+          at: Date.now(),
+          iso: new Date().toISOString(),
+          pid: process.pid,
+          connected: Boolean(whatsappConnected),
+          groupJid: groupJid || null,
+          supervised: process.env.FLIGHT_DEALS_SUPERVISED === "1",
+          ...extra,
+        },
+        null,
+        2,
+      ) + "\n",
+    );
+  } catch {
+    // ignore
+  }
 }
 
 function wasHandledMessage(msg) {
@@ -1578,7 +1637,8 @@ async function connectWhatsApp() {
     });
   } catch (error) {
     connecting = false;
-    throw error;
+    log.error({ error }, "connectWhatsApp failed — will retry");
+    scheduleReconnect(8_000, { repairSessions: true });
   }
 }
 
@@ -1586,7 +1646,13 @@ async function main() {
   acquireInstanceLock();
 
   process.on("uncaughtException", (error) => {
-    log.error({ error }, "uncaughtException — keeping bot alive");
+    log.error({ error }, "uncaughtException — keeping bot alive + reconnect");
+    try {
+      whatsappConnected = false;
+      scheduleReconnect(5_000, { repairSessions: true });
+    } catch (reconnectError) {
+      log.error({ reconnectError }, "reconnect after uncaughtException failed");
+    }
   });
   process.on("unhandledRejection", (error) => {
     log.error({ error }, "unhandledRejection — keeping bot alive");
@@ -1602,7 +1668,9 @@ async function main() {
   }
 
   if (!resolveProvider()) {
-    console.error("❌ חסר SERPAPI_API_KEY (או FLIGHT_DEALS_DEMO=true)");
+    console.error(
+      "❌ חסר TRAVELPAYOUTS_TOKEN או SERPAPI_API_KEY (או FLIGHT_DEALS_DEMO=true)",
+    );
     process.exit(1);
   }
 
@@ -1626,7 +1694,15 @@ async function main() {
       { connected: whatsappConnected, groupJid: groupJid || null },
       "Bot heartbeat",
     );
-  }, 30 * 60_000);
+    writeHeartbeat({ reason: "interval" }).catch(() => {});
+    // If WA dropped and nothing is reconnecting, nudge it.
+    if (!whatsappConnected && !connecting && !reconnectTimer) {
+      log.warn("Heartbeat found disconnected socket — scheduling reconnect");
+      scheduleReconnect(2_000, { repairSessions: false });
+    }
+  }, 60_000);
+
+  await writeHeartbeat({ reason: "boot" });
 
   const bud = budapestWatchConfig();
   log.info(
@@ -1640,5 +1716,7 @@ async function main() {
 
 main().catch((error) => {
   console.error(error);
+  // Under supervisor: exit non-zero so it restarts us.
+  // Without supervisor: still exit so systemd/cron wrappers can restart.
   process.exit(1);
 });
