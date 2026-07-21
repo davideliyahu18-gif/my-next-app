@@ -1523,6 +1523,46 @@ async function searchThailandViaTravelpayouts() {
   }
 }
 
+/**
+ * Fixed Thailand command: 10/02/2027–10/03/2027 · Emirates · free checked bag.
+ * Prefer SerpAPI deep schedule+bag match; fall back to Travelpayouts cache.
+ */
+export async function searchThailandFixedWatch({ forceRefresh = true } = {}) {
+  await ensurePersistedLoaded();
+  const cfg = thailandWatchConfig();
+
+  let deep = [];
+  try {
+    deep = await searchThailandWatch({ forceRefresh });
+  } catch (error) {
+    console.warn("[thailand-fixed] deep Emirates+bag search failed", error);
+  }
+
+  const isTravelpayouts = (d) =>
+    d?.provider === "travelpayouts" || d?.bookWith === "travelpayouts";
+
+  const withBag = deep.filter((d) => d?.baggageIncluded && !isTravelpayouts(d));
+  if (withBag.length) {
+    console.log(
+      `[thailand-fixed] Emirates+bag hit ₪${withBag[0].priceIls} ${cfg.outbound}→${cfg.returnDate}`,
+    );
+    return withBag;
+  }
+
+  const deepOnly = deep.filter((d) => !isTravelpayouts(d));
+  if (deepOnly.length) {
+    console.log(
+      `[thailand-fixed] deep hit ₪${deepOnly[0].priceIls} (bag flag=${Boolean(deepOnly[0].baggageIncluded)})`,
+    );
+    return deepOnly;
+  }
+
+  console.warn(
+    "[thailand-fixed] no live Emirates+bag fare — Travelpayouts fallback",
+  );
+  return searchThailandViaTravelpayouts();
+}
+
 async function searchBudapestViaTravelpayouts() {
   await ensurePersistedLoaded();
   const cfg = budapestWatchConfig();

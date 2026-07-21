@@ -16,6 +16,7 @@ import qrcode from "qrcode-terminal";
 import {
   resolveProvider,
   searchDeals as fetchDeals,
+  searchThailandFixedWatch,
   dealFingerprint,
   getSearchStatus,
   getCachedWatchDeals,
@@ -954,6 +955,62 @@ function senderJidFromMsg(msg) {
   return String(msg.key?.remoteJid ?? "").split(":")[0];
 }
 
+async function runThailandFixedSearch(chatId) {
+  const cfg = thailandWatchConfig();
+  try {
+    await sock.sendMessage(chatId, {
+      text: [
+        "🇹🇭 *מחפש תאילנד — מעקב קבוע*",
+        `תאריכים: *${formatDate(cfg.outbound)} – ${formatDate(cfg.returnDate)}*`,
+        `חברה: *אמירטס* · *מזוודה כלולה*`,
+        `לו״ז: *יציאה ${cfg.outboundDep}→${cfg.outboundArr}* · *חזרה בלילה*`,
+        "",
+        "🔄 רגע…",
+      ].join("\n"),
+    });
+  } catch (error) {
+    log.warn({ error }, "Failed to send Thailand search ack");
+  }
+
+  try {
+    for (let i = 0; i < 120 && scanRunning; i += 1) {
+      await sleep(500);
+    }
+    scanRunning = true;
+    let deals = [];
+    try {
+      deals = await searchThailandFixedWatch({ forceRefresh: true });
+      lastScanAt = Date.now();
+      lastScanFound = deals.length;
+    } finally {
+      scanRunning = false;
+    }
+
+    if (!deals.length) {
+      await sock.sendMessage(chatId, {
+        text: [
+          "🇹🇭 *תאילנד — אין תוצאה כרגע*",
+          `תאריכים: *${formatDate(cfg.outbound)} – ${formatDate(cfg.returnDate)}*`,
+          "חיפשתי אמירטס + מזוודה כלולה.",
+          "נסו שוב בעוד כמה דקות.",
+        ].join("\n"),
+      });
+      return;
+    }
+
+    await sendCurrentDealResult(chatId, deals, ["thailand"]);
+  } catch (error) {
+    log.warn({ error }, "Thailand fixed search failed");
+    try {
+      await sock.sendMessage(chatId, {
+        text: "⚠️ חיפוש תאילנד נכשל כרגע. נסו שוב בעוד דקה.",
+      });
+    } catch {
+      // ignore
+    }
+  }
+}
+
 /**
  * Handle bot commands. Replies go to replyChatId (group or DM).
  * User settings are keyed by userId (sender in group, chat in DM).
@@ -980,6 +1037,13 @@ async function handleUserCommand({
 
   if (cmd.type === "help") {
     await sendChat(replyChatId, personalHelpText());
+    return true;
+  }
+
+  if (cmd.type === "search-thailand") {
+    runThailandFixedSearch(replyChatId).catch((error) => {
+      log.warn({ error }, "Thailand command failed");
+    });
     return true;
   }
 
@@ -1240,7 +1304,7 @@ async function onGroupReady() {
         "🇹🇭 תאילנד · אמירטס + מזוודה · 10/02/2027–10/03/2027",
         "🇭🇺 בודפשט · 11/11/2026–15/11/2026",
         "",
-        "כתבו *עזרה* לתפריט, או *בוט מחפש* לעדכון מיידי.",
+        "כתבו *תאילנד* לחיפוש אמירטס+מזוודה, או *עזרה* לתפריט.",
         cfg.demoMode ? "\n_מצב דמו פעיל._" : "",
       ]
         .filter(Boolean)
