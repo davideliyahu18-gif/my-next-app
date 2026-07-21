@@ -266,6 +266,8 @@ function markHandledMessage(msg) {
 
 let decryptFailCount = 0;
 let decryptFailWindowStart = 0;
+let lastGroupHealAt = 0;
+let groupHealInFlight = false;
 
 function noteDecryptFailure(chatId) {
   const now = Date.now();
@@ -278,12 +280,23 @@ function noteDecryptFailure(chatId) {
     { chatId, decryptFailCount },
     "Message arrived undecrypted — will retry; if this keeps happening sessions will auto-repair",
   );
-  // After many failures, clear Signal sessions (keep creds) so keys re-handshake.
-  if (decryptFailCount >= 12) {
+  // Group decrypt fails after reconnect are common — heal quickly.
+  const isTargetGroup =
+    chatId?.endsWith("@g.us") && sameChatId(chatId, groupJid);
+  if (isTargetGroup && decryptFailCount >= 2) {
     decryptFailCount = 0;
-    repairSignalSessions("decrypt-threshold").catch((error) => {
-      log.warn({ error }, "Auto session repair failed");
+    healGroupCrypto("decrypt-fail").catch((error) => {
+      log.warn({ error }, "Group heal after decrypt fail failed");
     });
+    return;
+  }
+  if (decryptFailCount >= 8) {
+    decryptFailCount = 0;
+    repairSignalSessions("decrypt-threshold")
+      .then(() => healGroupCrypto("decrypt-threshold"))
+      .catch((error) => {
+        log.warn({ error }, "Auto session repair failed");
+      });
   }
 }
 
@@ -305,6 +318,51 @@ async function repairSignalSessions(reason = "manual") {
     log.warn({ reason, removed }, "Repaired Signal sessions (creds kept)");
   } catch (error) {
     log.warn({ error, reason }, "Session repair error");
+  }
+}
+
+/** Clear group sender keys + refresh metadata + send probe so WA redistributes keys. */
+async function healGroupCrypto(reason = "manual") {
+  if (!sock || !groupJid) return false;
+  if (groupHealInFlight) return false;
+  if (Date.now() - lastGroupHealAt < 20_000) {
+    log.info({ reason }, "Group heal skipped — too soon");
+    return false;
+  }
+  groupHealInFlight = true;
+  lastGroupHealAt = Date.now();
+  try {
+    const files = await readdir(AUTH_DIR);
+    let removed = 0;
+    const gid = String(groupJid).split("@")[0];
+    for (const name of files) {
+      if (
+        name.startsWith("sender-key-") ||
+        name.startsWith("sender-key-memory-")
+      ) {
+        // Prefer clearing keys for our group; if unsure, clear all sender keys.
+        if (!gid || name.includes(gid) || reason !== "light") {
+          await unlink(path.join(AUTH_DIR, name)).catch(() => {});
+          removed += 1;
+        }
+      }
+    }
+    await refreshGroupKeys();
+    // Outbound message forces participation in the group sender-key chain.
+    const ok = await sendChat(
+      groupJid,
+      [
+        "🔄 *הבוט חזר אונליין*",
+        "אם כתבתם קודם ולא קיבלתם תשובה — כתבו שוב *אמירטס* או *עזרה*.",
+      ].join("\n"),
+    );
+    log.warn({ reason, removed, ok }, "Healed group crypto + probe sent");
+    return ok;
+  } catch (error) {
+    log.warn({ error, reason }, "healGroupCrypto failed");
+    return false;
+  } finally {
+    groupHealInFlight = false;
   }
 }
 
@@ -1224,6 +1282,13 @@ async function handleIncomingMessage(msg, upsertType = "notify") {
             { chatId, id: msg.key?.id, participant: msg.key?.participant },
             "Undecrypted group message — requesting retry",
           );
+          try {
+            if (typeof sock?.requestPlaceholderResend === "function") {
+              await sock.requestPlaceholderResend(msg.key).catch(() => {});
+            }
+          } catch {
+            // ignore
+          }
         }
         noteDecryptFailure(chatId);
         try {
@@ -1700,12 +1765,13 @@ async function connectWhatsApp() {
         console.log("\n✅ WhatsApp מחובר בהצלחה!\n");
         log.info("WhatsApp connected");
         (async () => {
-          if (whatsappWasDisconnected) {
-            whatsappWasDisconnected = false;
-            log.warn("Reconnect after drop — repairing Signal sessions");
-            await repairSignalSessions("reconnect-open");
+          const afterDrop = whatsappWasDisconnected;
+          whatsappWasDisconnected = false;
+          if (afterDrop) {
+            log.warn("Reconnect after drop — healing group crypto");
           }
-          await refreshGroupKeys();
+          // Always heal group sender keys on connect so commands decrypt.
+          await healGroupCrypto(afterDrop ? "reconnect-open" : "boot-open");
           if (groupJid) {
             onGroupReady().catch((error) => {
               log.warn({ error }, "onGroupReady failed");
@@ -1713,7 +1779,7 @@ async function connectWhatsApp() {
           } else if (cfg.groupName) {
             const found = await resolveGroupByName();
             if (found) {
-              await refreshGroupKeys();
+              await healGroupCrypto("group-discovered");
               onGroupReady().catch((error) => {
                 log.warn({ error }, "onGroupReady failed");
               });
