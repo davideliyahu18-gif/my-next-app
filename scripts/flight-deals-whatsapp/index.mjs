@@ -408,23 +408,97 @@ function formatWatchUpdateMessage(deals = []) {
 
 async function sendChat(chatId, content) {
   if (!sock || !chatId) return false;
-  try {
-    if (typeof content === "string") {
-      await sock.sendMessage(chatId, { text: content });
+  const text =
+    typeof content === "string" ? content : formatDealMessage(content);
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      await sock.sendMessage(chatId, { text });
       return true;
+    } catch (error) {
+      const status = error?.output?.statusCode || error?.data;
+      log.warn({ error, chatId, attempt, status }, "sendChat failed");
+      if (attempt < 3) await sleep(1500 * attempt);
     }
-    const caption = formatDealMessage(content);
-    await sock.sendMessage(chatId, { text: caption });
-    return true;
-  } catch (error) {
-    log.warn({ error, chatId }, "sendChat failed");
-    return false;
   }
+  return false;
 }
 
 async function sendToGroup(content) {
   if (!groupJid) return false;
-  return sendChat(groupJid, content);
+  const ok = await sendChat(groupJid, content);
+  if (ok) return true;
+
+  // 403 often means wrong/stale group JID or bot not in group — rediscover.
+  const recovered = await resolveGroupByName();
+  if (recovered && !sameChatId(recovered, groupJid)) {
+    groupJid = recovered;
+    await saveState();
+    return sendChat(groupJid, content);
+  }
+  return false;
+}
+
+async function listJoinedGroups() {
+  if (!sock) return [];
+  try {
+    const participating = await sock.groupFetchAllParticipating();
+    return Object.values(participating ?? {}).map((g) => ({
+      id: g.id,
+      subject: String(g.subject ?? "").trim(),
+    }));
+  } catch (error) {
+    log.warn({ error }, "groupFetchAllParticipating failed");
+    return [];
+  }
+}
+
+async function sendStartupUpdate(deals) {
+  const text = formatWatchUpdateMessage(deals);
+  let ok = await sendToGroup(text);
+  if (ok) {
+    log.info("Posted startup Thailand+Budapest update to group");
+    return true;
+  }
+
+  const groups = await listJoinedGroups();
+  log.warn(
+    { groups: groups.map((g) => `${g.subject}|${g.id}`), expected: groupJid },
+    "Could not send to pinned group — listing joined groups",
+  );
+
+  // Try name match among joined groups.
+  if (cfg.groupName) {
+    const match = groups.find((g) => g.subject === cfg.groupName.trim());
+    if (match?.id) {
+      groupJid = match.id;
+      await saveState();
+      ok = await sendChat(groupJid, text);
+      if (ok) {
+        log.info({ groupJid }, "Posted startup update after group rediscovery");
+        return true;
+      }
+    }
+  }
+
+  // Fallback: DM the linked phone owner so something still arrives.
+  const ownerPhone = normalizeWhatsAppPhone(
+    process.env.WHATSAPP_PHONE || process.env.WHATSAPP_PAIR_PHONE,
+  );
+  if (ownerPhone) {
+    const ownerJid = `${ownerPhone}@s.whatsapp.net`;
+    const personalOk = await sendChat(
+      ownerJid,
+      [
+        "⚠️ לא הצלחתי לשלוח לקבוצה (403).",
+        "ודאו שהמספר *054-967-6816* חבר בקבוצת הטיסות.",
+        "",
+        text,
+      ].join("\n"),
+    );
+    log.info({ personalOk, ownerJid }, "Fallback personal startup update");
+    return personalOk;
+  }
+  return false;
 }
 
 /** One DM per subscriber with all matching deals (no per-destination spam). */
@@ -778,20 +852,30 @@ async function runStatusSearch(
 }
 
 async function processTriggerFile() {
-  if (!existsSync(TRIGGER_FILE) || !sock || !groupJid) return;
+  if (!existsSync(TRIGGER_FILE) || !sock) return;
   try {
     const raw = JSON.parse(await readFile(TRIGGER_FILE, "utf8"));
     await unlink(TRIGGER_FILE);
     if (raw.action === "status") {
       log.info("Queued status search from trigger file");
-      await runStatusSearch(groupJid);
+      await runStatusSearch(groupJid || raw.chatId);
+      return;
+    }
+    if (raw.action === "update") {
+      const deals = await runScan({
+        forceRefresh: true,
+        reason: "trigger-update",
+        reportCurrent: true,
+      });
+      await sendStartupUpdate(deals);
       return;
     }
     const text =
       raw.text ||
       "✅ *הודעת בדיקה*\n\nהבוט פעיל ומחובר.";
-    await sendToGroup(text);
-    log.info("Sent queued test message");
+    const ok = await sendToGroup(text);
+    if (!ok) await sendStartupUpdate([]);
+    log.info({ ok }, "Sent queued test message");
   } catch (error) {
     log.warn({ error }, "Failed to process test trigger");
   }
@@ -1079,9 +1163,7 @@ async function onGroupReady() {
   if (!startupScanDone) {
     startupScanDone = true;
     const deals = await runScan({ forceRefresh: true, reason: "group-ready" });
-    // Always post a clean Thailand + Budapest card after reconnect/start.
-    await sendToGroup(formatWatchUpdateMessage(deals));
-    log.info("Posted startup Thailand+Budapest update to group");
+    await sendStartupUpdate(deals);
   }
 }
 
