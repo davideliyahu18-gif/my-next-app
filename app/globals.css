@@ -339,16 +339,24 @@ body {
 
 .leaflet-control-zoom a {
   background: #ffffff !important;
-  color: #111827 !important;
-  border-color: #e5e7eb !important;
-  width: 34px !important;
-  height: 34px !important;
-  line-height: 34px !important;
-  font-size: 16px !important;
+  color: #1e293b !important;
+  border-color: #e2e8f0 !important;
+  width: 32px !important;
+  height: 32px !important;
+  line-height: 32px !important;
+  font-size: 15px !important;
+  border-radius: 8px !important;
+}
+
+.leaflet-control-zoom {
+  border: 0 !important;
+  margin: 10px !important;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12) !important;
 }
 
 .leaflet-container {
-  background: #ffffff !important;
+  background: #f3f6f9 !important;
   font-family: var(--font-heebo), sans-serif;
+  border-radius: 1rem;
 }
 
