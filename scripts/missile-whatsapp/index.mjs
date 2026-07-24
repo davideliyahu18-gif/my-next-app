@@ -143,9 +143,11 @@ function envConfig() {
     groupName:
       process.env.MISSILE_WHATSAPP_GROUP_NAME || "🛡️ מרכז התרעות אזורי",
     pollCron: process.env.MISSILE_ALERT_POLL_CRON ?? "*/1 * * * *",
+    pollSeconds: Number(process.env.MISSILE_ALERT_POLL_SECONDS || 30),
     sendLaunchPin: process.env.MISSILE_ALERT_SEND_LAUNCH_PIN !== "false",
     sendDemoOnConnect,
     livePoll: process.env.MISSILE_LIVE_POLL !== "false",
+    autoMode: process.env.MISSILE_AUTO_MODE !== "false",
   };
 }
 
@@ -469,6 +471,21 @@ async function main() {
   await loadState();
   await startSock();
 
+  // Auto mode: poll frequently and send new OSINT alerts alone.
+  const seconds = Number.isFinite(cfg.pollSeconds) && cfg.pollSeconds > 5
+    ? cfg.pollSeconds
+    : 30;
+
+  if (cfg.livePoll || cfg.autoMode) {
+    setInterval(() => {
+      void pollOnce();
+    }, seconds * 1000);
+    // First poll shortly after connect.
+    setTimeout(() => {
+      void pollOnce();
+    }, 8000);
+  }
+
   cron.schedule(cfg.pollCron, () => {
     void pollOnce();
   });
@@ -481,11 +498,10 @@ async function main() {
   console.log(
     [
       "",
-      "🚀 בוט שיגורים מקומי רץ",
+      "🚀 בוט שיגורים · מצב אוטומטי",
       `קבוצה: ${cfg.groupName}`,
-      "אין צורך ב-Green API",
-      "אחרי סריקת QR תישלח בדיקה אוטומטית עם מיקום",
-      "בדיקה נוספת: npm run test-send",
+      `סריקת OSINT כל ${seconds} שניות`,
+      "שולח לבד התראות שיגור/מטוסי קרב לקבוצה",
       "",
     ].join("\n"),
   );
