@@ -11,7 +11,12 @@ import {
   statusFromProgress,
   trajectoryPoints,
 } from "@/lib/rockets/geo";
-import type { LaunchSite, RocketTrack } from "@/lib/rockets/types";
+import type {
+  LaunchSite,
+  RocketFeedItem,
+  RocketsSnapshot,
+  RocketTrack,
+} from "@/lib/rockets/types";
 
 const MAP_W = 1000;
 const MAP_H = 620;
@@ -193,14 +198,71 @@ function TrackLayer({
 }
 
 export default function RocketTrackingMap() {
-  const [tracks, setTracks] = useState<RocketTrack[]>(() => createDemoTracks());
-  const [selectedTrackId, setSelectedTrackId] = useState<string | null>("trk-alpha");
+  const [tracks, setTracks] = useState<RocketTrack[]>([]);
+  const [feed, setFeed] = useState<RocketFeedItem[]>([]);
+  const [mode, setMode] = useState<RocketsSnapshot["mode"]>("live");
+  const [errors, setErrors] = useState<string[]>([]);
+  const [sources, setSources] = useState<RocketsSnapshot["sources"]>([]);
+  const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null);
   const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
   const [running, setRunning] = useState(true);
+  const [forceDemo, setForceDemo] = useState(false);
+  const [connected, setConnected] = useState(false);
   const lastTs = useRef<number | null>(null);
+  const selectedTrackIdRef = useRef<string | null>(null);
+  selectedTrackIdRef.current = selectedTrackId;
 
   useEffect(() => {
-    if (!running) {
+    if (forceDemo) {
+      const demo = createDemoTracks();
+      setTracks(demo);
+      setMode("demo");
+      setSelectedTrackId(demo[0]?.id ?? null);
+      setConnected(false);
+      return;
+    }
+
+    let closed = false;
+    const source = new EventSource("/api/rockets/stream");
+
+    source.onopen = () => {
+      if (!closed) setConnected(true);
+    };
+
+    source.onmessage = (event) => {
+      if (closed) return;
+      try {
+        const snapshot = JSON.parse(event.data) as RocketsSnapshot;
+        setTracks(snapshot.tracks);
+        setFeed(snapshot.feed);
+        setMode(snapshot.mode);
+        setErrors(snapshot.errors);
+        setSources(snapshot.sources);
+        const current = selectedTrackIdRef.current;
+        if (
+          snapshot.tracks.length > 0 &&
+          (!current || !snapshot.tracks.some((track) => track.id === current))
+        ) {
+          setSelectedTrackId(snapshot.tracks[0].id);
+        }
+        setConnected(true);
+      } catch {
+        // ignore malformed chunks
+      }
+    };
+
+    source.onerror = () => {
+      if (!closed) setConnected(false);
+    };
+
+    return () => {
+      closed = true;
+      source.close();
+    };
+  }, [forceDemo]);
+
+  useEffect(() => {
+    if (!running || mode === "live") {
       lastTs.current = null;
       return;
     }
@@ -212,9 +274,7 @@ export default function RocketTrackingMap() {
       setTracks((prev) =>
         prev.map((track) => {
           if (track.progress >= 1) return track;
-          // Visual pace: full arc ~90–140s depending on track
-          const rate = track.id === "trk-charlie" ? 0.012 : 0.0075;
-          const progress = Math.min(1, track.progress + dt * rate);
+          const progress = Math.min(1, track.progress + dt * 0.008);
           const etaSeconds = Math.max(0, Math.round(track.etaSeconds - dt));
           return {
             ...track,
@@ -228,21 +288,21 @@ export default function RocketTrackingMap() {
     };
     frame = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(frame);
-  }, [running]);
+  }, [running, mode]);
 
   const selectedTrack =
     tracks.find((t) => t.id === selectedTrackId) ?? tracks[0] ?? null;
   const selectedSite =
     LAUNCH_SITES.find((s) => s.id === selectedSiteId) ?? null;
-
   const activeCount = tracks.filter((t) => t.progress < 1).length;
+  const relatedFeed = feed.filter((item) => item.related).slice(0, 8);
 
   return (
     <div dir="rtl" className="min-h-screen bg-[#07090d] text-zinc-100">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_at_20%_0%,rgba(245,158,11,0.12),transparent_45%),radial-gradient(ellipse_at_80%_20%,rgba(244,63,94,0.08),transparent_40%),linear-gradient(180deg,#07090d_0%,#0c1118_100%)]" />
 
       <header className="relative z-10 border-b border-white/8 bg-black/30 backdrop-blur-md">
-        <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-4 px-4 py-4 md:px-6">
+        <div className="mx-auto flex max-w-[1400px] flex-wrap items-center justify-between gap-4 px-4 py-4 md:px-6">
           <div className="flex items-center gap-4">
             <Link
               href="/"
@@ -259,57 +319,82 @@ export default function RocketTrackingMap() {
               </h1>
             </div>
           </div>
-          <div className="flex items-center gap-3 md:gap-5">
+          <div className="flex flex-wrap items-center gap-3 md:gap-4">
             <div className="hidden text-left sm:block">
               <p className="text-[10px] font-bold tracking-[0.18em] text-zinc-500">
                 שעון ישראל
               </p>
               <LiveClock />
             </div>
-            <div className="flex items-center gap-2 rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-1.5">
+            <div
+              className={`flex items-center gap-2 rounded-full border px-3 py-1.5 ${
+                mode === "live"
+                  ? "border-emerald-500/30 bg-emerald-500/10"
+                  : "border-amber-500/30 bg-amber-500/10"
+              }`}
+            >
               <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-400 opacity-75" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-rose-500" />
+                <span
+                  className={`absolute inline-flex h-full w-full animate-ping rounded-full opacity-75 ${
+                    mode === "live" ? "bg-emerald-400" : "bg-amber-400"
+                  }`}
+                />
+                <span
+                  className={`relative inline-flex h-2 w-2 rounded-full ${
+                    mode === "live" ? "bg-emerald-500" : "bg-amber-500"
+                  }`}
+                />
               </span>
+              <span
+                className={`text-xs font-bold ${
+                  mode === "live" ? "text-emerald-200" : "text-amber-200"
+                }`}
+              >
+                {mode === "live" ? "LIVE טלגרם" : "הדגמה"}
+                {connected && mode === "live" ? " · מחובר" : ""}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-1.5">
               <span className="text-xs font-bold text-rose-200">
                 {activeCount} פעילים
               </span>
             </div>
+            {mode === "demo" && (
+              <button
+                type="button"
+                onClick={() => setRunning((v) => !v)}
+                className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-zinc-200 transition hover:bg-white/10"
+              >
+                {running ? "השהה" : "המשך"}
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => setRunning((v) => !v)}
-              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-zinc-200 transition hover:bg-white/10"
-            >
-              {running ? "השהה" : "המשך"}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setTracks(createDemoTracks());
-                setSelectedTrackId("trk-alpha");
-                setRunning(true);
-              }}
+              onClick={() => setForceDemo((v) => !v)}
               className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs font-bold text-amber-200 transition hover:bg-amber-500/20"
             >
-              הפעל הדגמה
+              {forceDemo ? "חזרה ללייב" : "הדגמה"}
             </button>
           </div>
         </div>
       </header>
 
-      <main className="relative z-10 mx-auto grid max-w-[1400px] gap-4 px-4 py-4 md:grid-cols-[1fr_320px] md:px-6 md:py-6">
+      <main className="relative z-10 mx-auto grid max-w-[1400px] gap-4 px-4 py-4 md:grid-cols-[1fr_340px] md:px-6 md:py-6">
         <section className="overflow-hidden rounded-2xl border border-white/10 bg-[#0b1017]/80 shadow-[0_20px_60px_rgba(0,0,0,0.45)]">
-          <div className="flex items-center justify-between border-b border-white/8 px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/8 px-4 py-3">
             <div>
               <h2 className="text-sm font-bold text-zinc-100">
                 תאטרון איראן → ישראל
               </h2>
               <p className="text-xs text-zinc-500">
-                הדמיה ויזואלית · לא טלמטריה צבאית חיה
+                {mode === "live"
+                  ? "מסלולים מדיווחי טלגרם פומביים · לא רדאר צבאי"
+                  : "מצב הדגמה · אין דיווח שיגור פעיל או נבחר ידנית"}
               </p>
             </div>
             <p className="font-mono text-[10px] text-zinc-500">
-              BOUNDS {DEFAULT_BOUNDS.west}–{DEFAULT_BOUNDS.east}E
+              {sources.map((s) => `@${s.username}`).join(" · ") ||
+                `@newsil5 · bounds ${DEFAULT_BOUNDS.west}-${DEFAULT_BOUNDS.east}E`}
             </p>
           </div>
 
@@ -334,16 +419,11 @@ export default function RocketTrackingMap() {
                     strokeWidth="1"
                   />
                 </pattern>
-                <radialGradient id="glow" cx="50%" cy="50%" r="50%">
-                  <stop offset="0%" stopColor="rgba(251,113,133,0.25)" />
-                  <stop offset="100%" stopColor="rgba(251,113,133,0)" />
-                </radialGradient>
               </defs>
 
               <rect width={MAP_W} height={MAP_H} fill="#080c12" />
               <rect width={MAP_W} height={MAP_H} fill="url(#grid)" />
 
-              {/* Soft land washes */}
               <ellipse
                 cx={project({ lat: 32.5, lng: 54 }, MAP_W, MAP_H).x}
                 cy={project({ lat: 32.5, lng: 54 }, MAP_W, MAP_H).y}
@@ -359,7 +439,6 @@ export default function RocketTrackingMap() {
                 fill="rgba(56,189,248,0.08)"
               />
 
-              {/* Corridor band */}
               <path
                 d={pathD([
                   project({ lat: 34.5, lng: 35 }, MAP_W, MAP_H),
@@ -416,8 +495,26 @@ export default function RocketTrackingMap() {
           </div>
 
           <div className="border-t border-white/8 px-4 py-3 text-xs leading-relaxed text-zinc-500">
-            נקודות השיגור הן אזורים כלליים ממקורות פתוחים/הדגמה — לא קואורדינטות
-            מדויקות של משגרים. המסלולים מונפשים לצורכי ויזואליזציה בלבד.
+            מקורות:{" "}
+            <a
+              href="https://t.me/newsil5"
+              target="_blank"
+              rel="noreferrer"
+              className="text-amber-300/90 underline-offset-2 hover:underline"
+            >
+              @newsil5
+            </a>
+            {" · "}
+            <a
+              href="https://t.me/shigurimisrael"
+              target="_blank"
+              rel="noreferrer"
+              className="text-amber-300/90 underline-offset-2 hover:underline"
+            >
+              @shigurimisrael
+            </a>
+            . מיקומי משגר הם אזורים כלליים מהטקסט — לא קואורדינטות מדויקות.
+            {errors[0] ? ` · ${errors[0]}` : ""}
           </div>
         </section>
 
@@ -426,43 +523,49 @@ export default function RocketTrackingMap() {
             <h3 className="mb-3 text-xs font-bold tracking-[0.2em] text-zinc-500">
               מסלולים פעילים
             </h3>
-            <ul className="space-y-2">
-              {tracks.map((track) => (
-                <li key={track.id}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedTrackId(track.id);
-                      setSelectedSiteId(null);
-                    }}
-                    className={`w-full rounded-xl border px-3 py-3 text-right transition ${
-                      selectedTrackId === track.id
-                        ? "border-rose-400/40 bg-rose-500/10"
-                        : "border-white/8 bg-white/[0.03] hover:border-white/15"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-bold">{track.labelHe}</span>
-                      <span
-                        className={`text-[11px] font-semibold ${statusTone(track.status)}`}
-                      >
-                        {STATUS_LABEL[track.status]}
-                      </span>
-                    </div>
-                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
-                      <div
-                        className="h-full rounded-full bg-gradient-to-l from-rose-400 to-amber-400 transition-[width] duration-300"
-                        style={{ width: `${Math.round(track.progress * 100)}%` }}
-                      />
-                    </div>
-                    <div className="mt-2 flex justify-between font-mono text-[10px] text-zinc-500">
-                      <span>{Math.round(track.progress * 100)}%</span>
-                      <span>ETA {etaLabel(track.etaSeconds)}</span>
-                    </div>
-                  </button>
-                </li>
-              ))}
-            </ul>
+            {tracks.length === 0 ? (
+              <p className="text-sm text-zinc-500">אין מסלולים כרגע.</p>
+            ) : (
+              <ul className="space-y-2">
+                {tracks.map((track) => (
+                  <li key={track.id}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedTrackId(track.id);
+                        setSelectedSiteId(null);
+                      }}
+                      className={`w-full rounded-xl border px-3 py-3 text-right transition ${
+                        selectedTrackId === track.id
+                          ? "border-rose-400/40 bg-rose-500/10"
+                          : "border-white/8 bg-white/[0.03] hover:border-white/15"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-bold">{track.labelHe}</span>
+                        <span
+                          className={`text-[11px] font-semibold ${statusTone(track.status)}`}
+                        >
+                          {STATUS_LABEL[track.status]}
+                        </span>
+                      </div>
+                      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-l from-rose-400 to-amber-400 transition-[width] duration-300"
+                          style={{
+                            width: `${Math.round(track.progress * 100)}%`,
+                          }}
+                        />
+                      </div>
+                      <div className="mt-2 flex justify-between font-mono text-[10px] text-zinc-500">
+                        <span>{track.sourceHe}</span>
+                        <span>ETA {etaLabel(track.etaSeconds)}</span>
+                      </div>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-[#0b1017]/90 p-4">
@@ -481,7 +584,9 @@ export default function RocketTrackingMap() {
                 </div>
                 <div className="flex justify-between gap-3">
                   <dt className="text-zinc-500">סטטוס</dt>
-                  <dd className={`font-semibold ${statusTone(selectedTrack.status)}`}>
+                  <dd
+                    className={`font-semibold ${statusTone(selectedTrack.status)}`}
+                  >
                     {STATUS_LABEL[selectedTrack.status]}
                   </dd>
                 </div>
@@ -492,9 +597,25 @@ export default function RocketTrackingMap() {
                 <div className="flex justify-between gap-3">
                   <dt className="text-zinc-500">מקור מידע</dt>
                   <dd className="text-left text-xs text-zinc-300">
-                    {selectedTrack.sourceHe}
+                    {selectedTrack.sourceUrl ? (
+                      <a
+                        href={selectedTrack.sourceUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-amber-300 underline-offset-2 hover:underline"
+                      >
+                        {selectedTrack.sourceHe}
+                      </a>
+                    ) : (
+                      selectedTrack.sourceHe
+                    )}
                   </dd>
                 </div>
+                {selectedTrack.rawText ? (
+                  <p className="pt-1 text-xs leading-relaxed text-zinc-400">
+                    {selectedTrack.rawText}
+                  </p>
+                ) : null}
               </dl>
             ) : selectedSite ? (
               <dl className="space-y-2 text-sm">
@@ -506,12 +627,6 @@ export default function RocketTrackingMap() {
                   <dt className="text-zinc-500">אזור</dt>
                   <dd className="font-semibold">{selectedSite.region}</dd>
                 </div>
-                <div className="flex justify-between gap-3">
-                  <dt className="text-zinc-500">דיוק</dt>
-                  <dd className="font-semibold">
-                    {selectedSite.precision === "region" ? "אזור כללי" : "שטח משוער"}
-                  </dd>
-                </div>
                 <p className="pt-1 text-xs leading-relaxed text-zinc-400">
                   {selectedSite.noteHe}
                 </p>
@@ -521,25 +636,37 @@ export default function RocketTrackingMap() {
             )}
           </div>
 
-          <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4">
-            <h3 className="mb-2 text-sm font-bold text-amber-200">אתרי שיגור (פומבי)</h3>
-            <ul className="space-y-1.5">
-              {LAUNCH_SITES.map((site) => (
-                <li key={site.id}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedSiteId(site.id);
-                      setSelectedTrackId(null);
-                    }}
-                    className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-right text-sm transition hover:bg-white/5"
-                  >
-                    <span className="font-medium text-zinc-200">{site.nameHe}</span>
-                    <span className="text-[11px] text-zinc-500">{site.region}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+          <div className="rounded-2xl border border-sky-500/20 bg-sky-500/5 p-4">
+            <h3 className="mb-2 text-sm font-bold text-sky-200">פיד טלגרם</h3>
+            {relatedFeed.length === 0 ? (
+              <p className="text-xs text-zinc-500">אין דיווחי שיגור אחרונים.</p>
+            ) : (
+              <ul className="max-h-64 space-y-2 overflow-y-auto">
+                {relatedFeed.map((item) => (
+                  <li key={item.id}>
+                    <a
+                      href={item.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block rounded-lg border border-white/8 bg-black/20 px-3 py-2 transition hover:border-sky-400/30"
+                    >
+                      <div className="mb-1 flex justify-between gap-2 text-[10px] text-zinc-500">
+                        <span>@{item.channel}</span>
+                        <span className="font-mono">
+                          {new Date(item.datetime).toLocaleTimeString("he-IL", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
+                      </div>
+                      <p className="line-clamp-3 text-xs leading-relaxed text-zinc-300">
+                        {item.text}
+                      </p>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </aside>
       </main>
