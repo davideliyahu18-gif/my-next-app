@@ -1,19 +1,17 @@
 #!/usr/bin/env node
 /**
- * Iran → Kuwait missile alert WhatsApp bot (Baileys).
+ * בוט WhatsApp מקומי — איראן → כווית (טקסט + סיכת מיקום)
  *
- * Sends text + native WhatsApp location pin(s) to a group.
- * Polls the Next.js cron endpoint every minute (or local schedule).
- *
- * Setup:
- *   1. cd scripts/missile-whatsapp && npm install
- *   2. Set MISSILE_WHATSAPP_GROUP_NAME or MISSILE_WHATSAPP_CHAT_ID in .env.local
- *   3. npm start  → scan QR once
- *   4. Optional: MISSILE_ALERT_SITE_URL=http://127.0.0.1:3000
+ * בלי Green API. רק:
+ *   cd scripts/missile-whatsapp
+ *   npm install
+ *   npm start
+ *   → סרקו QR בוואטסאפ (מכשירים מקושרים)
+ *   → הבוט מוצא את הקבוצה «🛡️ מרכז התרעות אזורי» ושולח בדיקה
  */
 
 import { createRequire } from "node:module";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile, unlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,7 +40,51 @@ const log = pino({ level: process.env.LOG_LEVEL ?? "info" });
 let sock = null;
 let groupJid = "";
 let pollRunning = false;
+let welcomeSent = false;
 let cfg = null;
+
+function demoAlert() {
+  const now = new Date();
+  const clock = new Intl.DateTimeFormat("he-IL", {
+    timeZone: "Asia/Kuwait",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    day: "2-digit",
+    month: "2-digit",
+    hour12: false,
+  }).format(now);
+
+  return {
+    id: `demo-kuwait-${now.getTime()}`,
+    text: [
+      "🚨 *התראת שיגור · איראן → כווית*",
+      "",
+      "📍 משגר (משוער): אזור כרמאנשאה",
+      "🎯 יעד (משוער): כווית סיטי",
+      "🧭 סוג: בליסטי",
+      `🕐 שיגור: ${clock} (שעון כווית)`,
+      "⏱ צפי הגעה: 3:30",
+      "",
+      "🗺 מפה: https://maps.google.com/?q=29.37590,47.97740",
+      "מקור: הדגמה מקומית",
+      "",
+      "⚠️ מיקום מקורב לפי דיווח פומבי/OSINT — לא קואורדינטה צבאית מדויקת.",
+    ].join("\n"),
+    location: {
+      latitude: 29.3759,
+      longitude: 47.9774,
+      name: "כווית סיטי",
+      address: "אזור יעד משוער · כווית סיטי",
+    },
+    launchLocation: {
+      latitude: 34.31,
+      longitude: 47.07,
+      name: "אזור כרמאנשאה",
+      address: "אזור שיגור משוער · אזור כרמאנשאה",
+    },
+  };
+}
 
 async function loadEnvFile() {
   for (const name of [".env.local", ".env"]) {
@@ -67,6 +109,7 @@ function envConfig() {
     process.env.NEXT_PUBLIC_SITE_URL ||
     "http://127.0.0.1:3000";
   const base = site.startsWith("http") ? site : `https://${site}`;
+  const sendDemoOnConnect = process.env.MISSILE_SEND_DEMO_ON_CONNECT !== "false";
 
   return {
     siteUrl: base.replace(/\/$/, ""),
@@ -83,7 +126,26 @@ function envConfig() {
       process.env.MISSILE_WHATSAPP_GROUP_NAME || "🛡️ מרכז התרעות אזורי",
     pollCron: process.env.MISSILE_ALERT_POLL_CRON ?? "*/1 * * * *",
     sendLaunchPin: process.env.MISSILE_ALERT_SEND_LAUNCH_PIN !== "false",
+    sendDemoOnConnect,
+    livePoll: process.env.MISSILE_LIVE_POLL !== "false",
   };
+}
+
+function normalizeName(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function namesMatch(subject, wanted) {
+  const s = normalizeName(subject);
+  const w = normalizeName(wanted);
+  if (!s || !w) return false;
+  if (s.includes(w) || w.includes(s)) return true;
+  // Loose match on core words
+  return s.includes("מרכז התרעות") && w.includes("מרכז התרעות");
 }
 
 async function loadJson(file, fallback) {
@@ -98,12 +160,13 @@ async function loadJson(file, fallback) {
 async function loadState() {
   const state = await loadJson(STATE_FILE, {});
   if (state.groupJid) groupJid = state.groupJid;
+  welcomeSent = Boolean(state.welcomeSent);
 }
 
 async function saveState() {
   await writeFile(
     STATE_FILE,
-    JSON.stringify({ groupJid }, null, 2),
+    JSON.stringify({ groupJid, welcomeSent }, null, 2),
     "utf8",
   );
 }
@@ -157,15 +220,20 @@ async function resolveGroup() {
 
   try {
     const all = await sock.groupFetchAllParticipating();
-    for (const [jid, meta] of Object.entries(all)) {
-      const subject = String(meta.subject || "").toLowerCase();
-      const wanted = cfg.groupName.toLowerCase();
-      if (subject.includes(wanted) || wanted.includes(subject)) {
+    const entries = Object.entries(all);
+    for (const [jid, meta] of entries) {
+      const subject = String(meta.subject || "");
+      if (namesMatch(subject, cfg.groupName)) {
         groupJid = jid;
-        log.info({ jid, subject: meta.subject }, "Resolved WhatsApp group");
+        console.log(`✅ נמצאה הקבוצה: ${subject}`);
+        console.log(`   id: ${jid}`);
         await saveState();
         return true;
       }
+    }
+    console.log("⚠️ לא נמצאה הקבוצה. קבוצות זמינות:");
+    for (const [, meta] of entries.slice(0, 30)) {
+      console.log(`   - ${meta.subject || "(ללא שם)"}`);
     }
   } catch (error) {
     log.warn({ err: error }, "groupFetchAllParticipating failed");
@@ -196,40 +264,37 @@ async function sendAlert(alert) {
   return true;
 }
 
+async function sendDemoIfNeeded() {
+  if (!cfg.sendDemoOnConnect || welcomeSent) return;
+  if (!(await resolveGroup())) return;
+  await sendAlert(demoAlert());
+  welcomeSent = true;
+  await saveState();
+  console.log("✅ נשלחה הודעת בדיקה + מיקום לקבוצה");
+}
+
 async function pollOnce() {
-  if (pollRunning) return;
+  if (!cfg.livePoll || pollRunning) return;
   pollRunning = true;
   try {
-    if (!(await resolveGroup())) {
-      log.warn("WhatsApp group not resolved yet");
-      return;
-    }
+    if (!(await resolveGroup())) return;
 
-    // Dry poll on server to discover candidates without Green API send.
-    const summary = await apiFetch("/api/cron/missile-alerts?dry=1");
-    const alertIds = Array.isArray(summary.alertIds) ? summary.alertIds : [];
-    if (!alertIds.length) {
-      log.debug({ summary }, "No fresh missile alerts");
+    let alerts = [];
+    try {
+      const pending = await apiFetch("/api/missile-alerts/pending");
+      alerts = Array.isArray(pending.alerts) ? pending.alerts : [];
+    } catch (error) {
+      log.debug({ err: error }, "Live site poll unavailable (demo-only mode ok)");
       return;
     }
 
     const seen = await loadSeen();
-    const freshIds = alertIds.filter((id) => !seen.has(id));
-    if (!freshIds.length) return;
-
-    // Ask server for a demo payload only when testing; for live IDs rebuild via test endpoint shape.
-    // Prefer re-fetching dry summary with demo if only demo ids — otherwise send reconstructed text from cron preview.
-    // Server dry mode does not return full alert bodies; use test endpoint for demo, else re-run with Baileys-only notify.
-    // Workaround: call dedicated endpoint that returns pending alert bodies.
-    const pending = await apiFetch("/api/missile-alerts/pending");
-    const alerts = Array.isArray(pending.alerts) ? pending.alerts : [];
-    const toSend = alerts.filter((a) => freshIds.includes(a.id));
-
+    const toSend = alerts.filter((a) => a?.id && !seen.has(a.id));
     const sentIds = [];
     for (const alert of toSend) {
       await sendAlert(alert);
       sentIds.push(alert.id);
-      log.info({ id: alert.id }, "Sent missile alert with location");
+      log.info({ id: alert.id }, "Sent live missile alert with location");
     }
     if (sentIds.length) {
       await markSeen(sentIds);
@@ -238,8 +303,8 @@ async function pollOnce() {
           method: "POST",
           body: JSON.stringify({ ids: sentIds }),
         });
-      } catch (error) {
-        log.warn({ err: error }, "Server ack failed (local seen still saved)");
+      } catch {
+        // local seen is enough
       }
     }
   } catch (error) {
@@ -252,21 +317,18 @@ async function pollOnce() {
 async function handleTestTrigger() {
   if (!existsSync(TEST_TRIGGER)) return;
   try {
-    const payload = JSON.parse(await readFile(TEST_TRIGGER, "utf8"));
-    await writeFile(TEST_TRIGGER + ".done", JSON.stringify(payload), "utf8");
-    // Remove trigger so it only fires once
-    await writeFile(TEST_TRIGGER, "", "utf8");
+    const raw = await readFile(TEST_TRIGGER, "utf8");
+    if (!raw.trim()) return;
+    JSON.parse(raw);
+    await unlink(TEST_TRIGGER).catch(() => {});
 
     if (!(await resolveGroup())) {
-      log.warn("Cannot send test — group not resolved");
+      console.log("⚠️ לא ניתן לשלוח בדיקה — הקבוצה לא נמצאה");
       return;
     }
 
-    const result = await apiFetch("/api/missile-alerts/preview-demo");
-    if (result?.alert) {
-      await sendAlert(result.alert);
-      log.info("Sent demo missile alert with location");
-    }
+    await sendAlert(demoAlert());
+    console.log("✅ נשלחה הודעת בדיקה + מיקום");
   } catch (error) {
     log.error({ err: error }, "Test trigger failed");
   }
@@ -289,12 +351,13 @@ async function startSock() {
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
     if (qr) {
-      console.log("\nScan this QR with WhatsApp → Linked Devices:\n");
+      console.log("\n📱 סרקו את ה-QR בוואטסאפ → מכשירים מקושרים:\n");
       qrcode.generate(qr, { small: true });
     }
     if (connection === "open") {
-      log.info("WhatsApp connected");
+      console.log("✅ WhatsApp מחובר");
       await resolveGroup();
+      await sendDemoIfNeeded();
     }
     if (connection === "close") {
       const code = lastDisconnect?.error?.output?.statusCode;
@@ -304,6 +367,8 @@ async function startSock() {
         setTimeout(() => {
           void startSock();
         }, 2500);
+      } else {
+        console.log("התנתקתם. הריצו שוב npm start וסרקו QR.");
       }
     }
   });
@@ -321,15 +386,17 @@ async function main() {
 
   setInterval(() => {
     void handleTestTrigger();
-  }, 4000);
+  }, 3000);
 
   console.log(
     [
-      "Missile WhatsApp bot running.",
-      `Site: ${cfg.siteUrl}`,
-      `Group name hint: ${cfg.groupName}`,
-      `Cron: ${cfg.pollCron}`,
-      "Queue a demo with: npm run test-send",
+      "",
+      "🚀 בוט שיגורים מקומי רץ",
+      `קבוצה: ${cfg.groupName}`,
+      "אין צורך ב-Green API",
+      "אחרי סריקת QR תישלח בדיקה אוטומטית עם מיקום",
+      "בדיקה נוספת: npm run test-send",
+      "",
     ].join("\n"),
   );
 }
