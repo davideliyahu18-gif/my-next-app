@@ -87,7 +87,10 @@ function pickTarget(
   return { position: { lat: 32.0853, lng: 34.7818 }, labelHe: "ישראל (כללי)" };
 }
 
-function pickOrigin(text: string): { position: LatLng; labelHe: string } | null {
+function pickOrigin(
+  text: string,
+  options?: ParseAlertOptions,
+): { position: LatLng; labelHe: string } | null {
   const launcherField =
     field(text, "מיקום המשגר") ??
     field(text, "מיקום משגר") ??
@@ -100,6 +103,20 @@ function pickOrigin(text: string): { position: LatLng; labelHe: string } | null 
     const labels = launches.map((p) => p.labelHe).join(", ");
     return { position: launches[0].position, labelHe: labels };
   }
+
+  // Explicit Iran→Kuwait (or Iran launch) posts often omit a city name.
+  if (
+    /איראן|ايران|إيران|iran/i.test(text) &&
+    (mentionsKuwait(text) ||
+      options?.defaultCorridor === "kuwait" ||
+      /שיגור|יציאות|ירי לעבר|launch|missile/i.test(text))
+  ) {
+    return {
+      position: { lat: 28.92, lng: 50.84 },
+      labelHe: "איראן (אזור כללי · בושהר)",
+    };
+  }
+
   return null;
 }
 
@@ -143,7 +160,7 @@ export function messageToTrack(
 ): RocketTrack | null {
   if (!isLaunchRelatedMessage(message.text)) return null;
 
-  const origin = pickOrigin(message.text);
+  const origin = pickOrigin(message.text, options);
   if (!origin) return null;
 
   if (

@@ -4,7 +4,7 @@ import type { LatLng, MapBounds } from "./types";
 export const DEFAULT_BOUNDS: MapBounds = {
   north: 40.5,
   south: 24.0,
-  west: 44.0,
+  west: 33.5,
   east: 58.5,
 };
 

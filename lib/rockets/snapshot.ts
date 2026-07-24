@@ -6,8 +6,12 @@ import type { RocketsSnapshot } from "./types";
 export const ROCKETS_POLL_MS = 20_000;
 
 function corridorMode(): "israel" | "kuwait" {
-  const raw = (process.env.MISSILE_ALERT_CORRIDOR ?? "kuwait").toLowerCase();
-  return raw === "israel" ? "israel" : "kuwait";
+  // Map tracks keep natural targets from the text (Israel/Kuwait/…).
+  // Demo data is Kuwait-focused; WhatsApp filtering is separate.
+  const raw = (process.env.MISSILE_ALERT_CORRIDOR ?? "auto").toLowerCase();
+  if (raw === "kuwait") return "kuwait";
+  if (raw === "israel") return "israel";
+  return "israel";
 }
 
 export async function getRocketsSnapshot(options?: {

@@ -8,8 +8,15 @@ function corridorIsKuwait(): boolean {
   return (process.env.MISSILE_ALERT_CORRIDOR ?? "kuwait").toLowerCase() !== "israel";
 }
 
+/** When true, every Iran launch becomes a Kuwait WhatsApp alert (even without "כווית"). */
+function remapIranLaunchesToKuwait(): boolean {
+  return (process.env.MISSILE_ALERT_REMAP_IRAN_LAUNCHES ?? "false") === "true";
+}
+
 function onlyExplicitKuwait(): boolean {
-  return (process.env.MISSILE_ALERT_REQUIRE_KUWAIT_MENTION ?? "false") === "true";
+  // Default: require explicit Kuwait mention unless remap mode is on.
+  if (remapIranLaunchesToKuwait()) return false;
+  return (process.env.MISSILE_ALERT_REQUIRE_KUWAIT_MENTION ?? "true") !== "false";
 }
 
 function formatClock(iso: string): string {
@@ -116,8 +123,8 @@ function isKuwaitRelevant(track: RocketTrack, text: string): boolean {
   if (/כווית|الكويت|kuwait/i.test(track.targetLabelHe)) return true;
   if (onlyExplicitKuwait()) return false;
   if (!corridorIsKuwait()) return false;
-  // Gulf bot mode: Iran outbound launches map to Kuwait default target.
-  return isIranOriginTrack(track, text);
+  // Opt-in remap: Iran outbound launches → Kuwait WhatsApp alerts.
+  return remapIranLaunchesToKuwait() && isIranOriginTrack(track, text);
 }
 
 export function messagesToMissileAlerts(
@@ -128,16 +135,19 @@ export function messagesToMissileAlerts(
   const seen = new Set<string>();
 
   for (const message of messages) {
-    const track = messageToTrack(message, now, { defaultCorridor: "kuwait" });
+    // Parse with natural targets first (do not force Kuwait onto Israel alerts).
+    const track = messageToTrack(message, now, {
+      defaultCorridor: mentionsKuwait(message.text) ? "kuwait" : "israel",
+    });
     if (!track) continue;
     if (!isKuwaitRelevant(track, message.text)) continue;
     if (!isIranOriginTrack(track, message.text) && !mentionsKuwait(message.text)) {
       continue;
     }
 
-    // Force Kuwait default when corridor mode remapped without explicit city.
+    // Remap target to Kuwait City only when opted-in and Kuwait was not named.
     if (
-      corridorIsKuwait() &&
+      remapIranLaunchesToKuwait() &&
       !mentionsKuwait(message.text) &&
       !/כווית|الكويت|kuwait/i.test(track.targetLabelHe)
     ) {

@@ -46,8 +46,9 @@ npm run test-send
 ## מקור הנתונים
 
 - קריאת ערוצי טלגרם פומביים (`@newsil5`, `@shigurimisrael`)
-- סינון שיגורים מאיראן הרלוונטיים למסדרון כווית
-- `MISSILE_ALERT_REQUIRE_KUWAIT_MENTION=true` — רק אם מוזכרת כווית במפורש
+- סינון שיגורים מאיראן הרלוונטיים לכווית (ברירת מחדל: רק כשמוזכרת כווית)
+- `MISSILE_ALERT_REMAP_IRAN_LAUNCHES=true` — כל שיגור מאיראן נשלח כהתראת כווית
+- `MISSILE_ALERT_REQUIRE_KUWAIT_MENTION=false` — מאפשר מסלול רחב יותר (בזהירות)
 
 ## מפת האתר
 

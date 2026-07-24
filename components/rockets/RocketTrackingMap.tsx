@@ -18,11 +18,11 @@ const MAP_H = 620;
 
 const LANDMARKS: { label: string; lat: number; lng: number }[] = [
   { label: "כווית", lat: 29.3759, lng: 47.9774 },
+  { label: "ישראל", lat: 31.5, lng: 34.85 },
   { label: "עיראק", lat: 33.2, lng: 44.0 },
   { label: "איראן", lat: 32.5, lng: 54.0 },
   { label: "בושהר", lat: 28.92, lng: 50.84 },
   { label: "מפרץ פרסי", lat: 27.0, lng: 51.5 },
-  { label: "ערב הסעודית", lat: 27.5, lng: 46.5 },
 ];
 
 function pathD(points: { x: number; y: number }[]): string {
