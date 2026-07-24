@@ -137,6 +137,50 @@ export const PLACES: NamedPlace[] = [
     kind: "target",
   },
   {
+    id: "bahrain",
+    labelHe: "בחריין",
+    aliases: ["בחריין", "البحرين", "bahrain", "manama", "מנאמה"],
+    position: { lat: 26.2285, lng: 50.586 },
+    kind: "target",
+  },
+  {
+    id: "uae-dubai",
+    labelHe: "דובאי",
+    aliases: ["דובאי", "دبي", "dubai", "uae", "אמירויות", "الإمارات"],
+    position: { lat: 25.2048, lng: 55.2708 },
+    kind: "target",
+  },
+  {
+    id: "uae-abu-dhabi",
+    labelHe: "אבו דאבי",
+    aliases: ["אבו דאבי", "أبو ظبي", "abu dhabi"],
+    position: { lat: 24.4539, lng: 54.3773 },
+    kind: "target",
+  },
+  {
+    id: "qatar",
+    labelHe: "קטאר",
+    aliases: ["קטאר", "قطر", "qatar", "doha", "דוחה"],
+    position: { lat: 25.2854, lng: 51.531 },
+    kind: "target",
+  },
+  {
+    id: "saudi-dammam",
+    labelHe: "דמאם / מזרח סעודיה",
+    aliases: [
+      "דמאם",
+      "الدمام",
+      "dammam",
+      "dhahran",
+      "ظهران",
+      "סעודיה",
+      "السعودية",
+      "saudi",
+    ],
+    position: { lat: 26.4207, lng: 50.0888 },
+    kind: "target",
+  },
+  {
     id: "tel-aviv",
     labelHe: "תל אביב",
     aliases: ["תל אביב", "ת״א", "ת'א", "חולון", "גוש דן"],
@@ -209,15 +253,43 @@ export function matchPlaces(
   return found;
 }
 
+const KUWAIT_PLACE_IDS = new Set([
+  "kuwait-city",
+  "ahmadi",
+  "jahra",
+  "hawalli",
+  "arifjan",
+  "kuwait-airport",
+]);
+
+const GULF_PLACE_IDS = new Set([
+  ...KUWAIT_PLACE_IDS,
+  "bahrain",
+  "uae-dubai",
+  "uae-abu-dhabi",
+  "qatar",
+  "saudi-dammam",
+]);
+
 export function mentionsKuwait(text: string): boolean {
   return matchPlaces(text, "target").some((place) =>
-    [
-      "kuwait-city",
-      "ahmadi",
-      "jahra",
-      "hawalli",
-      "arifjan",
-      "kuwait-airport",
-    ].includes(place.id),
+    KUWAIT_PLACE_IDS.has(place.id),
   );
+}
+
+/** Kuwait / Bahrain / UAE / Qatar / eastern Saudi — regional alert corridor. */
+export function mentionsGulf(text: string): boolean {
+  if (
+    /כווית|الكويت|kuwait|בחריין|البحرين|bahrain|אמירויות|الإمارات|uae|dubai|דובאי|אבו דאבי|abu dhabi|קטאר|قطر|qatar|doha|סעודיה|السعودية|saudi|dammam|dhahran|מפרץ/i.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+  return matchPlaces(text, "target").some((place) => GULF_PLACE_IDS.has(place.id));
+}
+
+export function firstGulfTarget(text: string): NamedPlace | null {
+  const targets = matchPlaces(text, "target");
+  return targets.find((place) => GULF_PLACE_IDS.has(place.id)) ?? null;
 }

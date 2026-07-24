@@ -1,4 +1,9 @@
-import { KUWAIT_DEFAULT_TARGET, mentionsKuwait } from "@/lib/rockets/locations";
+import {
+  KUWAIT_DEFAULT_TARGET,
+  firstGulfTarget,
+  mentionsGulf,
+  mentionsKuwait,
+} from "@/lib/rockets/locations";
 import { messageToTrack } from "@/lib/rockets/parse-alert";
 import type { TelegramChannelMessage } from "@/lib/rockets/telegram";
 import type { RocketTrack } from "@/lib/rockets/types";
@@ -6,18 +11,18 @@ import { messagesToAircraftAlerts } from "./aircraft";
 import { boldEveryLine } from "./style";
 import type { MissileAlert, MissileAlertLocation } from "./types";
 
-function corridorIsKuwait(): boolean {
-  return (process.env.MISSILE_ALERT_CORRIDOR ?? "kuwait").toLowerCase() !== "israel";
+function regionalMode(): boolean {
+  // Default ON for "מרכז התרעות אזורי" — Kuwait + Gulf.
+  return (process.env.MISSILE_ALERT_REGIONAL_GULF ?? "true") !== "false";
 }
 
-/** When true, every Iran launch becomes a Kuwait WhatsApp alert (even without "כווית"). */
 function remapIranLaunchesToKuwait(): boolean {
   return (process.env.MISSILE_ALERT_REMAP_IRAN_LAUNCHES ?? "false") === "true";
 }
 
-function onlyExplicitKuwait(): boolean {
-  // Default: require explicit Kuwait mention unless remap mode is on.
+function onlyExplicitTarget(): boolean {
   if (remapIranLaunchesToKuwait()) return false;
+  // In regional mode, require an explicit Gulf/Kuwait mention (not Israel-only).
   return (process.env.MISSILE_ALERT_REQUIRE_KUWAIT_MENTION ?? "true") !== "false";
 }
 
@@ -65,7 +70,7 @@ function toLocation(
 
 export function formatMissileAlertText(alert: Omit<MissileAlert, "text">): string {
   const lines = [
-    "🚨 התראת שיגור · איראן → כווית",
+    `🚨 התראת שיגור · איראן → ${alert.targetLabelHe}`,
     "",
     `📍 משגר (משוער): ${alert.originLabelHe}`,
     `🎯 יעד (משוער): ${alert.targetLabelHe}`,
@@ -115,19 +120,123 @@ export function trackToMissileAlert(track: RocketTrack): MissileAlert {
 function isIranOriginTrack(track: RocketTrack, text: string): boolean {
   if (/איראן|ايران|إيران|iran/i.test(text)) return true;
   if (/איראן|ايران/.test(track.labelHe)) return true;
-  // Named Iranian launch regions imply Iran corridor.
   return /כרמאנשאה|אספהאן|שיראז|תבריז|בושהר|טהרן|המדאן|זנג|יזד|בידגנה/.test(
     track.originLabelHe,
   );
 }
 
-function isKuwaitRelevant(track: RocketTrack, text: string): boolean {
-  if (mentionsKuwait(text)) return true;
-  if (/כווית|الكويت|kuwait/i.test(track.targetLabelHe)) return true;
-  if (onlyExplicitKuwait()) return false;
-  if (!corridorIsKuwait()) return false;
-  // Opt-in remap: Iran outbound launches → Kuwait WhatsApp alerts.
+function isRegionalRelevant(track: RocketTrack, text: string): boolean {
+  if (mentionsGulf(text) || mentionsKuwait(text)) return true;
+  if (/כווית|בחריין|קטאר|אמירויות|סעודיה|kuwait|bahrain|qatar|uae|saudi/i.test(
+    track.targetLabelHe,
+  )) {
+    return true;
+  }
+  if (onlyExplicitTarget()) return false;
   return remapIranLaunchesToKuwait() && isIranOriginTrack(track, text);
+}
+
+function isGulfStrikeMessage(text: string): boolean {
+  if (!regionalMode()) return false;
+
+  // Ignore outbound Saudi/UAE strikes on Yemen etc.
+  if (
+    /סעודיה תקפה|saudi\s+arabia\s+bombed|bombed\s+the\s+port\s+of\s+hodeidah|חות.?ים|houthis|תימן|yemen/i.test(
+      text,
+    ) &&
+    !/כווית|bahrain|בחריין|kuwait|קטאר|qatar|דובאי|dubai/i.test(text)
+  ) {
+    return false;
+  }
+
+  const gulfAsTarget =
+    /(?:על|ל|לעבר|toward|towards|on|in)\s*(?:כווית|בחריין|קטאר|דובאי|אבו דאבי|אמירויות|bahrain|kuwait|qatar|dubai|abu dhabi|uae|dammam)/i.test(
+      text,
+    ) ||
+    /(?:כווית|בחריין|קטאר|bahrain|kuwait|qatar).{0,30}(?:פגיעה|תקיפה|שיגור|טיל|impact|attack|missile)/i.test(
+      text,
+    ) ||
+    /(?:ballistic|missile|drone|טיל|בליסטי|כטב).{0,40}(?:bahrain|kuwait|qatar|כווית|בחריין|קטאר)/i.test(
+      text,
+    ) ||
+    mentionsKuwait(text) ||
+    firstGulfTarget(text) != null;
+
+  if (!gulfAsTarget) return false;
+
+  return /שיגור|טיל|בליסטי|כטב.?מ|ירי|פגיעה|תקיפה|ballistic|missile|drone|attack|impact|strike|rocket/i.test(
+    text,
+  );
+}
+
+function gulfStrikeToAlert(
+  message: TelegramChannelMessage,
+): MissileAlert | null {
+  if (!isGulfStrikeMessage(message.text)) return null;
+  // Prefer structured track when possible.
+  const track = messageToTrack(message, new Date(), {
+    defaultCorridor: "kuwait",
+  });
+  if (track && isRegionalRelevant(track, message.text)) {
+    const gulf = firstGulfTarget(message.text);
+    if (gulf) {
+      track.target = gulf.position;
+      track.targetLabelHe = gulf.labelHe;
+    }
+    return trackToMissileAlert(track);
+  }
+
+  const gulf = firstGulfTarget(message.text) ?? KUWAIT_DEFAULT_TARGET;
+  const snippet = message.text.replace(/\s+/g, " ").trim().slice(0, 200);
+  const maps = mapsUrl(gulf.position.lat, gulf.position.lng);
+  const weapon = /drone|כטב|מל.?ט/i.test(message.text)
+    ? "טיל/כטב״מ"
+    : /ballistic|בליסטי/i.test(message.text)
+      ? "בליסטי"
+      : "לא צוין";
+
+  const base = {
+    id: `gulf-${message.id}`,
+    originLabelHe: /איראן|iran/i.test(message.text)
+      ? "איראן (משוער)"
+      : "לא צוין",
+    targetLabelHe: gulf.labelHe,
+    origin: { lat: 28.92, lng: 50.84 },
+    target: gulf.position,
+    location: toLocation(
+      gulf.labelHe,
+      gulf.position.lat,
+      gulf.position.lng,
+      "target",
+    ),
+    launchLocation: toLocation("איראן (משוער)", 28.92, 50.84, "launch"),
+    launchedAt: message.datetime,
+    etaSeconds: 0,
+    weaponHe: weapon,
+    sourceHe: `@${message.channel}`,
+    sourceUrl: message.url,
+    mapsUrl: maps,
+  };
+
+  const lines = [
+    `🚨 התראת מפרץ · יעד: ${gulf.labelHe}`,
+    "",
+    `📍 מקור/משגר (משוער): ${base.originLabelHe}`,
+    `🎯 לאן: ${gulf.labelHe}`,
+    `🧭 סוג: ${weapon}`,
+    `🕐 דיווח: ${formatClock(message.datetime)} (שעון כווית)`,
+    "⏱ מתי מגיעים: לא צוין / באירוע",
+    "",
+    `דיווח: ${snippet}`,
+    "",
+    `🗺 מפה: ${maps}`,
+    `מקור: @${message.channel}`,
+    message.url,
+    "",
+    "⚠️ מיקום מקורב לפי דיווח פומבי/OSINT",
+  ];
+
+  return { ...base, text: boldEveryLine(lines.join("\n")) };
 }
 
 export function messagesToMissileAlerts(
@@ -138,21 +247,37 @@ export function messagesToMissileAlerts(
   const seen = new Set<string>();
 
   for (const message of messages) {
-    // Parse with natural targets first (do not force Kuwait onto Israel alerts).
-    const track = messageToTrack(message, now, {
-      defaultCorridor: mentionsKuwait(message.text) ? "kuwait" : "israel",
-    });
-    if (!track) continue;
-    if (!isKuwaitRelevant(track, message.text)) continue;
-    if (!isIranOriginTrack(track, message.text) && !mentionsKuwait(message.text)) {
+    const gulfAlert = gulfStrikeToAlert(message);
+    if (gulfAlert && !seen.has(gulfAlert.id)) {
+      seen.add(gulfAlert.id);
+      alerts.push(gulfAlert);
       continue;
     }
 
-    // Remap target to Kuwait City only when opted-in and Kuwait was not named.
+    const track = messageToTrack(message, now, {
+      defaultCorridor:
+        mentionsGulf(message.text) || mentionsKuwait(message.text)
+          ? "kuwait"
+          : "israel",
+    });
+    if (!track) continue;
+    if (!isRegionalRelevant(track, message.text)) continue;
     if (
+      !isIranOriginTrack(track, message.text) &&
+      !mentionsGulf(message.text) &&
+      !mentionsKuwait(message.text)
+    ) {
+      continue;
+    }
+
+    const gulf = firstGulfTarget(message.text);
+    if (gulf) {
+      track.target = gulf.position;
+      track.targetLabelHe = gulf.labelHe;
+    } else if (
       remapIranLaunchesToKuwait() &&
-      !mentionsKuwait(message.text) &&
-      !/כווית|الكويت|kuwait/i.test(track.targetLabelHe)
+      !mentionsGulf(message.text) &&
+      !/כווית|בחריין|קטאר|kuwait|bahrain|qatar/i.test(track.targetLabelHe)
     ) {
       track.target = KUWAIT_DEFAULT_TARGET.position;
       track.targetLabelHe = KUWAIT_DEFAULT_TARGET.labelHe;
@@ -164,8 +289,7 @@ export function messagesToMissileAlerts(
     alerts.push(alert);
   }
 
-  // Also include fighter-jet / combat-aircraft activity over Iran.
-  for (const air of messagesToAircraftAlerts(messages)) {
+  for (const air of messagesToAircraftAlerts(messages, now)) {
     if (seen.has(air.id)) continue;
     seen.add(air.id);
     alerts.push(air);
