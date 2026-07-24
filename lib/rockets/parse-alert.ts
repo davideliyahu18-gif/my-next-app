@@ -10,12 +10,16 @@ export type ParseAlertOptions = {
 
 function isLaunchRelatedMessage(text: string): boolean {
   return (
-    /שיגור|יציאות מאיראן|מיקום המשגר|גורם משגר|טיל בליסטי|ירי לעבר/.test(
+    /שיגור|יציאות מאיראן|מיקום המשגר|גורם משגר|טיל בליסטי|ירי לעבר|זוהה שיגור/.test(
       text,
     ) ||
-    (/بليستي|صاروخ|إطلاق|launch|missile|ballistic/i.test(text) &&
-      /ايران|إيران|iran|משגר|שיגור/i.test(text)) ||
-    (/בליסטי|כטב.?מ/.test(text) && /משגר|יציאות|שיגור/.test(text))
+    (/بليستي|صاروخ|إطلاق|launch|missile|ballistic|rockets?\s+(?:launched|detected|fired)/i.test(
+      text,
+    ) &&
+      /ايران|إيران|iran|משגר|שיגור|tehran|isfahan/i.test(text)) ||
+    (/בליסטי|כטב.?מ/.test(text) && /משגר|יציאות|שיגור/.test(text)) ||
+    (/ballistic\s+missile|missile\s+launch|launches?\s+from\s+iran/i.test(text) &&
+      /iran|israel|kuwait|detected|siren/i.test(text))
   );
 }
 

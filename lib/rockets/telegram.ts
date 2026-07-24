@@ -6,10 +6,38 @@ export type TelegramChannelMessage = {
   datetime: string;
 };
 
-const CHANNELS = [
+export type TelegramChannel = {
+  username: string;
+  label: string;
+};
+
+/** Default public OSINT Telegram sources (web preview scrape). */
+export const DEFAULT_OSINT_CHANNELS: TelegramChannel[] = [
   { username: "newsil5", label: "מודיעין גלוי" },
   { username: "shigurimisrael", label: "התרעות שיגורים" },
-] as const;
+  { username: "red_alert_il", label: "התרעות צבע אדום" },
+  { username: "news0404il", label: "חדשות 04" },
+  { username: "AbuAliExpress", label: "אבו עלי אקספרס" },
+  { username: "manniefabian", label: "Mannie War Room" },
+  { username: "Middle_East_Spectator", label: "Middle East Spectator" },
+  { username: "OSINTdefender", label: "OSINT Defender" },
+  { username: "warfareanalysis", label: "Warfare Analysis" },
+  { username: "IntelSky", label: "IntelSky" },
+  { username: "iranintl_en", label: "Iran International" },
+  { username: "RocketAlert", label: "Rocket Alerts" },
+];
+
+function resolveChannels(): TelegramChannel[] {
+  const raw = process.env.MISSILE_OSINT_CHANNELS?.trim();
+  if (!raw) return DEFAULT_OSINT_CHANNELS;
+
+  // Format: username:Label,username2:Label2  OR  username,username2
+  return raw.split(",").map((part) => {
+    const [username, ...labelParts] = part.trim().split(":");
+    const label = labelParts.join(":").trim() || username;
+    return { username: username.trim(), label };
+  }).filter((c) => c.username);
+}
 
 function stripHtml(html: string): string {
   return html
@@ -41,7 +69,7 @@ function parseChannelHtml(
     );
     const datetimeMatch = block.match(/datetime="([^"]+)"/);
     const linkMatch = block.match(
-      new RegExp(`href="(https://t\\.me/${username}/\\d+)"`),
+      new RegExp(`href="(https://t\\.me/${username}/\\d+)"`, "i"),
     );
     if (!textMatch || !datetimeMatch) continue;
 
@@ -82,6 +110,7 @@ async function fetchChannel(
       Accept: "text/html,application/xhtml+xml",
     },
     cache: "no-store",
+    redirect: "follow",
   });
 
   if (!response.ok) {
@@ -97,11 +126,12 @@ export async function fetchTelegramLaunchMessages(): Promise<{
   sources: { username: string; label: string }[];
   errors: string[];
 }> {
+  const channels = resolveChannels();
   const errors: string[] = [];
   const all: TelegramChannelMessage[] = [];
 
   await Promise.all(
-    CHANNELS.map(async (channel) => {
+    channels.map(async (channel) => {
       try {
         const messages = await fetchChannel(channel.username);
         all.push(...messages);
@@ -117,9 +147,10 @@ export async function fetchTelegramLaunchMessages(): Promise<{
 
   return {
     messages: all,
-    sources: CHANNELS.map((c) => ({ username: c.username, label: c.label })),
+    sources: channels.map((c) => ({ username: c.username, label: c.label })),
     errors,
   };
 }
 
-export { CHANNELS };
+/** @deprecated use DEFAULT_OSINT_CHANNELS / resolve via fetch */
+export const CHANNELS = DEFAULT_OSINT_CHANNELS;

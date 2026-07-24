@@ -37,17 +37,19 @@ function field(text: string, label: string): string | null {
 }
 
 export function isFighterJetInIranMessage(text: string): boolean {
-  const hasIran = /איראן|ايران|إيران|iran|טהרן|אספהאן|כרמאנשאה|בושהר|שיראז|המדאן|תבריז/i.test(
+  const hasIran = /איראן|ايران|إيران|iran|טהרן|אספהאן|כרמאנשאה|בושהר|שיראז|המדאן|תבריז|tehran|isfahan|kermanshah/i.test(
     text,
   );
   if (!hasIran) return false;
 
   return (
-    /מטוס(?:י)?\s*קרב|מטוסי\s*קרב|חיל\s*האוויר|חיל\s*אוויר|F-?35|F-?16|F-?15|F-?18|בסיס\s*אווירי|פעילות\s*אווירית|מטוסים\s*(?:מעל|ב|באיראן)|fighter\s*jet|combat\s*aircraft|warplane/i.test(
+    /מטוס(?:י)?\s*קרב|מטוסי\s*קרב|חיל\s*האוויר|חיל\s*אוויר|F-?35|F-?16|F-?15|F-?18|בסיס\s*אווירי|פעילות\s*אווירית|מטוסים\s*(?:מעל|ב|באיראן)|fighter\s*jet|combat\s*aircraft|warplane|warplanes|fighter\s*aircraft|air\s*force\s*(?:jets?|aircraft)|jets?\s+over\s+iran/i.test(
       text,
     ) ||
-    (/מטוס|מטוסים|טיסה|טיסות/.test(text) &&
-      /קרב|תקיפה|חדירה|מעל איראן|בשמי איראן|מרחב אווירי/.test(text))
+    (/מטוס|מטוסים|טיסה|טיסות|aircraft|jets?/.test(text) &&
+      /קרב|תקיפה|חדירה|מעל איראן|בשמי איראן|מרחב אווירי|strike|over\s+iran|iranian\s+airspace/i.test(
+        text,
+      ))
   );
 }
 
