@@ -353,9 +353,40 @@ async function startSock() {
     if (qr) {
       console.log("\n📱 סרקו את ה-QR בוואטסאפ → מכשירים מקושרים:\n");
       qrcode.generate(qr, { small: true });
+
+      // Also write a scannable PNG for cloud / chat display.
+      try {
+        const QRCode = require("qrcode");
+        const outDirs = [
+          path.join(__dirname, "qr.png"),
+          "/opt/cursor/artifacts/whatsapp-qr/scan-me.png",
+        ];
+        for (const out of outDirs) {
+          await mkdir(path.dirname(out), { recursive: true }).catch(() => {});
+          await QRCode.toFile(out, qr, {
+            type: "png",
+            width: 512,
+            margin: 2,
+            errorCorrectionLevel: "M",
+          });
+          console.log(`QR image saved: ${out}`);
+        }
+        await writeFile(
+          path.join(__dirname, "qr-ready.txt"),
+          new Date().toISOString(),
+          "utf8",
+        );
+      } catch (error) {
+        console.error("Failed to write QR PNG:", error);
+      }
     }
     if (connection === "open") {
       console.log("✅ WhatsApp מחובר");
+      await writeFile(
+        path.join(__dirname, "connected.txt"),
+        new Date().toISOString(),
+        "utf8",
+      );
       await resolveGroup();
       await sendDemoIfNeeded();
     }
