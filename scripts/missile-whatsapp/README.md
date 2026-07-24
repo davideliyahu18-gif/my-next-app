@@ -7,6 +7,16 @@
 
 > זה OSINT / דיווח פומבי משוער — **לא** טלמטריה צבאית חיה.
 
+## יש לך קבוצה מוכנה?
+
+עברו למדריך המלא: [`GREEN-API-SETUP.md`](./GREEN-API-SETUP.md)
+
+בקצרה:
+1. חברו Instance ב־Green API לאותו וואטסאפ שבחבורה
+2. מצאו את `120363...@g.us` של הקבוצה
+3. שימו ב־Vercel: `GREEN_API_*` + `MISSILE_WHATSAPP_CHAT_ID`
+4. בדקו עם `POST /api/missile-alerts/test`
+
 ## אפשרות א׳ — Green API (Vercel / serverless)
 
 1. צרו חשבון ב-[Green API](https://green-api.com) וחברו WhatsApp.
@@ -17,11 +27,18 @@ GREEN_API_INSTANCE=...
 GREEN_API_TOKEN=...
 MISSILE_WHATSAPP_CHAT_ID=120363...@g.us
 CRON_SECRET=...
-MISSILE_ALERT_CORRIDOR=kuwait
+MISSILE_ALERT_REQUIRE_KUWAIT_MENTION=true
 ```
 
 3. Deploy — `vercel.json` מריץ `/api/cron/missile-alerts` כל דקה.
-4. בדיקה ידנית:
+4. מציאת Chat ID:
+
+```bash
+curl "https://YOUR_SITE/api/missile-alerts/groups" \
+  -H "Authorization: Bearer $CRON_SECRET"
+```
+
+5. בדיקה ידנית:
 
 ```bash
 curl -X POST "https://YOUR_SITE/api/missile-alerts/test" \
@@ -34,7 +51,7 @@ curl -X POST "https://YOUR_SITE/api/missile-alerts/test" \
 cd scripts/missile-whatsapp
 npm install
 # ב־.env.local בשורש הפרויקט:
-# MISSILE_WHATSAPP_GROUP_NAME=התראות שיגורים כווית
+# MISSILE_WHATSAPP_GROUP_NAME=השם המדויק של הקבוצה שלכם
 # MISSILE_ALERT_SITE_URL=http://127.0.0.1:3000
 # CRON_SECRET=...
 npm start   # סרקו QR
