@@ -7,8 +7,13 @@ const FIFA_USER_AGENT =
 const GOAL_EVENT_TYPES = new Set([0, 34, 39, 41]);
 const OWN_GOAL_EVENT_TYPE = 34;
 const ASSIST_EVENT_TYPE = 1;
+const CORNER_EVENT_TYPE = 16;
+const PENALTY_GOAL_EVENT_TYPE = 41;
+const PENALTY_MISSED_EVENT_TYPE = 60;
 const PERIOD_IN_PLAY = new Set([3, 5, 7, 9]);
-const PERIOD_FINISHED = new Set([10, 11]);
+/** FIFA period for penalty shoot-out in progress. */
+const PERIOD_PENALTIES = 11;
+const PERIOD_FINISHED = new Set([10]);
 const UNKNOWN_SCORER = "Unknown scorer";
 
 /** Splits FIFA event text before the scoring verb / penalty conversion. */
@@ -34,6 +39,8 @@ export interface FifaGoal {
   teamName: string;
   teamId: string;
   ownGoal: boolean;
+  /** True for spot-kick goals in open play (not shoot-out). */
+  penalty: boolean;
 }
 
 export interface FifaAssist {
@@ -41,6 +48,27 @@ export interface FifaAssist {
   player: string;
   teamName: string;
   teamId: string;
+}
+
+export interface FifaCorner {
+  eventId: string;
+  minute: string;
+  teamName: string;
+  teamId: string;
+}
+
+export interface FifaPenaltyKick {
+  eventId: string;
+  minute: string;
+  player: string;
+  teamName: string;
+  teamId: string;
+  scored: boolean;
+  /** True when taken during the penalty shoot-out. */
+  shootout: boolean;
+  /** Match scoreline after this event (open play) when available. */
+  homeScore: number | null;
+  awayScore: number | null;
 }
 
 export interface FifaMatch {
@@ -52,12 +80,16 @@ export interface FifaMatch {
   homeFlag: string;
   awayFlag: string;
   utcDate: Date;
-  status: "SCHEDULED" | "IN_PLAY" | "PAUSE" | "FINISHED";
+  status: "SCHEDULED" | "IN_PLAY" | "PAUSE" | "PENALTIES" | "FINISHED";
   competition: string;
   homeScore: number | null;
   awayScore: number | null;
+  homePenaltyScore: number | null;
+  awayPenaltyScore: number | null;
   goals: FifaGoal[];
   assists: FifaAssist[];
+  corners: FifaCorner[];
+  penalties: FifaPenaltyKick[];
   stage: string | null;
   group: string | null;
   period: number | null;
@@ -294,7 +326,10 @@ async function scorerFromTimelineEvent(
 }
 
 function mapStatus(period: number | null): FifaMatch["status"] {
-  if (period === 4) return "PAUSE";
+  if (period === 4 || period === 8 || period === 16 || period === 17) {
+    return "PAUSE";
+  }
+  if (period === PERIOD_PENALTIES) return "PENALTIES";
   if (period !== null && PERIOD_FINISHED.has(period)) return "FINISHED";
   if (period !== null && PERIOD_IN_PLAY.has(period)) return "IN_PLAY";
   return "SCHEDULED";
@@ -310,19 +345,80 @@ function teamSide(
   return "";
 }
 
+function isCornerTimelineEvent(event: Record<string, unknown>): boolean {
+  if (Number(event.Type) === CORNER_EVENT_TYPE) return true;
+  const localized = event.TypeLocalized as LocalizedItem[] | undefined;
+  const label = localizedName(localized).toLowerCase();
+  return label.includes("corner");
+}
+
+function isPenaltyMissedEvent(
+  eventType: number,
+  localizedLabel: string,
+): boolean {
+  if (eventType === PENALTY_MISSED_EVENT_TYPE) return true;
+  return localizedLabel.toLowerCase().includes("penalty missed");
+}
+
+function isPenaltyGoalEvent(
+  eventType: number,
+  localizedLabel: string,
+): boolean {
+  if (eventType === PENALTY_GOAL_EVENT_TYPE) return true;
+  return localizedLabel.toLowerCase() === "penalty goal";
+}
+
+function parsePenaltyPlayerName(description: string): string {
+  const cleaned = description.trim();
+  if (!cleaned) return "";
+  const withTeam = cleaned.match(
+    /^(.+?)\s*\([^)]+\)\s*(?:misses|successfully converts)/i,
+  );
+  if (withTeam?.[1]) return withTeam[1].trim();
+  const miss = cleaned.match(/^(.+?)\s+misses\s+(?:his|their)\s+penalty/i);
+  if (miss?.[1]) return miss[1].trim();
+  const scored = cleaned.match(
+    /^(.+?)\s+successfully\s+converts\s+the\s+penalty/i,
+  );
+  if (scored?.[1]) return scored[1].trim();
+  return parseScorer(cleaned);
+}
+
+async function playerFromPenaltyEvent(
+  event: Record<string, unknown>,
+): Promise<string> {
+  const description = localizedName(
+    event.EventDescription as LocalizedItem[] | undefined,
+  );
+  const fromApi = await playerName(event.IdPlayer as string | number | undefined);
+  if (fromApi && !isPlaceholderScorer(fromApi)) return fromApi;
+  const fromText = parsePenaltyPlayerName(description);
+  if (fromText && !isPlaceholderScorer(fromText)) return fromText;
+  return fromApi || fromText || "שחקן";
+}
+
 async function parseScoringFromTimeline(
   timeline: Record<string, unknown>,
   homeTeamId: string,
   awayTeamId: string,
   homeTeam: string,
   awayTeam: string,
-): Promise<{ goals: FifaGoal[]; assists: FifaAssist[] }> {
+): Promise<{
+  goals: FifaGoal[];
+  assists: FifaAssist[];
+  corners: FifaCorner[];
+  penalties: FifaPenaltyKick[];
+}> {
   const events = (timeline.Event as Record<string, unknown>[] | undefined) ?? [];
   const goals: FifaGoal[] = [];
   const assists: FifaAssist[] = [];
+  const corners: FifaCorner[] = [];
+  const penalties: FifaPenaltyKick[] = [];
 
   for (const event of events) {
     const eventType = Number(event.Type);
+    const period = Number(event.Period);
+    const shootout = period === PERIOD_PENALTIES;
     const teamId = String(event.IdTeam ?? "");
     const side = teamSide(teamId, homeTeamId, awayTeamId);
     const teamName =
@@ -330,6 +426,50 @@ async function parseScoringFromTimeline(
     const description = localizedName(
       event.EventDescription as LocalizedItem[] | undefined,
     );
+    const localizedLabel = localizedName(
+      event.TypeLocalized as LocalizedItem[] | undefined,
+    );
+    const eventHomeScore =
+      event.HomeGoals !== null && event.HomeGoals !== undefined
+        ? Number(event.HomeGoals)
+        : null;
+    const eventAwayScore =
+      event.AwayGoals !== null && event.AwayGoals !== undefined
+        ? Number(event.AwayGoals)
+        : null;
+
+    const missed = isPenaltyMissedEvent(eventType, localizedLabel);
+    const penaltyGoal = isPenaltyGoalEvent(eventType, localizedLabel);
+
+    if ((missed || penaltyGoal) && teamName) {
+      const player = await playerFromPenaltyEvent(event);
+      penalties.push({
+        eventId: String(event.EventId ?? `${teamId}-${event.MatchMinute}-${eventType}`),
+        minute: String(event.MatchMinute || (shootout ? "130" : "?")),
+        player,
+        teamName,
+        teamId,
+        scored: penaltyGoal && !missed,
+        shootout,
+        homeScore: eventHomeScore,
+        awayScore: eventAwayScore,
+      });
+
+      // Shoot-out kicks never count as open-play goals.
+      if (shootout) continue;
+    }
+
+    if (shootout) continue;
+
+    if (isCornerTimelineEvent(event) && teamName) {
+      corners.push({
+        eventId: String(event.EventId ?? `${teamId}-${event.MatchMinute}`),
+        minute: String(event.MatchMinute ?? "?"),
+        teamName,
+        teamId,
+      });
+      continue;
+    }
 
     if (eventType === ASSIST_EVENT_TYPE) {
       const player = parseAssistPlayer(description);
@@ -352,10 +492,11 @@ async function parseScoringFromTimeline(
       teamName,
       teamId,
       ownGoal: isOwnGoalEvent(eventType, description),
+      penalty: penaltyGoal,
     });
   }
 
-  return { goals, assists };
+  return { goals, assists, corners, penalties };
 }
 
 export function calendarTeamLabels(side: Record<string, unknown>): {
@@ -378,6 +519,7 @@ function formatMatchTimeLabel(
   status: FifaMatch["status"],
 ): string | null {
   if (status === "PAUSE" || period === 4) return "HT";
+  if (status === "PENALTIES" || period === PERIOD_PENALTIES) return "פנדלים";
   if (!matchTime) return null;
   const cleaned = String(matchTime).trim();
   if (!cleaned || cleaned === "—") return null;
@@ -445,20 +587,47 @@ async function buildMatch(
       : null;
 
   let status = mapStatus(period);
+  const events =
+    (timelineData.Event as Record<string, unknown>[] | undefined) ?? [];
+  const hasPenaltiesStart = events.some(
+    (event) =>
+      Number(event.Period) === PERIOD_PENALTIES ||
+      /penalty shoot-?out is about to begin/i.test(
+        localizedName(event.EventDescription as LocalizedItem[] | undefined),
+      ),
+  );
+  const hasMatchEnd = events.some((event) => Number(event.Type) === 26);
+  if (status !== "FINISHED" && hasPenaltiesStart && !hasMatchEnd) {
+    status = "PENALTIES";
+  }
   if (status === "SCHEDULED") {
-    const events = (timelineData.Event as Record<string, unknown>[] | undefined) ?? [];
     for (const event of events) {
       if (event.Type === 26) {
         status = "FINISHED";
         break;
       }
-      if (event.Type === 7) {
+      // Kick-off / period start whistle.
+      if (event.Type === 7 || event.Type === 8 || event.Type === 11) {
         status = "IN_PLAY";
       }
     }
   }
+  // FIFA briefly reports Period 0 + MatchStatus 1/3 with MatchTime "0'" at kickoff
+  // before Period flips to first-half (3). Treat that as live immediately.
+  if (status === "SCHEDULED") {
+    const matchStatus = Number(liveData.MatchStatus);
+    const matchTimeRaw = String(liveData.MatchTime ?? "").trim();
+    const hasClock =
+      Boolean(matchTimeRaw) && matchTimeRaw !== "—" && matchTimeRaw !== "-";
+    if (matchStatus === 1 || matchStatus === 3 || (period === 0 && hasClock)) {
+      status = "IN_PLAY";
+    }
+  }
+  if (Number(liveData.MatchStatus) === 0 || hasMatchEnd) {
+    status = "FINISHED";
+  }
 
-  const { goals, assists } = await parseScoringFromTimeline(
+  const { goals, assists, corners, penalties } = await parseScoringFromTimeline(
     timelineData,
     homeTeamId,
     awayTeamId,
@@ -473,6 +642,11 @@ async function buildMatch(
       period,
       status,
     ) ?? null;
+
+  const rawHomePen =
+    liveData.HomeTeamPenaltyScore ?? calendarRow.HomeTeamPenaltyScore;
+  const rawAwayPen =
+    liveData.AwayTeamPenaltyScore ?? calendarRow.AwayTeamPenaltyScore;
 
   return {
     id: matchId,
@@ -489,8 +663,14 @@ async function buildMatch(
     ),
     homeScore,
     awayScore,
+    homePenaltyScore:
+      rawHomePen !== null && rawHomePen !== undefined ? Number(rawHomePen) : null,
+    awayPenaltyScore:
+      rawAwayPen !== null && rawAwayPen !== undefined ? Number(rawAwayPen) : null,
     goals,
     assists,
+    corners,
+    penalties,
     stage:
       localizedName(calendarRow.StageName as LocalizedItem[] | undefined) ||
       null,
@@ -552,8 +732,20 @@ export function calendarRowToMatch(calendarRow: CalendarRow): FifaMatch {
     ),
     homeScore,
     awayScore,
+    homePenaltyScore:
+      calendarRow.HomeTeamPenaltyScore !== null &&
+      calendarRow.HomeTeamPenaltyScore !== undefined
+        ? Number(calendarRow.HomeTeamPenaltyScore)
+        : null,
+    awayPenaltyScore:
+      calendarRow.AwayTeamPenaltyScore !== null &&
+      calendarRow.AwayTeamPenaltyScore !== undefined
+        ? Number(calendarRow.AwayTeamPenaltyScore)
+        : null,
     goals: [],
     assists: [],
+    corners: [],
+    penalties: [],
     stage:
       localizedName(calendarRow.StageName as LocalizedItem[] | undefined) ||
       null,
@@ -709,7 +901,11 @@ export function latestMatchMinuteLabel(match: FifaMatch): string {
 }
 
 export async function getLiveMatchesNow(fresh = false): Promise<FifaMatch[]> {
-  const liveStatuses = new Set<FifaMatch["status"]>(["IN_PLAY", "PAUSE"]);
+  const liveStatuses = new Set<FifaMatch["status"]>([
+    "IN_PLAY",
+    "PAUSE",
+    "PENALTIES",
+  ]);
   const now = new Date();
   const candidateIds: string[] = [];
   const seen = new Set<string>();
@@ -721,8 +917,10 @@ export async function getLiveMatchesNow(fresh = false): Promise<FifaMatch[]> {
       if (seen.has(matchId)) continue;
       seen.add(matchId);
       const kickoff = parseDatetime(row.Date as string | undefined);
-      if (kickoff.getTime() > now.getTime() + 15 * 60 * 1000) continue;
-      if (kickoff.getTime() < now.getTime() - 5 * 60 * 60 * 1000) continue;
+      // Include matches close to kickoff so status flips to IN_PLAY are caught ASAP.
+      if (kickoff.getTime() > now.getTime() + 10 * 60 * 1000) continue;
+      // Extra time + penalties can run past 5h from kickoff.
+      if (kickoff.getTime() < now.getTime() - 6 * 60 * 60 * 1000) continue;
       candidateIds.push(matchId);
     }
   }

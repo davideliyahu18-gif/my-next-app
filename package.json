@@ -6,7 +6,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "fifa-bot:setup": "npm install --prefix scripts/fifa-whatsapp",
+    "fifa-bot:start": "npm run start --prefix scripts/fifa-whatsapp",
+    "fifa-bot:poll": "node scripts/fifa-whatsapp/cloud-poller.mjs",
+    "fifa-bot:commands": "node scripts/fifa-whatsapp/command-poller.mjs",
+    "fifa-bot:hotpath": "node scripts/fifa-whatsapp/live-hotpath.mjs",
+    "fifa-bot:highlight": "node scripts/fifa-whatsapp/send-match-highlight.mjs"
   },
   "dependencies": {
     "@upstash/redis": "^1.38.0",

@@ -57,6 +57,7 @@ function liveMinute(match: FifaMatch): string {
     });
   }
   if (match.status === "FINISHED") return "סיום";
+  if (match.status === "PENALTIES") return "פנדלים";
   return latestMatchMinuteLabel(match);
 }
 
@@ -65,7 +66,9 @@ function matchToLiveView(
   venue = "—",
 ): LiveMatchView {
   const status =
-    match.status === "IN_PLAY" || match.status === "PAUSE"
+    match.status === "IN_PLAY" ||
+    match.status === "PAUSE" ||
+    match.status === "PENALTIES"
       ? "live"
       : match.status === "FINISHED"
         ? "finished"
@@ -473,7 +476,13 @@ function dayOffsetFromIsoDate(isoDate: string): number {
 function scheduleStatus(
   match: FifaMatch,
 ): ScheduleMatchView["status"] {
-  if (match.status === "IN_PLAY" || match.status === "PAUSE") return "live";
+  if (
+    match.status === "IN_PLAY" ||
+    match.status === "PAUSE" ||
+    match.status === "PENALTIES"
+  ) {
+    return "live";
+  }
   if (match.status === "FINISHED") return "finished";
   return "upcoming";
 }

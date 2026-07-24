@@ -40,3 +40,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# FIFA WhatsApp bot (Baileys session + local state)
+/scripts/fifa-whatsapp/node_modules/
+/scripts/fifa-whatsapp/auth/
+/scripts/fifa-whatsapp/bot-state.json
