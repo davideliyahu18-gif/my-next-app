@@ -136,6 +136,34 @@ export const PLACES: NamedPlace[] = [
     position: { lat: 31.95, lng: 35.91 },
     kind: "target",
   },
+  {
+    id: "kuwait",
+    labelHe: "כווית",
+    aliases: ["כווית", "الكويت", "kuwait"],
+    position: { lat: 29.38, lng: 47.99 },
+    kind: "target",
+  },
+  {
+    id: "bahrain",
+    labelHe: "בחריין",
+    aliases: ["בחריין", "البحرين", "bahrain"],
+    position: { lat: 26.07, lng: 50.55 },
+    kind: "target",
+  },
+  {
+    id: "israel",
+    labelHe: "ישראל",
+    aliases: ["ישראל", "לעבר ישראל"],
+    position: { lat: 31.5, lng: 34.85 },
+    kind: "target",
+  },
+  {
+    id: "iran-general",
+    labelHe: "איראן",
+    aliases: ["מאיראן", "מאיראן", "איראן"],
+    position: { lat: 32.8, lng: 51.4 },
+    kind: "launch",
+  },
 ];
 
 export function matchPlaces(

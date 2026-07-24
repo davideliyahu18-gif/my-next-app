@@ -5,7 +5,7 @@ import { statusFromProgress } from "./geo";
 
 function isLaunchRelatedMessage(text: string): boolean {
   return (
-    /שיגור|יציאות מאיראן|מיקום המשגר|גורם משגר|טיל בליסטי|ירי לעבר/.test(
+    /שיגור|שיגורים|יציאות מאיראן|מיקום המשגר|גורם משגר|טיל בליסטי|ירי לעבר/.test(
       text,
     ) ||
     (/בליסטי|כטב.?מ/.test(text) && /משגר|יציאות|שיגור/.test(text))
@@ -55,9 +55,18 @@ function parseEtaSeconds(text: string, now: Date): number | null {
 }
 
 function pickTarget(text: string): { position: LatLng; labelHe: string } {
-  const targets = matchPlaces(text, "target");
-  if (targets[0]) {
-    return { position: targets[0].position, labelHe: targets[0].labelHe };
+  const targets = matchPlaces(text, "target").filter(
+    (p) => p.id !== "iran-general",
+  );
+  // Prefer more specific destinations over generic Israel when both match.
+  const preferred =
+    targets.find((p) =>
+      ["kuwait", "bahrain", "aqaba", "jordan", "haifa", "tel-aviv", "south", "north", "center"].includes(
+        p.id,
+      ),
+    ) ?? targets[0];
+  if (preferred) {
+    return { position: preferred.position, labelHe: preferred.labelHe };
   }
   if (/ירדן|עקבה/.test(text)) {
     return { position: { lat: 29.53, lng: 35.0 }, labelHe: "עקבה / ירדן" };
@@ -73,11 +82,26 @@ function pickOrigin(text: string): { position: LatLng; labelHe: string } | null 
     null;
 
   const search = launcherField ?? text;
-  const launches = matchPlaces(search, "launch");
+  const launches = matchPlaces(search, "launch").filter(
+    (p) => p.id !== "iran-general",
+  );
   if (launches[0]) {
     const labels = launches.map((p) => p.labelHe).join(", ");
     return { position: launches[0].position, labelHe: labels };
   }
+
+  if (/תימן|סעדה|חות/.test(text) && /שיגור/.test(text)) {
+    return { position: { lat: 16.94, lng: 43.76 }, labelHe: "סעדה / תימן" };
+  }
+
+  if (
+    /שיגור(?:ים)?\s*מאיראן|יציאות מאיראן|גורם משגר\s*[|:]?\s*איראן|מאיראן\s*ל/.test(
+      text,
+    )
+  ) {
+    return { position: { lat: 32.8, lng: 51.4 }, labelHe: "איראן (כללי)" };
+  }
+
   return null;
 }
 
