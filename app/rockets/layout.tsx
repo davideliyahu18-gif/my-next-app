@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "מכ״ם שיגורים · Rocket Track",
+  title: "Dash - דאש · שיגורים",
   description:
-    "הדמיית מפת מעקב שיגורים מאיראן לישראל — ויזואליזציה, לא טלמטריה צבאית חיה.",
+    "דאש לייב: מפת מעקב, שיגורים לעבר ישראל, ופיד טלגרם מעודכן.",
 };
 
 export default function RocketsLayout({
