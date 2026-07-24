@@ -25,6 +25,8 @@ const AUTH_DIR = path.join(__dirname, "auth");
 const STATE_FILE = path.join(__dirname, "bot-state.json");
 const SEEN_FILE = path.join(__dirname, "seen-alerts.json");
 const TEST_TRIGGER = path.join(__dirname, "test-trigger.json");
+const SEND_NOW_FILE = path.join(__dirname, "send-now.json");
+const LATEST_SENT_FILE = path.join(__dirname, "latest-sent.json");
 
 const require = createRequire(import.meta.url);
 const baileys = require("@whiskeysockets/baileys");
@@ -334,6 +336,38 @@ async function handleTestTrigger() {
   }
 }
 
+async function handleSendNow() {
+  if (!existsSync(SEND_NOW_FILE)) return;
+  try {
+    const raw = await readFile(SEND_NOW_FILE, "utf8");
+    if (!raw.trim()) return;
+    const payload = JSON.parse(raw);
+    await unlink(SEND_NOW_FILE).catch(() => {});
+
+    if (!(await resolveGroup())) {
+      console.log("⚠️ לא ניתן לשלוח — הקבוצה לא נמצאה");
+      return;
+    }
+
+    const alert = payload.alert;
+    if (!alert?.text || !alert?.location) {
+      console.log("⚠️ send-now.json חסר alert.text/location");
+      return;
+    }
+
+    await sendAlert(alert);
+    if (alert.id) await markSeen([alert.id]);
+    await writeFile(
+      LATEST_SENT_FILE,
+      JSON.stringify({ id: alert.id, at: new Date().toISOString() }, null, 2),
+      "utf8",
+    );
+    console.log(`✅ נשלחה התראה חיה: ${alert.id || "unknown"}`);
+  } catch (error) {
+    log.error({ err: error }, "Send-now failed");
+  }
+}
+
 async function startSock() {
   await mkdir(AUTH_DIR, { recursive: true });
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
@@ -417,7 +451,8 @@ async function main() {
 
   setInterval(() => {
     void handleTestTrigger();
-  }, 3000);
+    void handleSendNow();
+  }, 2000);
 
   console.log(
     [
