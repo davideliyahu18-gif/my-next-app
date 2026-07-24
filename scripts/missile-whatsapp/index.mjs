@@ -45,6 +45,20 @@ let pollRunning = false;
 let welcomeSent = false;
 let cfg = null;
 
+function boldEveryLine(text) {
+  return String(text || "")
+    .split("\n")
+    .map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return "";
+      if (/^\*[^*].*\*$/.test(trimmed) && !trimmed.slice(1, -1).includes("*")) {
+        return trimmed;
+      }
+      return `*${trimmed.replace(/\*/g, "")}*`;
+    })
+    .join("\n");
+}
+
 function demoAlert() {
   const now = new Date();
   const clock = new Intl.DateTimeFormat("he-IL", {
@@ -59,20 +73,22 @@ function demoAlert() {
 
   return {
     id: `demo-kuwait-${now.getTime()}`,
-    text: [
-      "🚨 *התראת שיגור · איראן → כווית*",
-      "",
-      "📍 משגר (משוער): אזור כרמאנשאה",
-      "🎯 יעד (משוער): כווית סיטי",
-      "🧭 סוג: בליסטי",
-      `🕐 שיגור: ${clock} (שעון כווית)`,
-      "⏱ צפי הגעה: 3:30",
-      "",
-      "🗺 מפה: https://maps.google.com/?q=29.37590,47.97740",
-      "מקור: הדגמה מקומית",
-      "",
-      "⚠️ מיקום מקורב לפי דיווח פומבי/OSINT — לא קואורדינטה צבאית מדויקת.",
-    ].join("\n"),
+    text: boldEveryLine(
+      [
+        "🚨 התראת שיגור · איראן → כווית",
+        "",
+        "📍 משגר (משוער): אזור כרמאנשאה",
+        "🎯 יעד (משוער): כווית סיטי",
+        "🧭 סוג: בליסטי",
+        `🕐 שיגור: ${clock} (שעון כווית)`,
+        "⏱ צפי הגעה: 3:30",
+        "",
+        "🗺 מפה: https://maps.google.com/?q=29.37590,47.97740",
+        "מקור: הדגמה מקומית",
+        "",
+        "⚠️ מיקום מקורב לפי דיווח פומבי/OSINT — לא קואורדינטה צבאית מדויקת.",
+      ].join("\n"),
+    ),
     location: {
       latitude: 29.3759,
       longitude: 47.9774,
@@ -258,7 +274,8 @@ async function sendLocation(location) {
 
 async function sendAlert(alert, options = {}) {
   if (!sock || !groupJid) return false;
-  await sock.sendMessage(groupJid, { text: alert.text });
+  const text = boldEveryLine(alert.text);
+  await sock.sendMessage(groupJid, { text });
   if (options.textOnly) return true;
   if (alert.location) {
     await sendLocation(alert.location);

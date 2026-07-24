@@ -2,6 +2,8 @@ import { KUWAIT_DEFAULT_TARGET, mentionsKuwait } from "@/lib/rockets/locations";
 import { messageToTrack } from "@/lib/rockets/parse-alert";
 import type { TelegramChannelMessage } from "@/lib/rockets/telegram";
 import type { RocketTrack } from "@/lib/rockets/types";
+import { messagesToAircraftAlerts } from "./aircraft";
+import { boldEveryLine } from "./style";
 import type { MissileAlert, MissileAlertLocation } from "./types";
 
 function corridorIsKuwait(): boolean {
@@ -63,7 +65,7 @@ function toLocation(
 
 export function formatMissileAlertText(alert: Omit<MissileAlert, "text">): string {
   const lines = [
-    "🚨 *התראת שיגור · איראן → כווית*",
+    "🚨 התראת שיגור · איראן → כווית",
     "",
     `📍 משגר (משוער): ${alert.originLabelHe}`,
     `🎯 יעד (משוער): ${alert.targetLabelHe}`,
@@ -72,11 +74,12 @@ export function formatMissileAlertText(alert: Omit<MissileAlert, "text">): strin
     `⏱ צפי הגעה: ${etaLabel(alert.etaSeconds)}`,
     "",
     `🗺 מפה: ${alert.mapsUrl}`,
-    `מקור: ${alert.sourceHe}${alert.sourceUrl ? `\n${alert.sourceUrl}` : ""}`,
+    `מקור: ${alert.sourceHe}`,
+    ...(alert.sourceUrl ? [alert.sourceUrl] : []),
     "",
     "⚠️ מיקום מקורב לפי דיווח פומבי/OSINT — לא קואורדינטה צבאית מדויקת.",
   ];
-  return lines.join("\n");
+  return boldEveryLine(lines.join("\n"));
 }
 
 export function trackToMissileAlert(track: RocketTrack): MissileAlert {
@@ -159,6 +162,13 @@ export function messagesToMissileAlerts(
     if (seen.has(alert.id)) continue;
     seen.add(alert.id);
     alerts.push(alert);
+  }
+
+  // Also include fighter-jet / combat-aircraft activity over Iran.
+  for (const air of messagesToAircraftAlerts(messages)) {
+    if (seen.has(air.id)) continue;
+    seen.add(air.id);
+    alerts.push(air);
   }
 
   return alerts;
