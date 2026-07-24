@@ -256,10 +256,13 @@ async function sendLocation(location) {
   return true;
 }
 
-async function sendAlert(alert) {
+async function sendAlert(alert, options = {}) {
   if (!sock || !groupJid) return false;
   await sock.sendMessage(groupJid, { text: alert.text });
-  await sendLocation(alert.location);
+  if (options.textOnly) return true;
+  if (alert.location) {
+    await sendLocation(alert.location);
+  }
   if (cfg.sendLaunchPin && alert.launchLocation) {
     await sendLocation(alert.launchLocation);
   }
@@ -350,12 +353,16 @@ async function handleSendNow() {
     }
 
     const alert = payload.alert;
-    if (!alert?.text || !alert?.location) {
-      console.log("⚠️ send-now.json חסר alert.text/location");
+    if (!alert?.text) {
+      console.log("⚠️ send-now.json חסר alert.text");
+      return;
+    }
+    if (!payload.textOnly && !alert.location) {
+      console.log("⚠️ send-now.json חסר alert.location");
       return;
     }
 
-    await sendAlert(alert);
+    await sendAlert(alert, { textOnly: Boolean(payload.textOnly) });
     if (alert.id) await markSeen([alert.id]);
     await writeFile(
       LATEST_SENT_FILE,
