@@ -1,11 +1,11 @@
 import type { LatLng, MapBounds } from "./types";
 
-/** Middle East corridor: Israel ↔ Iran. */
+/** Middle East / Gulf corridor: Kuwait ↔ Iran (also covers Israel tracks). */
 export const DEFAULT_BOUNDS: MapBounds = {
-  north: 42.2,
-  south: 24.5,
-  west: 31.5,
-  east: 63.5,
+  north: 40.5,
+  south: 24.0,
+  west: 44.0,
+  east: 58.5,
 };
 
 export function project(
@@ -58,7 +58,7 @@ export function statusFromProgress(progress: number): import("./types").RocketTr
 
 export function formatClock(date = new Date()): string {
   return new Intl.DateTimeFormat("he-IL", {
-    timeZone: "Asia/Jerusalem",
+    timeZone: "Asia/Kuwait",
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",

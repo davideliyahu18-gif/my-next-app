@@ -40,3 +40,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# WhatsApp Baileys sessions / local bot state
+scripts/**/auth/
+scripts/**/bot-state.json
+scripts/**/seen-alerts.json
+scripts/**/test-trigger.json
+scripts/**/test-trigger.json.done
+scripts/**/node_modules/
+

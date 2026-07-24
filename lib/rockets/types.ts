@@ -1,4 +1,10 @@
-export type RocketTrackStatus = "pending" | "boost" | "midcourse" | "terminal" | "impact" | "intercepted";
+export type RocketTrackStatus =
+  | "pending"
+  | "boost"
+  | "midcourse"
+  | "terminal"
+  | "impact"
+  | "intercepted";
 
 export type LatLng = {
   lat: number;
@@ -30,6 +36,27 @@ export type RocketTrack = {
   launchedAt: string;
   etaSeconds: number;
   speedHintHe: string;
+  sourceUrl?: string;
+  rawText?: string;
+};
+
+export type RocketFeedItem = {
+  id: string;
+  channel: string;
+  url: string;
+  text: string;
+  datetime: string;
+  related: boolean;
+};
+
+export type RocketsSnapshot = {
+  ok: boolean;
+  mode: "live" | "demo";
+  tracks: RocketTrack[];
+  feed: RocketFeedItem[];
+  sources: { username: string; label: string }[];
+  errors: string[];
+  timestamp: string;
 };
 
 export type MapBounds = {

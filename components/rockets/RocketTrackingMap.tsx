@@ -17,12 +17,12 @@ const MAP_W = 1000;
 const MAP_H = 620;
 
 const LANDMARKS: { label: string; lat: number; lng: number }[] = [
-  { label: "ישראל", lat: 31.5, lng: 34.85 },
-  { label: "ירדן", lat: 31.2, lng: 36.5 },
+  { label: "כווית", lat: 29.3759, lng: 47.9774 },
   { label: "עיראק", lat: 33.2, lng: 44.0 },
   { label: "איראן", lat: 32.5, lng: 54.0 },
-  { label: "סוריה", lat: 35.0, lng: 38.5 },
+  { label: "בושהר", lat: 28.92, lng: 50.84 },
   { label: "מפרץ פרסי", lat: 27.0, lng: 51.5 },
+  { label: "ערב הסעודית", lat: 27.5, lng: 46.5 },
 ];
 
 function pathD(points: { x: number; y: number }[]): string {
@@ -197,10 +197,37 @@ export default function RocketTrackingMap() {
   const [selectedTrackId, setSelectedTrackId] = useState<string | null>("trk-alpha");
   const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
   const [running, setRunning] = useState(true);
+  const [liveMode, setLiveMode] = useState<"demo" | "live">("demo");
   const lastTs = useRef<number | null>(null);
 
   useEffect(() => {
-    if (!running) {
+    const source = new EventSource("/api/rockets/stream");
+    source.onmessage = (event) => {
+      try {
+        const snapshot = JSON.parse(event.data) as {
+          mode?: "demo" | "live";
+          tracks?: RocketTrack[];
+        };
+        if (Array.isArray(snapshot.tracks) && snapshot.tracks.length > 0) {
+          setTracks(snapshot.tracks);
+          setLiveMode(snapshot.mode === "live" ? "live" : "demo");
+          setSelectedTrackId((prev) => {
+            if (prev && snapshot.tracks!.some((t) => t.id === prev)) return prev;
+            return snapshot.tracks![0]?.id ?? null;
+          });
+        }
+      } catch {
+        // ignore malformed frames
+      }
+    };
+    source.onerror = () => {
+      // Keep demo animation if stream drops.
+    };
+    return () => source.close();
+  }, []);
+
+  useEffect(() => {
+    if (!running || liveMode === "live") {
       lastTs.current = null;
       return;
     }
@@ -228,7 +255,7 @@ export default function RocketTrackingMap() {
     };
     frame = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(frame);
-  }, [running]);
+  }, [running, liveMode]);
 
   const selectedTrack =
     tracks.find((t) => t.id === selectedTrackId) ?? tracks[0] ?? null;
@@ -255,14 +282,14 @@ export default function RocketTrackingMap() {
                 ROCKET TRACK
               </p>
               <h1 className="text-xl font-black tracking-tight md:text-2xl">
-                מכ״ם שיגורים
+                מכ״ם שיגורים · כווית
               </h1>
             </div>
           </div>
           <div className="flex items-center gap-3 md:gap-5">
             <div className="hidden text-left sm:block">
               <p className="text-[10px] font-bold tracking-[0.18em] text-zinc-500">
-                שעון ישראל
+                שעון כווית
               </p>
               <LiveClock />
             </div>
@@ -272,7 +299,7 @@ export default function RocketTrackingMap() {
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-rose-500" />
               </span>
               <span className="text-xs font-bold text-rose-200">
-                {activeCount} פעילים
+                {liveMode === "live" ? "LIVE" : "DEMO"} · {activeCount} פעילים
               </span>
             </div>
             <button
@@ -302,10 +329,10 @@ export default function RocketTrackingMap() {
           <div className="flex items-center justify-between border-b border-white/8 px-4 py-3">
             <div>
               <h2 className="text-sm font-bold text-zinc-100">
-                תאטרון איראן → ישראל
+                תאטרון איראן → כווית
               </h2>
               <p className="text-xs text-zinc-500">
-                הדמיה ויזואלית · לא טלמטריה צבאית חיה
+                הדמיה + OSINT · התראות WhatsApp עם מיקום
               </p>
             </div>
             <p className="font-mono text-[10px] text-zinc-500">
@@ -318,7 +345,7 @@ export default function RocketTrackingMap() {
               viewBox={`0 0 ${MAP_W} ${MAP_H}`}
               className="h-auto w-full"
               role="img"
-              aria-label="מפת מעקב שיגורים מאיראן לישראל"
+              aria-label="מפת מעקב שיגורים מאיראן לכווית"
             >
               <defs>
                 <pattern
@@ -416,8 +443,10 @@ export default function RocketTrackingMap() {
           </div>
 
           <div className="border-t border-white/8 px-4 py-3 text-xs leading-relaxed text-zinc-500">
-            נקודות השיגור הן אזורים כלליים ממקורות פתוחים/הדגמה — לא קואורדינטות
-            מדויקות של משגרים. המסלולים מונפשים לצורכי ויזואליזציה בלבד.
+            נקודות השיגור והיעד הן אזורים כלליים ממקורות פתוחים/הדגמה — לא
+            קואורדינטות מדויקות. בוט WhatsApp שולח טקסט + סיכת מיקום מקורבת
+            (Green API / Baileys). ראו{" "}
+            <code className="text-zinc-400">scripts/missile-whatsapp/README.md</code>.
           </div>
         </section>
 

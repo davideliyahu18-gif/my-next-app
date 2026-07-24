@@ -1,4 +1,5 @@
 import type { LaunchSite, RocketTrack } from "./types";
+import { KUWAIT_DEFAULT_TARGET } from "./locations";
 
 /**
  * Approximate public/OSINT regions reported in open media.
@@ -48,14 +49,17 @@ export const LAUNCH_SITES: LaunchSite[] = [
     region: "חוף המפרץ",
     position: { lat: 28.92, lng: 50.84 },
     precision: "area",
-    noteHe: "אזור חופי שדווח בהקשרים פומביים.",
+    noteHe: "אזור חופי שדווח בהקשרים פומביים — קרוב יחסית לכווית.",
   },
 ];
 
 const TARGETS = {
-  telAviv: { lat: 32.0853, lng: 34.7818, label: "תל אביב" },
-  haifa: { lat: 32.794, lng: 34.9896, label: "חיפה" },
-  south: { lat: 31.25, lng: 34.8, label: "דרום ישראל" },
+  kuwaitCity: {
+    ...KUWAIT_DEFAULT_TARGET.position,
+    label: KUWAIT_DEFAULT_TARGET.labelHe,
+  },
+  ahmadi: { lat: 29.0769, lng: 48.0838, label: "אל־אחמדי" },
+  jahra: { lat: 29.3375, lng: 47.6581, label: "אל־ג׳הרה" },
 } as const;
 
 /** Demo tracks for the visualization — not live military telemetry. */
@@ -65,44 +69,44 @@ export function createDemoTracks(now = Date.now()): RocketTrack[] {
   return [
     {
       id: "trk-alpha",
-      labelHe: "מסלול α · כרמאנשאה",
+      labelHe: "מסלול α · כרמאנשאה → כווית",
       origin: LAUNCH_SITES[0].position,
       originLabelHe: LAUNCH_SITES[0].nameHe,
-      target: TARGETS.telAviv,
-      targetLabelHe: TARGETS.telAviv.label,
+      target: TARGETS.kuwaitCity,
+      targetLabelHe: TARGETS.kuwaitCity.label,
       progress: 0.42,
       status: "midcourse",
       sourceHe: "הדגמה · מקור פומבי מדומה",
       launchedAt: iso(6 * 60_000),
-      etaSeconds: 420,
+      etaSeconds: 180,
       speedHintHe: "בליסטי · בינוני",
     },
     {
       id: "trk-bravo",
-      labelHe: "מסלול β · אספהאן",
+      labelHe: "מסלול β · אספהאן → אל־אחמדי",
       origin: LAUNCH_SITES[1].position,
       originLabelHe: LAUNCH_SITES[1].nameHe,
-      target: TARGETS.haifa,
-      targetLabelHe: TARGETS.haifa.label,
+      target: TARGETS.ahmadi,
+      targetLabelHe: TARGETS.ahmadi.label,
       progress: 0.18,
       status: "boost",
       sourceHe: "הדגמה · דיווח איראני מדומה",
       launchedAt: iso(2 * 60_000),
-      etaSeconds: 780,
+      etaSeconds: 420,
       speedHintHe: "בליסטי · ארוך טווח",
     },
     {
       id: "trk-charlie",
-      labelHe: "מסלול γ · שיראז",
-      origin: LAUNCH_SITES[2].position,
-      originLabelHe: LAUNCH_SITES[2].nameHe,
-      target: TARGETS.south,
-      targetLabelHe: TARGETS.south.label,
+      labelHe: "מסלול γ · בושהר → ג׳הרה",
+      origin: LAUNCH_SITES[4].position,
+      originLabelHe: LAUNCH_SITES[4].nameHe,
+      target: TARGETS.jahra,
+      targetLabelHe: TARGETS.jahra.label,
       progress: 0.78,
       status: "terminal",
       sourceHe: "הדגמה · OSINT",
-      launchedAt: iso(11 * 60_000),
-      etaSeconds: 95,
+      launchedAt: iso(8 * 60_000),
+      etaSeconds: 55,
       speedHintHe: "שלב סופי",
     },
   ];
