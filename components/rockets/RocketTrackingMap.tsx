@@ -14,7 +14,7 @@ import type {
 const GeoMap = dynamic(() => import("@/components/rockets/GeoMap"), {
   ssr: false,
   loading: () => (
-    <div className="flex h-[min(68vh,640px)] items-center justify-center bg-[#dbe4ee] text-sm font-semibold text-slate-500">
+    <div className="flex h-[min(70vh,680px)] items-center justify-center bg-white text-sm font-medium text-neutral-400">
       טוען מפה…
     </div>
   ),
@@ -27,21 +27,16 @@ function etaLabel(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-function statusTone(status: RocketTrack["status"]): string {
-  switch (status) {
-    case "boost":
-      return "text-amber-700";
-    case "midcourse":
-      return "text-teal-700";
-    case "terminal":
-      return "text-orange-700";
-    case "impact":
-      return "text-slate-500";
-    case "intercepted":
-      return "text-emerald-700";
-    default:
-      return "text-slate-500";
-  }
+function relativeHe(iso: string): string {
+  const ms = Date.now() - Date.parse(iso);
+  if (Number.isNaN(ms)) return "";
+  const mins = Math.floor(ms / 60_000);
+  if (mins < 1) return "עכשיו";
+  if (mins < 60) return `לפני ${mins} דק׳`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `לפני ${hours} שע׳`;
+  const days = Math.floor(hours / 24);
+  return `לפני ${days} ימים`;
 }
 
 function LiveClock() {
@@ -53,7 +48,7 @@ function LiveClock() {
     return () => clearInterval(id);
   }, []);
   return (
-    <span className="font-mono text-sm tabular-nums text-slate-800">
+    <span className="font-mono text-sm tabular-nums text-neutral-900">
       {now || "—:—:—"}
     </span>
   );
@@ -65,11 +60,13 @@ export default function RocketTrackingMap() {
   const [mode, setMode] = useState<RocketsSnapshot["mode"]>("live");
   const [errors, setErrors] = useState<string[]>([]);
   const [sources, setSources] = useState<RocketsSnapshot["sources"]>([]);
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null);
   const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
   const [running, setRunning] = useState(true);
   const [forceDemo, setForceDemo] = useState(false);
   const [connected, setConnected] = useState(false);
+  const [feedFilter, setFeedFilter] = useState<"all" | "launch">("all");
   const lastTs = useRef<number | null>(null);
   const selectedTrackIdRef = useRef<string | null>(null);
   selectedTrackIdRef.current = selectedTrackId;
@@ -100,6 +97,7 @@ export default function RocketTrackingMap() {
         setMode(snapshot.mode);
         setErrors(snapshot.errors);
         setSources(snapshot.sources);
+        setUpdatedAt(snapshot.timestamp);
         const current = selectedTrackIdRef.current;
         if (
           snapshot.tracks.length > 0 &&
@@ -109,7 +107,7 @@ export default function RocketTrackingMap() {
         }
         setConnected(true);
       } catch {
-        // ignore malformed chunks
+        // ignore
       }
     };
 
@@ -137,11 +135,10 @@ export default function RocketTrackingMap() {
         prev.map((track) => {
           if (track.progress >= 1) return track;
           const progress = Math.min(1, track.progress + dt * 0.008);
-          const etaSeconds = Math.max(0, Math.round(track.etaSeconds - dt));
           return {
             ...track,
             progress,
-            etaSeconds,
+            etaSeconds: Math.max(0, Math.round(track.etaSeconds - dt)),
             status: statusFromProgress(progress),
           };
         }),
@@ -157,66 +154,50 @@ export default function RocketTrackingMap() {
   const selectedSite =
     LAUNCH_SITES.find((s) => s.id === selectedSiteId) ?? null;
   const activeCount = tracks.filter((t) => t.progress < 1).length;
-  const relatedFeed = feed.filter((item) => item.related).slice(0, 8);
+
+  const visibleFeed =
+    feedFilter === "launch" ? feed.filter((item) => item.related) : feed;
 
   return (
-    <div
-      dir="rtl"
-      className="min-h-screen bg-[#e8eef4] text-slate-900"
-      style={{
-        backgroundImage:
-          "radial-gradient(ellipse 80% 50% at 10% -10%, rgba(13,148,136,0.16), transparent), radial-gradient(ellipse 60% 40% at 100% 0%, rgba(249,115,22,0.10), transparent), linear-gradient(180deg, #edf2f7 0%, #e2e8f0 100%)",
-      }}
-    >
-      <header className="sticky top-0 z-30 border-b border-slate-300/70 bg-white/75 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-[1400px] flex-wrap items-center justify-between gap-4 px-4 py-4 md:px-6">
-          <div className="flex items-center gap-4">
+    <div dir="rtl" className="min-h-screen bg-white text-neutral-900">
+      <header className="sticky top-0 z-30 border-b border-neutral-200 bg-white/90 backdrop-blur-md">
+        <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-4 px-4 py-4 md:px-8">
+          <div className="flex items-center gap-5">
             <Link
               href="/"
-              className="text-xs font-semibold text-slate-500 transition hover:text-slate-800"
+              className="text-xs font-medium text-neutral-400 transition hover:text-neutral-700"
             >
               ← חזרה
             </Link>
             <div>
-              <p className="text-[10px] font-black tracking-[0.28em] text-teal-700">
-                SITUATION MAP
+              <p className="text-[11px] font-semibold uppercase tracking-[0.35em] text-neutral-400">
+                White Map
               </p>
-              <h1 className="font-display text-2xl font-black tracking-tight text-slate-900 md:text-3xl">
+              <h1 className="text-2xl font-black tracking-tight md:text-3xl">
                 מכ״ם שיגורים
               </h1>
             </div>
           </div>
+
           <div className="flex flex-wrap items-center gap-3">
-            <div className="hidden rounded-2xl border border-slate-200 bg-white px-3 py-2 text-left shadow-sm sm:block">
-              <p className="text-[10px] font-bold tracking-[0.18em] text-slate-400">
-                שעון ישראל
+            <div className="hidden text-left sm:block">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-neutral-400">
+                Israel
               </p>
               <LiveClock />
             </div>
-            <div
-              className={`flex items-center gap-2 rounded-full border px-3 py-1.5 ${
-                mode === "live"
-                  ? "border-teal-300 bg-teal-50 text-teal-800"
-                  : "border-amber-300 bg-amber-50 text-amber-800"
-              }`}
-            >
-              <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-current opacity-40" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-current" />
-              </span>
-              <span className="text-xs font-bold">
-                {mode === "live" ? "LIVE טלגרם" : "הדגמה"}
-                {connected && mode === "live" ? " · מחובר" : ""}
-              </span>
+            <div className="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-semibold text-neutral-700">
+              {connected ? "מחובר" : "מתחבר…"}
+              {updatedAt ? ` · ${relativeHe(updatedAt)}` : ""}
             </div>
-            <div className="rounded-full border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-bold text-orange-800">
-              {activeCount} פעילים
+            <div className="rounded-full bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-white">
+              {mode === "live" ? "LIVE" : "DEMO"} · {activeCount} פעילים
             </div>
             {mode === "demo" && (
               <button
                 type="button"
                 onClick={() => setRunning((v) => !v)}
-                className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                className="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-semibold"
               >
                 {running ? "השהה" : "המשך"}
               </button>
@@ -224,7 +205,7 @@ export default function RocketTrackingMap() {
             <button
               type="button"
               onClick={() => setForceDemo((v) => !v)}
-              className="rounded-xl border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs font-bold text-teal-800 transition hover:bg-teal-100"
+              className="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-semibold hover:bg-neutral-50"
             >
               {forceDemo ? "חזרה ללייב" : "הדגמה"}
             </button>
@@ -232,217 +213,260 @@ export default function RocketTrackingMap() {
         </div>
       </header>
 
-      <main className="mx-auto grid max-w-[1400px] gap-4 px-4 py-4 md:grid-cols-[1fr_340px] md:px-6 md:py-6">
-        <section className="overflow-hidden rounded-[1.75rem] border border-slate-300/80 bg-white shadow-[0_24px_60px_rgba(15,23,42,0.12)]">
-          <div className="flex flex-wrap items-end justify-between gap-3 border-b border-slate-200 px-5 py-4">
-            <div>
-              <h2 className="text-lg font-black text-slate-900">
-                מפת מצב · איראן ↔ ישראל
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                {mode === "live"
-                  ? "שכבת מסלולים מדיווחי טלגרם על מפה גאוגרפית"
-                  : "מצב הדגמה על מפה גאוגרפית"}
-              </p>
-            </div>
-            <p className="font-mono text-[11px] text-slate-400">
-              {sources.map((s) => `@${s.username}`).join(" · ") ||
-                "@newsil5 · @shigurimisrael"}
+      <main className="mx-auto max-w-[1440px] px-4 py-5 md:px-8 md:py-7">
+        <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-black tracking-tight md:text-2xl">
+              מפה לבנה · מסדרון איראן–ישראל
+            </h2>
+            <p className="mt-1 text-sm text-neutral-500">
+              שכבת מסלולים על בסיס דיווחי טלגרם מעודכנים
             </p>
           </div>
+          <p className="text-xs text-neutral-400">
+            {sources.map((s) => `@${s.username}`).join("  ·  ") ||
+              "@newsil5 · @shigurimisrael"}
+          </p>
+        </div>
 
-          <GeoMap
-            tracks={tracks}
-            sites={LAUNCH_SITES}
-            selectedTrackId={selectedTrackId}
-            selectedSiteId={selectedSiteId}
-            onSelectTrack={(id) => {
-              setSelectedTrackId(id);
-              setSelectedSiteId(null);
-            }}
-            onSelectSite={(id) => {
-              setSelectedSiteId(id);
-              setSelectedTrackId(null);
-            }}
-          />
+        <div className="grid gap-5 lg:grid-cols-[1.35fr_0.9fr]">
+          <section className="overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-[0_1px_0_rgba(0,0,0,0.03)]">
+            <GeoMap
+              tracks={tracks}
+              sites={LAUNCH_SITES}
+              selectedTrackId={selectedTrackId}
+              selectedSiteId={selectedSiteId}
+              onSelectTrack={(id) => {
+                setSelectedTrackId(id);
+                setSelectedSiteId(null);
+              }}
+              onSelectSite={(id) => {
+                setSelectedSiteId(id);
+                setSelectedTrackId(null);
+              }}
+            />
 
-          <div className="border-t border-slate-200 px-5 py-3 text-xs leading-relaxed text-slate-500">
-            מקורות:{" "}
-            <a
-              href="https://t.me/newsil5"
-              target="_blank"
-              rel="noreferrer"
-              className="font-semibold text-teal-700 underline-offset-2 hover:underline"
-            >
-              @newsil5
-            </a>
-            {" · "}
-            <a
-              href="https://t.me/shigurimisrael"
-              target="_blank"
-              rel="noreferrer"
-              className="font-semibold text-teal-700 underline-offset-2 hover:underline"
-            >
-              @shigurimisrael
-            </a>
-            . מיקומי משגר הם אזורים כלליים מהטקסט.
-            {errors[0] ? ` · ${errors[0]}` : ""}
-          </div>
-        </section>
-
-        <aside className="flex flex-col gap-4">
-          <div className="rounded-[1.5rem] border border-slate-200 bg-white/90 p-4 shadow-sm">
-            <h3 className="mb-3 text-[11px] font-black tracking-[0.2em] text-slate-400">
-              מסלולים
-            </h3>
-            {tracks.length === 0 ? (
-              <p className="text-sm text-slate-500">אין מסלולים כרגע.</p>
-            ) : (
-              <ul className="space-y-2">
-                {tracks.map((track) => (
-                  <li key={track.id}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedTrackId(track.id);
-                        setSelectedSiteId(null);
-                      }}
-                      className={`w-full rounded-2xl border px-3 py-3 text-right transition ${
-                        selectedTrackId === track.id
-                          ? "border-orange-300 bg-orange-50 shadow-sm"
-                          : "border-slate-200 bg-slate-50/70 hover:border-slate-300"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-bold text-slate-900">
-                          {track.labelHe}
-                        </span>
-                        <span
-                          className={`text-[11px] font-bold ${statusTone(track.status)}`}
-                        >
-                          {STATUS_LABEL[track.status]}
-                        </span>
-                      </div>
-                      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200">
-                        <div
-                          className="h-full rounded-full bg-gradient-to-l from-orange-500 to-teal-500 transition-[width] duration-300"
-                          style={{
-                            width: `${Math.round(track.progress * 100)}%`,
+            <div className="grid gap-0 border-t border-neutral-200 md:grid-cols-2">
+              <div className="border-b border-neutral-200 p-4 md:border-b-0 md:border-l">
+                <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-neutral-400">
+                  מסלולים
+                </h3>
+                {tracks.length === 0 ? (
+                  <p className="text-sm text-neutral-400">אין מסלולים כרגע.</p>
+                ) : (
+                  <ul className="max-h-56 space-y-2 overflow-y-auto">
+                    {tracks.map((track) => (
+                      <li key={track.id}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedTrackId(track.id);
+                            setSelectedSiteId(null);
                           }}
-                        />
-                      </div>
-                      <div className="mt-2 flex justify-between font-mono text-[10px] text-slate-500">
-                        <span>{track.sourceHe}</span>
-                        <span>ETA {etaLabel(track.etaSeconds)}</span>
-                      </div>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+                          className={`w-full rounded-2xl border px-3 py-3 text-right transition ${
+                            selectedTrackId === track.id
+                              ? "border-neutral-900 bg-neutral-900 text-white"
+                              : "border-neutral-200 hover:border-neutral-400"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-sm font-bold">
+                              {track.labelHe}
+                            </span>
+                            <span
+                              className={`text-[11px] font-semibold ${
+                                selectedTrackId === track.id
+                                  ? "text-neutral-300"
+                                  : "text-neutral-500"
+                              }`}
+                            >
+                              {STATUS_LABEL[track.status]}
+                            </span>
+                          </div>
+                          <div
+                            className={`mt-2 h-1 overflow-hidden rounded-full ${
+                              selectedTrackId === track.id
+                                ? "bg-white/20"
+                                : "bg-neutral-100"
+                            }`}
+                          >
+                            <div
+                              className={`h-full rounded-full ${
+                                selectedTrackId === track.id
+                                  ? "bg-white"
+                                  : "bg-neutral-900"
+                              }`}
+                              style={{
+                                width: `${Math.round(track.progress * 100)}%`,
+                              }}
+                            />
+                          </div>
+                          <div
+                            className={`mt-2 flex justify-between font-mono text-[10px] ${
+                              selectedTrackId === track.id
+                                ? "text-neutral-400"
+                                : "text-neutral-400"
+                            }`}
+                          >
+                            <span>{track.sourceHe}</span>
+                            <span>ETA {etaLabel(track.etaSeconds)}</span>
+                          </div>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
 
-          <div className="rounded-[1.5rem] border border-slate-200 bg-white/90 p-4 shadow-sm">
-            <h3 className="mb-3 text-[11px] font-black tracking-[0.2em] text-slate-400">
-              פרטים
-            </h3>
-            {selectedTrack ? (
-              <dl className="space-y-2 text-sm">
-                <div className="flex justify-between gap-3">
-                  <dt className="text-slate-500">מקור</dt>
-                  <dd className="font-bold">{selectedTrack.originLabelHe}</dd>
-                </div>
-                <div className="flex justify-between gap-3">
-                  <dt className="text-slate-500">יעד</dt>
-                  <dd className="font-bold">{selectedTrack.targetLabelHe}</dd>
-                </div>
-                <div className="flex justify-between gap-3">
-                  <dt className="text-slate-500">סטטוס</dt>
-                  <dd
-                    className={`font-bold ${statusTone(selectedTrack.status)}`}
-                  >
-                    {STATUS_LABEL[selectedTrack.status]}
-                  </dd>
-                </div>
-                <div className="flex justify-between gap-3">
-                  <dt className="text-slate-500">סוג</dt>
-                  <dd className="font-bold">{selectedTrack.speedHintHe}</dd>
-                </div>
-                <div className="flex justify-between gap-3">
-                  <dt className="text-slate-500">מקור מידע</dt>
-                  <dd className="text-left text-xs">
-                    {selectedTrack.sourceUrl ? (
-                      <a
-                        href={selectedTrack.sourceUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="font-semibold text-teal-700 underline-offset-2 hover:underline"
-                      >
-                        {selectedTrack.sourceHe}
-                      </a>
-                    ) : (
-                      selectedTrack.sourceHe
-                    )}
-                  </dd>
-                </div>
-                {selectedTrack.rawText ? (
-                  <p className="rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-600">
-                    {selectedTrack.rawText}
-                  </p>
+              <div className="p-4">
+                <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-neutral-400">
+                  פרטים
+                </h3>
+                {selectedTrack ? (
+                  <dl className="space-y-2 text-sm">
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-neutral-400">מקור</dt>
+                      <dd className="font-semibold">
+                        {selectedTrack.originLabelHe}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-neutral-400">יעד</dt>
+                      <dd className="font-semibold">
+                        {selectedTrack.targetLabelHe}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-neutral-400">סוג</dt>
+                      <dd className="font-semibold">
+                        {selectedTrack.speedHintHe}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-neutral-400">קישור</dt>
+                      <dd>
+                        {selectedTrack.sourceUrl ? (
+                          <a
+                            href={selectedTrack.sourceUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="font-semibold underline underline-offset-2"
+                          >
+                            {selectedTrack.sourceHe}
+                          </a>
+                        ) : (
+                          selectedTrack.sourceHe
+                        )}
+                      </dd>
+                    </div>
+                    {selectedTrack.rawText ? (
+                      <p className="rounded-2xl bg-neutral-50 p-3 text-xs leading-relaxed text-neutral-600">
+                        {selectedTrack.rawText}
+                      </p>
+                    ) : null}
+                  </dl>
+                ) : selectedSite ? (
+                  <div className="text-sm">
+                    <p className="font-bold">{selectedSite.nameHe}</p>
+                    <p className="text-neutral-500">{selectedSite.region}</p>
+                    <p className="mt-2 text-xs leading-relaxed text-neutral-600">
+                      {selectedSite.noteHe}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-sm text-neutral-400">בחר מסלול במפה.</p>
+                )}
+                {errors[0] ? (
+                  <p className="mt-3 text-xs text-red-600">{errors[0]}</p>
                 ) : null}
-              </dl>
-            ) : selectedSite ? (
-              <dl className="space-y-2 text-sm">
-                <div className="flex justify-between gap-3">
-                  <dt className="text-slate-500">אתר</dt>
-                  <dd className="font-bold">{selectedSite.nameHe}</dd>
-                </div>
-                <div className="flex justify-between gap-3">
-                  <dt className="text-slate-500">אזור</dt>
-                  <dd className="font-bold">{selectedSite.region}</dd>
-                </div>
-                <p className="text-xs leading-relaxed text-slate-600">
-                  {selectedSite.noteHe}
-                </p>
-              </dl>
-            ) : (
-              <p className="text-sm text-slate-500">בחר מסלול או אתר במפה.</p>
-            )}
-          </div>
+              </div>
+            </div>
+          </section>
 
-          <div className="rounded-[1.5rem] border border-teal-200 bg-teal-50/80 p-4 shadow-sm">
-            <h3 className="mb-2 text-sm font-black text-teal-900">פיד טלגרם</h3>
-            {relatedFeed.length === 0 ? (
-              <p className="text-xs text-teal-800/70">אין דיווחי שיגור אחרונים.</p>
-            ) : (
-              <ul className="max-h-64 space-y-2 overflow-y-auto">
-                {relatedFeed.map((item) => (
-                  <li key={item.id}>
-                    <a
-                      href={item.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="block rounded-xl border border-teal-200/80 bg-white/80 px-3 py-2 transition hover:border-teal-400"
-                    >
-                      <div className="mb-1 flex justify-between gap-2 text-[10px] text-slate-500">
-                        <span>@{item.channel}</span>
-                        <span className="font-mono">
-                          {new Date(item.datetime).toLocaleTimeString("he-IL", {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
+          <aside className="flex min-h-[70vh] flex-col overflow-hidden rounded-3xl border border-neutral-200 bg-neutral-50">
+            <div className="border-b border-neutral-200 bg-white px-4 py-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-black tracking-tight">
+                    פיד טלגרם
+                  </h3>
+                  <p className="text-xs text-neutral-500">
+                    מתעדכן אוטומטית · {feed.length} הודעות
+                  </p>
+                </div>
+                <div className="flex rounded-full border border-neutral-200 bg-neutral-50 p-1 text-xs font-semibold">
+                  <button
+                    type="button"
+                    onClick={() => setFeedFilter("all")}
+                    className={`rounded-full px-3 py-1 ${
+                      feedFilter === "all"
+                        ? "bg-neutral-900 text-white"
+                        : "text-neutral-500"
+                    }`}
+                  >
+                    הכל
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFeedFilter("launch")}
+                    className={`rounded-full px-3 py-1 ${
+                      feedFilter === "launch"
+                        ? "bg-neutral-900 text-white"
+                        : "text-neutral-500"
+                    }`}
+                  >
+                    שיגורים
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex-1 space-y-3 overflow-y-auto p-3">
+              {visibleFeed.length === 0 ? (
+                <p className="p-4 text-sm text-neutral-400">
+                  אין הודעות בפיד כרגע.
+                </p>
+              ) : (
+                visibleFeed.map((item) => (
+                  <a
+                    key={item.id}
+                    href={item.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block overflow-hidden rounded-2xl border border-neutral-200 bg-white transition hover:border-neutral-400"
+                  >
+                    {item.imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={item.imageUrl}
+                        alt=""
+                        className="h-36 w-full object-cover"
+                      />
+                    ) : null}
+                    <div className="p-3">
+                      <div className="mb-1.5 flex items-center justify-between gap-2 text-[11px]">
+                        <span className="font-semibold text-neutral-900">
+                          @{item.channel}
+                          {item.related ? (
+                            <span className="mr-2 rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-600">
+                              שיגור
+                            </span>
+                          ) : null}
+                        </span>
+                        <span className="text-neutral-400">
+                          {relativeHe(item.datetime)}
                         </span>
                       </div>
-                      <p className="line-clamp-3 text-xs leading-relaxed text-slate-700">
+                      <p className="line-clamp-4 text-sm leading-relaxed text-neutral-700">
                         {item.text}
                       </p>
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </aside>
+                    </div>
+                  </a>
+                ))
+              )}
+            </div>
+          </aside>
+        </div>
       </main>
     </div>
   );

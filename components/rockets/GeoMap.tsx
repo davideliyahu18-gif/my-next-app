@@ -15,12 +15,8 @@ type Props = {
   onSelectSite: (id: string) => void;
 };
 
-const CENTER: L.LatLngExpression = [32.2, 45.5];
+const CENTER: L.LatLngExpression = [32.4, 44.8];
 const DEFAULT_ZOOM = 5;
-
-function trackColor(selected: boolean): string {
-  return selected ? "#ff5a36" : "#ff8f6b";
-}
 
 export default function GeoMap({
   tracks,
@@ -44,29 +40,28 @@ export default function GeoMap({
       center: CENTER,
       zoom: DEFAULT_ZOOM,
       minZoom: 4,
-      maxZoom: 10,
+      maxZoom: 11,
       zoomControl: false,
       attributionControl: true,
       preferCanvas: true,
     });
 
+    // Clean white / light gray basemap
     L.tileLayer(
-      "https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png",
+      "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
       {
         attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+          '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; CARTO',
         subdomains: "abcd",
         maxZoom: 18,
       },
     ).addTo(map);
 
-    // Soft dusk wash over the basemap
     L.tileLayer(
-      "https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png",
+      "https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png",
       {
         subdomains: "abcd",
-        opacity: 0.55,
-        pane: "overlayPane",
+        opacity: 0.7,
       },
     ).addTo(map);
 
@@ -98,16 +93,16 @@ export default function GeoMap({
     for (const site of sites) {
       const selected = site.id === selectedSiteId;
       const marker = L.circleMarker([site.position.lat, site.position.lng], {
-        radius: selected ? 10 : 7,
-        color: selected ? "#0f766e" : "#115e59",
-        weight: 2,
-        fillColor: selected ? "#2dd4bf" : "#14b8a6",
-        fillOpacity: 0.85,
+        radius: selected ? 9 : 6,
+        color: "#111827",
+        weight: selected ? 2.5 : 1.5,
+        fillColor: selected ? "#111827" : "#ffffff",
+        fillOpacity: 1,
       });
       marker.bindTooltip(site.nameHe, {
         direction: "top",
         offset: [0, -8],
-        className: "rocket-map-tooltip",
+        className: "rocket-map-tooltip-light",
       });
       marker.on("click", () => callbacksRef.current.onSelectSite(site.id));
       marker.addTo(group);
@@ -122,23 +117,23 @@ export default function GeoMap({
         .filter((_, i, arr) => i / (arr.length - 1) <= track.progress)
         .map((p) => [p.lat, p.lng] as L.LatLngExpression);
       const tip = ballisticPoint(track.origin, track.target, track.progress);
+      const ink = selected ? "#dc2626" : "#111827";
 
       L.polyline(full, {
-        color: selected ? "rgba(15,23,42,0.35)" : "rgba(15,23,42,0.2)",
-        weight: selected ? 3 : 2,
-        dashArray: "6 8",
-        interactive: true,
+        color: "#94a3b8",
+        weight: selected ? 2.5 : 1.5,
+        dashArray: "2 10",
+        opacity: 0.9,
       })
         .on("click", () => callbacksRef.current.onSelectTrack(track.id))
         .addTo(group);
 
       if (flown.length > 1) {
         L.polyline(flown, {
-          color: trackColor(selected),
-          weight: selected ? 5 : 3.5,
-          opacity: 0.95,
+          color: ink,
+          weight: selected ? 4.5 : 3,
+          opacity: 1,
           lineCap: "round",
-          interactive: true,
         })
           .on("click", () => callbacksRef.current.onSelectTrack(track.id))
           .addTo(group);
@@ -146,32 +141,31 @@ export default function GeoMap({
 
       L.circleMarker([track.origin.lat, track.origin.lng], {
         radius: 5,
-        color: "#0f766e",
+        color: "#111827",
         weight: 2,
-        fillColor: "#fbbf24",
+        fillColor: "#ffffff",
         fillOpacity: 1,
       }).addTo(group);
 
       L.circleMarker([track.target.lat, track.target.lng], {
-        radius: 6,
-        color: trackColor(selected),
+        radius: 7,
+        color: ink,
         weight: 2,
         fillColor: "transparent",
-        fillOpacity: 0,
       }).addTo(group);
 
       const tipMarker = L.circleMarker([tip.lat, tip.lng], {
-        radius: selected ? 9 : 7,
-        color: "#fff7ed",
-        weight: 2,
-        fillColor: trackColor(selected),
+        radius: selected ? 8 : 6,
+        color: "#ffffff",
+        weight: 3,
+        fillColor: ink,
         fillOpacity: 1,
       });
       tipMarker.bindTooltip(track.labelHe, {
         permanent: selected,
         direction: "right",
         offset: [12, 0],
-        className: "rocket-map-tooltip",
+        className: "rocket-map-tooltip-light",
       });
       tipMarker.on("click", () =>
         callbacksRef.current.onSelectTrack(track.id),
@@ -192,16 +186,14 @@ export default function GeoMap({
       bounds.extend([track.target.lat, track.target.lng]);
     }
     if (bounds.isValid()) {
-      map.fitBounds(bounds.pad(0.35), { animate: true, maxZoom: 6 });
+      map.fitBounds(bounds.pad(0.4), { animate: true, maxZoom: 6 });
     }
   }, [tracks]);
 
   return (
-    <div className="relative h-[min(68vh,640px)] w-full overflow-hidden">
+    <div className="relative h-[min(70vh,680px)] w-full overflow-hidden bg-white">
       <div ref={containerRef} className="absolute inset-0 z-0 h-full w-full" />
-      <div className="pointer-events-none absolute inset-0 z-[400] bg-[radial-gradient(ellipse_at_center,transparent_45%,rgba(15,23,42,0.28)_100%)]" />
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-[450] h-16 bg-gradient-to-b from-[#0b1220]/70 to-transparent" />
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[450] h-20 bg-gradient-to-t from-[#0b1220]/55 to-transparent" />
+      <div className="pointer-events-none absolute inset-0 z-[400] ring-1 ring-inset ring-black/5" />
     </div>
   );
 }

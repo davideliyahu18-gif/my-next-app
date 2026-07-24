@@ -41,6 +41,7 @@ export type RocketFeedItem = {
   text: string;
   datetime: string;
   related: boolean;
+  imageUrl?: string;
 };
 
 export type RocketsSnapshot = {
