@@ -66,20 +66,30 @@ export async function GET(request: Request) {
       .sort((a, b) => a.name.localeCompare(b.name, "he"));
 
     const url = new URL(request.url);
-    const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+    const q = (url.searchParams.get("q") ?? "מרכז התרעות").trim().toLowerCase();
     const filtered = q
       ? groups.filter(
           (g) =>
             g.name.toLowerCase().includes(q) ||
-            g.id.toLowerCase().includes(q),
+            g.id.toLowerCase().includes(q) ||
+            g.name.includes("מרכז התרעות"),
         )
       : groups;
 
+    const preferredName = "🛡️ מרכז התרעות אזורי";
+    const preferred =
+      groups.find((g) => g.name === preferredName) ??
+      groups.find((g) => g.name.includes("מרכז התרעות")) ??
+      null;
+
     return NextResponse.json({
       ok: true,
+      preferredGroup: preferred,
       count: filtered.length,
       groups: filtered,
-      tip: "Copy the id ending with @g.us into MISSILE_WHATSAPP_CHAT_ID",
+      tip: preferred
+        ? `Set MISSILE_WHATSAPP_CHAT_ID=${preferred.id}`
+        : "Copy the id ending with @g.us into MISSILE_WHATSAPP_CHAT_ID",
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed";

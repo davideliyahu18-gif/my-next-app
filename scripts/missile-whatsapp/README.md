@@ -51,7 +51,7 @@ curl -X POST "https://YOUR_SITE/api/missile-alerts/test" \
 cd scripts/missile-whatsapp
 npm install
 # ב־.env.local בשורש הפרויקט:
-# MISSILE_WHATSAPP_GROUP_NAME=השם המדויק של הקבוצה שלכם
+# MISSILE_WHATSAPP_GROUP_NAME=🛡️ מרכז התרעות אזורי
 # MISSILE_ALERT_SITE_URL=http://127.0.0.1:3000
 # CRON_SECRET=...
 npm start   # סרקו QR

@@ -80,7 +80,7 @@ function envConfig() {
       process.env.WHATSAPP_GROUP_CHAT_ID ||
       "",
     groupName:
-      process.env.MISSILE_WHATSAPP_GROUP_NAME || "התראות שיגורים כווית",
+      process.env.MISSILE_WHATSAPP_GROUP_NAME || "🛡️ מרכז התרעות אזורי",
     pollCron: process.env.MISSILE_ALERT_POLL_CRON ?? "*/1 * * * *",
     sendLaunchPin: process.env.MISSILE_ALERT_SEND_LAUNCH_PIN !== "false",
   };
