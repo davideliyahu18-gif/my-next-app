@@ -22,5 +22,14 @@ npm start
 
 ## מקור התראות חיות
 
-כשהאתר רץ (`npm run dev` / Vercel), הבוט המקומי יכול גם למשוך התראות אמיתיות מטלגרם דרך `/api/missile-alerts/pending`.  
-גם בלי האתר — בדיקות עם מיקום עובדות.
+הבוט סורק OSINT בשני מסלולים:
+1. `/api/missile-alerts/pending` (כש־Next רץ)
+2. **סריקת Telegram מקומית** (גם אם Next כבוי)
+
+התראות נכנסות ל־`outbox.json` ונשלחות עם מרווח + retry אחרי rate-limit/ניתוק.
+
+```bash
+npm run keep-alive   # ריסטארט אוטומטי אחרי קריסה
+```
+
+⚠️ Cloud Agent / מכונה שנכבים = פספוסים. צריך מארח דולק 24/7 (או Green API בענן).

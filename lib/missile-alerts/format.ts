@@ -141,12 +141,25 @@ function isGulfStrikeMessage(text: string): boolean {
 
   // Ignore outbound coalition strikes INTO Yemen (not alerts for the Gulf).
   if (
-    /סעודיה תקפה|saudi\s+arabia\s+bombed|bombed\s+the\s+port\s+of\s+hodeidah/i.test(
+    /סעודיה תקפה|saudi\s+arabia\s+bombed|bombed\s+the\s+port\s+of\s+hodeidah|saudi\s+led\s+coalition\s+airstrikes|coalition\s+airstrikes\s+targeted\s+hodeidah|תקיפות הסעודיות.{0,40}חודידה|airstrikes?\s+targeted\s+(?:hodeidah|sanaa|saada|yemen)/i.test(
       text,
     )
   ) {
     return false;
   }
+  // "Saudi/coalition bombed Yemen" without Yemen→Saudi attack language.
+  const saudiActsOnYemen =
+    (/(?:saudi|סעודיה|coalition).{0,80}(?:bombed|airstrike|airstrikes|תקפה|תקיפה)/i.test(
+      text,
+    ) ||
+      /(?:bombed|airstrike|airstrikes|תקפה).{0,80}(?:hodeidah|חודידה|yemen|תימן|sanaa)/i.test(
+        text,
+      )) &&
+    /hodeidah|חודידה|sanaa|saada|תימן|yemen/i.test(text) &&
+    !/(?:yemen|תימן|חות.?ים|houthis?).{0,60}(?:saudi|סעודיה|jazan|aramco|yanbu|khamis)|(?:missile|ballistic|drone|טיל).{0,40}(?:jazan|aramco|yanbu|khamis|saudi|סעודיה)/i.test(
+      text,
+    );
+  if (saudiActsOnYemen) return false;
 
   // Saudi / ARAMCO / Gulf airbases as TARGET (including Yemen→Saudi waves).
   const saudiAsTarget =

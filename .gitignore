@@ -45,6 +45,14 @@ next-env.d.ts
 scripts/**/auth/
 scripts/**/bot-state.json
 scripts/**/seen-alerts.json
+scripts/**/outbox.json
+scripts/**/heartbeat.json
+scripts/**/latest-sent.json
+scripts/**/connected.txt
+scripts/**/qr-ready.txt
+scripts/**/qr.png
+scripts/**/send-now.json
+scripts/**/catchup-batch.json
 scripts/**/test-trigger.json
 scripts/**/test-trigger.json.done
 scripts/**/node_modules/
