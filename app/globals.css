@@ -358,5 +358,61 @@ body {
   background: #f3f6f9 !important;
   font-family: var(--font-heebo), sans-serif;
   border-radius: 1rem;
+  direction: rtl;
+}
+
+.rocket-he-label-wrap {
+  background: transparent !important;
+  border: 0 !important;
+}
+
+.rocket-he-label {
+  display: inline-block;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+  font-family: var(--font-heebo), "Segoe UI", Tahoma, sans-serif;
+  color: #1e293b;
+  text-shadow:
+    0 0 4px #fff,
+    0 0 6px #fff,
+    1px 1px 0 #fff,
+    -1px -1px 0 #fff;
+  pointer-events: none;
+}
+
+.rocket-he-label--country {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #0f172a;
+}
+
+.rocket-he-label--city {
+  font-size: 11px;
+  font-weight: 700;
+  color: #334155;
+}
+
+.rocket-he-label--site {
+  font-size: 10px;
+  font-weight: 700;
+  color: #1d4ed8;
+  transform: translate(8px, -12px);
+}
+
+.rocket-map-tooltip-he {
+  background: #0f172a !important;
+  color: #f8fafc !important;
+  border: 0 !important;
+  border-radius: 999px !important;
+  padding: 5px 10px !important;
+  font-family: var(--font-heebo), sans-serif !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.2) !important;
+}
+
+.rocket-map-tooltip-he::before {
+  border-top-color: #0f172a !important;
 }
 
