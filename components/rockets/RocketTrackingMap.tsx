@@ -3,6 +3,10 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ROCKETS_WHATSAPP_GROUP_NAME,
+  ROCKETS_WHATSAPP_INVITE_LINK,
+} from "@/lib/constants";
 import { createDemoTracks, LAUNCH_SITES, STATUS_LABEL } from "@/lib/rockets/data";
 import { formatClock, statusFromProgress } from "@/lib/rockets/geo";
 import type {
@@ -399,7 +403,7 @@ export default function RocketTrackingMap() {
           </ul>
         </section>
 
-        {/* Auto alerts */}
+        {/* Auto alerts + WhatsApp group */}
         <section className="rounded-3xl border border-white bg-white px-4 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
@@ -409,7 +413,7 @@ export default function RocketTrackingMap() {
                   השמעת התרעות אוטומטית
                 </h2>
                 <p className="text-[11px] text-slate-400">
-                  אופציה להפעיל התרעות
+                  אופציה להפעיל התרעות במסך
                 </p>
               </div>
             </div>
@@ -434,6 +438,31 @@ export default function RocketTrackingMap() {
               כשתיכנס התראת שיגור חדשה — תוצג כאן התראה במסך.
             </p>
           ) : null}
+
+          <div className="mt-3 rounded-2xl border border-[#25D366]/35 bg-[#25D366]/10 px-3 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold text-slate-800">
+                  WhatsApp · יעד ההתראות
+                </p>
+                <p className="mt-0.5 text-[11px] text-slate-600">
+                  {ROCKETS_WHATSAPP_GROUP_NAME}
+                </p>
+                <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+                  הודעות שיגור יגיעו לקבוצה הזו (אחרי חיבור הבוט לקבוצה).
+                </p>
+              </div>
+              <a
+                href={ROCKETS_WHATSAPP_INVITE_LINK}
+                target="_blank"
+                rel="noreferrer"
+                className="shrink-0 rounded-full bg-[#25D366] px-3 py-1.5 text-[11px] font-black text-white"
+              >
+                כניסה לקבוצה
+              </a>
+            </div>
+          </div>
+
           {mode === "demo" ? (
             <button
               type="button"

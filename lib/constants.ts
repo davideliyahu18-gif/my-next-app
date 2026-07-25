@@ -12,6 +12,17 @@ export const WHATSAPP_INVITE_LINK =
   process.env.NEXT_PUBLIC_WHATSAPP_INVITE_LINK ||
   "https://chat.whatsapp.com/L47SyZIjYAR0k8qZ0C2Fcl";
 
+/** WhatsApp group for rocket / חמ״ל התרעות איראן alerts. */
+export const ROCKETS_WHATSAPP_INVITE_LINK =
+  process.env.ROCKETS_WHATSAPP_INVITE_LINK ||
+  process.env.NEXT_PUBLIC_ROCKETS_WHATSAPP_INVITE_LINK ||
+  "https://chat.whatsapp.com/DgafURRfpIqD2mLd3xLwf5";
+
+export const ROCKETS_WHATSAPP_GROUP_NAME =
+  process.env.ROCKETS_WHATSAPP_GROUP_NAME ||
+  process.env.MISSILE_WHATSAPP_GROUP_NAME ||
+  "חמ״ל התרעות איראן";
+
 /** FIFA API configuration (https://api.fifa.com/api/v3). */
 export const FIFA_CONFIG = {
   baseUrl: process.env.FIFA_API_BASE_URL ?? "https://api.fifa.com/api/v3",
