@@ -52,6 +52,13 @@ export type RocketsSnapshot = {
   sources: { username: string; label: string }[];
   errors: string[];
   timestamp: string;
+  /** Monitoring counters — every Telegram post is tracked in the feed. */
+  stats?: {
+    scanned: number;
+    feed: number;
+    related: number;
+    tracks: number;
+  };
 };
 
 export type MapBounds = {

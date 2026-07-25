@@ -3,8 +3,8 @@ import { isLaunchRelated, messagesToTracks } from "./parse-alert";
 import { fetchTelegramLaunchMessages } from "./telegram";
 import type { RocketsSnapshot } from "./types";
 
-/** Poll interval for SSE clients. */
-export const ROCKETS_POLL_MS = 12_000;
+/** Poll interval for SSE clients — keep tight so nothing is missed for long. */
+export const ROCKETS_POLL_MS = 8_000;
 
 export async function getRocketsSnapshot(options?: {
   allowDemoFallback?: boolean;
@@ -13,13 +13,14 @@ export async function getRocketsSnapshot(options?: {
   const timestamp = new Date().toISOString();
 
   try {
-    const { messages, sources, errors } = await fetchTelegramLaunchMessages();
+    const { messages, sources, errors, scanned } =
+      await fetchTelegramLaunchMessages();
     const tracks = messagesToTracks(messages, new Date(), {
-      maxAgeHours: 48,
+      maxAgeHours: 72,
     });
 
-    // Prefer newest posts; keep a generous live feed (not only launch-related).
-    const feed = messages.slice(0, 40).map((message) => ({
+    // Every scraped message goes into the feed (no filtering out).
+    const feed = messages.map((message) => ({
       id: message.id,
       channel: message.channel,
       url: message.url,
@@ -28,6 +29,13 @@ export async function getRocketsSnapshot(options?: {
       related: isLaunchRelated(message.text),
       imageUrl: message.imageUrl,
     }));
+
+    const stats = {
+      scanned,
+      feed: feed.length,
+      related: feed.filter((item) => item.related).length,
+      tracks: tracks.length,
+    };
 
     if (tracks.length > 0 || feed.length > 0) {
       return {
@@ -38,6 +46,7 @@ export async function getRocketsSnapshot(options?: {
         sources,
         errors,
         timestamp,
+        stats,
       };
     }
 
@@ -50,6 +59,7 @@ export async function getRocketsSnapshot(options?: {
         sources,
         errors,
         timestamp,
+        stats,
       };
     }
 
@@ -61,9 +71,10 @@ export async function getRocketsSnapshot(options?: {
       sources,
       errors: [
         ...errors,
-        "לא נמצאו דיווחי שיגור פעילים — מציג הדגמה עד לעדכון הבא",
+        "לא נמצאו דיווחים — מציג הדגמה עד לעדכון הבא",
       ],
       timestamp,
+      stats,
     };
   } catch (error) {
     const message =
@@ -76,6 +87,7 @@ export async function getRocketsSnapshot(options?: {
       sources: [],
       errors: [message],
       timestamp,
+      stats: { scanned: 0, feed: 0, related: 0, tracks: 0 },
     };
   }
 }

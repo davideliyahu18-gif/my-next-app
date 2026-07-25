@@ -132,13 +132,16 @@ export default function RocketTrackingMap() {
   const [mode, setMode] = useState<RocketsSnapshot["mode"]>("live");
   const [errors, setErrors] = useState<string[]>([]);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
+  const [stats, setStats] = useState<RocketsSnapshot["stats"]>();
   const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [autoAlerts, setAutoAlerts] = useState(false);
   const [forceDemo, setForceDemo] = useState(false);
   const [running, setRunning] = useState(true);
+  const [newIds, setNewIds] = useState<Set<string>>(new Set());
   const lastTs = useRef<number | null>(null);
   const selectedTrackIdRef = useRef<string | null>(null);
+  const seenIdsRef = useRef<Set<string>>(new Set());
   selectedTrackIdRef.current = selectedTrackId;
 
   useEffect(() => {
@@ -162,11 +165,30 @@ export default function RocketTrackingMap() {
       if (closed) return;
       try {
         const snapshot = JSON.parse(event.data) as RocketsSnapshot;
+        const incoming = snapshot.feed ?? [];
+        const fresh = new Set<string>();
+        if (seenIdsRef.current.size > 0) {
+          for (const item of incoming) {
+            if (!seenIdsRef.current.has(item.id)) fresh.add(item.id);
+          }
+        }
+        for (const item of incoming) {
+          seenIdsRef.current.add(item.id);
+        }
+        // Cap memory of seen ids
+        if (seenIdsRef.current.size > 500) {
+          seenIdsRef.current = new Set(
+            [...seenIdsRef.current].slice(-400),
+          );
+        }
+
         setTracks(snapshot.tracks);
-        setFeed(snapshot.feed);
+        setFeed(incoming);
         setMode(snapshot.mode);
         setErrors(snapshot.errors);
         setUpdatedAt(snapshot.timestamp);
+        setStats(snapshot.stats);
+        setNewIds(fresh);
         const current = selectedTrackIdRef.current;
         if (
           snapshot.tracks.length > 0 &&
@@ -243,6 +265,24 @@ export default function RocketTrackingMap() {
       </header>
 
       <main className="mx-auto flex max-w-lg flex-col gap-3 px-3 py-3 pb-10">
+        {/* Monitoring strip — every message is tracked */}
+        <section className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 shadow-sm">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-bold text-emerald-800">
+              {connected ? "כל הודעה במעקב · הכל עובר" : "מתחבר למעקב…"}
+            </p>
+            <span className="font-mono text-[11px] font-semibold text-emerald-700">
+              {stats?.feed ?? feed.length}/{stats?.scanned ?? feed.length}
+            </span>
+          </div>
+          <p className="mt-0.5 text-[11px] text-emerald-700/80">
+            נסרקו {stats?.scanned ?? feed.length} · בפיד {stats?.feed ?? feed.length} ·
+            שיגורים {stats?.related ?? launchFeed.length} · מסלולים{" "}
+            {stats?.tracks ?? tracks.length}
+            {newIds.size > 0 ? ` · +${newIds.size} חדשות` : ""}
+          </p>
+        </section>
+
         {/* Live Tracking */}
         <section className="overflow-hidden rounded-3xl border border-white bg-white shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
           <div className="flex items-center justify-between px-4 pb-2 pt-3">
@@ -269,7 +309,7 @@ export default function RocketTrackingMap() {
         {/* Launches status */}
         <section className="rounded-3xl border border-white bg-white p-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
           <div className="mb-2 flex items-center gap-2 px-1">
-            <span className="text-base">🚀</span>
+            <span className="text-base">🛡️</span>
             <h2 className="text-sm font-bold text-slate-800">
               חמ״ל התרעות איראן 🛡️
             </h2>
@@ -405,10 +445,15 @@ export default function RocketTrackingMap() {
           ) : null}
         </section>
 
-        {/* Telegram feed */}
+        {/* Telegram feed — every message */}
         <section className="overflow-hidden rounded-3xl border border-white bg-white shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
           <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-            <h2 className="text-sm font-bold text-slate-800">Telegram Feed</h2>
+            <div>
+              <h2 className="text-sm font-bold text-slate-800">Telegram Feed</h2>
+              <p className="text-[10px] text-slate-400">
+                כל ההודעות · {feed.length} במעקב
+              </p>
+            </div>
             <span
               className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${
                 connected
@@ -420,19 +465,23 @@ export default function RocketTrackingMap() {
             </span>
           </div>
 
-          <div className="max-h-[420px] space-y-2 overflow-y-auto p-3">
+          <div className="max-h-[520px] space-y-2 overflow-y-auto p-3">
             {feed.length === 0 ? (
               <p className="rounded-2xl bg-slate-50 px-3 py-4 text-center text-sm text-slate-400">
                 ממתינים להודעות מטלגרם…
               </p>
             ) : (
-              feed.slice(0, 30).map((item) => (
+              feed.map((item) => (
                 <a
                   key={item.id}
                   href={item.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="block overflow-hidden rounded-2xl bg-[#f3f5f8] transition hover:bg-[#e9eef5]"
+                  className={`block overflow-hidden rounded-2xl transition ${
+                    newIds.has(item.id)
+                      ? "bg-emerald-50 ring-1 ring-emerald-300"
+                      : "bg-[#f3f5f8] hover:bg-[#e9eef5]"
+                  }`}
                 >
                   {item.imageUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -450,11 +499,20 @@ export default function RocketTrackingMap() {
                           <span className="mr-1 rounded bg-red-100 px-1.5 py-0.5 font-bold text-red-600">
                             שיגור
                           </span>
+                        ) : (
+                          <span className="mr-1 rounded bg-slate-200 px-1.5 py-0.5 font-bold text-slate-600">
+                            במעקב
+                          </span>
+                        )}
+                        {newIds.has(item.id) ? (
+                          <span className="mr-1 rounded bg-emerald-500 px-1.5 py-0.5 font-bold text-white">
+                            חדש
+                          </span>
                         ) : null}
                       </span>
                       <span>{formatFeedTime(item.datetime)}</span>
                     </div>
-                    <p className="line-clamp-4 text-[13px] leading-relaxed text-slate-700">
+                    <p className="line-clamp-5 text-[13px] leading-relaxed text-slate-700">
                       {item.text}
                     </p>
                     <p className="mt-1 text-[10px] text-slate-400">

@@ -12,6 +12,9 @@ const CHANNELS = [
   { username: "shigurimisrael", label: "התרעות שיגורים", priority: 2 },
 ] as const;
 
+/** How many preview pages to walk back per channel (≈20 msgs each). */
+const PAGES_PER_CHANNEL = 3;
+
 function stripHtml(html: string): string {
   return html
     .replace(/<br\s*\/?>/gi, "\n")
@@ -47,36 +50,48 @@ function extractImage(block: string): string | undefined {
 function parseChannelHtml(
   html: string,
   username: string,
-): TelegramChannelMessage[] {
+): { messages: TelegramChannelMessage[]; oldestId: number | null } {
   const blocks = html.split('class="tgme_widget_message_wrap');
   const messages: TelegramChannelMessage[] = [];
+  let oldestId: number | null = null;
 
   for (const block of blocks.slice(1)) {
-    const textMatch = block.match(
-      /class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/,
+    const dataPost = block.match(
+      new RegExp(`data-post="${username}/(\\d+)"`),
     );
     const datetimeMatch = block.match(/datetime="([^"]+)"/);
     const linkMatch = block.match(
       new RegExp(`href="(https://t\\.me/${username}/\\d+)"`),
     );
-    if (!datetimeMatch) continue;
+    const textMatch = block.match(
+      /class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/,
+    );
+
+    const postId = dataPost?.[1] ?? linkMatch?.[1]?.match(/\/(\d+)$/)?.[1];
+    if (!postId && !datetimeMatch) continue;
+
+    const numericId = postId ? Number(postId) : NaN;
+    if (!Number.isNaN(numericId)) {
+      oldestId =
+        oldestId == null ? numericId : Math.min(oldestId, numericId);
+    }
 
     const text = textMatch ? stripHtml(textMatch[1]) : "";
     const imageUrl = extractImage(block);
-    if (!text && !imageUrl) continue;
-
     const url =
       linkMatch?.[1] ??
-      `https://t.me/${username}/${datetimeMatch[1].replace(/\W/g, "")}`;
-    const idMatch = url.match(/\/(\d+)$/);
-    const id = `${username}:${idMatch?.[1] ?? datetimeMatch[1]}`;
+      (postId
+        ? `https://t.me/${username}/${postId}`
+        : `https://t.me/s/${username}`);
+    const id = `${username}:${postId ?? datetimeMatch?.[1] ?? messages.length}`;
 
+    // Capture EVERY post — even media-only / empty caption.
     messages.push({
       id,
       channel: username,
       url,
-      text: text || "(מדיה)",
-      datetime: datetimeMatch[1],
+      text: text || (imageUrl ? "(מדיה ללא טקסט)" : "(הודעה ללא טקסט)"),
+      datetime: datetimeMatch?.[1] ?? new Date().toISOString(),
       imageUrl,
     });
   }
@@ -85,16 +100,22 @@ function parseChannelHtml(
   for (const message of messages) {
     byId.set(message.id, message);
   }
-  return [...byId.values()].sort(
-    (a, b) => Date.parse(b.datetime) - Date.parse(a.datetime),
-  );
+
+  return {
+    messages: [...byId.values()],
+    oldestId,
+  };
 }
 
-async function fetchChannel(
+async function fetchChannelPage(
   username: string,
-): Promise<TelegramChannelMessage[]> {
-  // bust CDN caches with a timestamp query (ignored by t.me, helps intermediaries)
-  const url = `https://t.me/s/${username}?t=${Date.now()}`;
+  before?: number,
+): Promise<{ messages: TelegramChannelMessage[]; oldestId: number | null }> {
+  const base = before
+    ? `https://t.me/s/${username}?before=${before}`
+    : `https://t.me/s/${username}`;
+  const url = `${base}${base.includes("?") ? "&" : "?"}t=${Date.now()}`;
+
   const response = await fetch(url, {
     headers: {
       "User-Agent":
@@ -114,10 +135,32 @@ async function fetchChannel(
   return parseChannelHtml(html, username);
 }
 
+async function fetchChannel(
+  username: string,
+): Promise<TelegramChannelMessage[]> {
+  const all = new Map<string, TelegramChannelMessage>();
+  let before: number | undefined;
+
+  for (let page = 0; page < PAGES_PER_CHANNEL; page += 1) {
+    const { messages, oldestId } = await fetchChannelPage(username, before);
+    if (messages.length === 0) break;
+    for (const message of messages) {
+      all.set(message.id, message);
+    }
+    if (oldestId == null) break;
+    before = oldestId;
+  }
+
+  return [...all.values()].sort(
+    (a, b) => Date.parse(b.datetime) - Date.parse(a.datetime),
+  );
+}
+
 export async function fetchTelegramLaunchMessages(): Promise<{
   messages: TelegramChannelMessage[];
   sources: { username: string; label: string }[];
   errors: string[];
+  scanned: number;
 }> {
   const errors: string[] = [];
   const all: TelegramChannelMessage[] = [];
@@ -149,6 +192,7 @@ export async function fetchTelegramLaunchMessages(): Promise<{
     messages: all,
     sources: CHANNELS.map((c) => ({ username: c.username, label: c.label })),
     errors,
+    scanned: all.length,
   };
 }
 
