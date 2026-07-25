@@ -271,7 +271,7 @@ export default function RocketTrackingMap() {
           <div className="mb-2 flex items-center gap-2 px-1">
             <span className="text-base">🚀</span>
             <h2 className="text-sm font-bold text-slate-800">
-              שיגורים לעבר ישראל
+              חמ״ל התרעות איראן 🛡️
             </h2>
           </div>
 
