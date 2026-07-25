@@ -1,0 +1,1921 @@
+#!/usr/bin/env node
+/**
+ * WhatsApp Thailand flight-deals bot (Emirates schedule watch).
+ *
+ * Single process. Pin WHATSAPP_GROUP_CHAT_ID. Never run two instances.
+ */
+
+import { createRequire } from "node:module";
+import { mkdir, readFile, writeFile, readdir, unlink } from "node:fs/promises";
+import { existsSync, openSync, writeSync, closeSync, unlinkSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import cron from "node-cron";
+import pino from "pino";
+import qrcode from "qrcode-terminal";
+import {
+  resolveProvider,
+  searchDeals as fetchDeals,
+  searchThailandFixedWatch,
+  isEmiratesBagDeal,
+  getSerpApiStatus,
+  dealFingerprint,
+  getSearchStatus,
+  getCachedWatchDeals,
+  thailandWatchConfig,
+  budapestWatchConfig,
+} from "./providers.mjs";
+import {
+  loadPersonalUsers,
+  upsertPersonalUser,
+  getPersonalUser,
+  listActivePersonalUsers,
+  parsePersonalCommand,
+  parseGroupCommand,
+  personalHelpText,
+  personalStatusText,
+  shouldAlertPersonalUser,
+  formatWatchesHe,
+  DEFAULT_WATCHES,
+} from "./personal-users.mjs";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.join(__dirname, "../..");
+const AUTH_DIR = path.join(__dirname, "auth");
+const SEEN_FILE = path.join(__dirname, "seen-deals.json");
+const STATE_FILE = path.join(__dirname, "bot-state.json");
+const TRIGGER_FILE = path.join(__dirname, "test-trigger.json");
+const LOCK_FILE = path.join(__dirname, "bot.lock");
+const HEARTBEAT_FILE = path.join(__dirname, "bot-heartbeat.json");
+
+const require = createRequire(import.meta.url);
+const baileys = require("@whiskeysockets/baileys");
+const {
+  default: makeWASocket,
+  useMultiFileAuthState,
+  DisconnectReason,
+  fetchLatestBaileysVersion,
+  makeCacheableSignalKeyStore,
+  Browsers,
+} = baileys;
+
+async function loadEnvFile() {
+  const envPath = path.join(ROOT, ".env.local");
+  if (!existsSync(envPath)) return;
+  const text = await readFile(envPath, "utf8");
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const idx = trimmed.indexOf("=");
+    if (idx === -1) continue;
+    const key = trimmed.slice(0, idx);
+    let value = trimmed.slice(idx + 1);
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (!process.env[key]) process.env[key] = value;
+  }
+}
+
+/** Legacy — prefer `npm run flight-deals:repair-auth`. */
+async function healSignalSessions() {
+  if (process.env.FLIGHT_DEALS_HEAL_SESSION !== "true") return;
+  try {
+    const files = await readdir(AUTH_DIR);
+    let removed = 0;
+    for (const name of files) {
+      if (name.startsWith("session-") && name.endsWith(".json")) {
+        await unlink(path.join(AUTH_DIR, name));
+        removed += 1;
+      }
+    }
+    if (removed) log.info({ removed }, "Healed WhatsApp signal sessions");
+  } catch (error) {
+    log.warn({ error }, "Session heal skipped");
+  }
+}
+
+function envConfig() {
+  return {
+    origin: process.env.FLIGHT_DEALS_ORIGIN ?? "TLV",
+    maxPrice: Number(process.env.FLIGHT_DEALS_MAX_PRICE_USD ?? "50"),
+    currency: process.env.FLIGHT_DEALS_CURRENCY ?? "USD",
+    groupJidEnv: process.env.WHATSAPP_GROUP_CHAT_ID ?? "",
+    groupName: process.env.WHATSAPP_GROUP_NAME ?? "",
+    demoMode: process.env.FLIGHT_DEALS_DEMO === "true",
+    amadeusBase: process.env.AMADEUS_API_BASE ?? "https://test.api.amadeus.com",
+    amadeusId: process.env.AMADEUS_CLIENT_ID ?? "",
+    amadeusSecret: process.env.AMADEUS_CLIENT_SECRET ?? "",
+    cronExpr: process.env.FLIGHT_DEALS_SCAN_CRON ?? "*/30 * * * *",
+  };
+}
+
+const log = pino({ level: process.env.LOG_LEVEL ?? "info" });
+
+let sock = null;
+/** @type {Map<string, { priceUsd: number, at: number, id: string }>} */
+let seenDeals = new Map();
+let scanRunning = false;
+let scanQueued = false;
+let startupScanDone = false;
+let whatsappConnected = false;
+let pairingRefreshTimer = null;
+let pairingStarted = false;
+let reconnectTimer = null;
+let connecting = false;
+let connectGeneration = 0;
+let reconnectFailures = 0;
+let whatsappWasDisconnected = false;
+/** @type {Map<string, import("@whiskeysockets/baileys").proto.IMessage>} */
+const messageStore = new Map();
+const handledMsgIds = new Set();
+let lastScanAt = 0;
+let lastScanFound = 0;
+let lastScanSent = 0;
+let lastForceRefreshAt = 0;
+let groupJid = "";
+let groupPollTimer = null;
+let welcomeSent = false;
+let cfg = envConfig();
+let lockFd = null;
+const GROUP_POLL_MS = 10_000;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function pidAlive(pid) {
+  if (!pid || !Number.isFinite(pid)) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function acquireInstanceLock() {
+  const tryCreate = () => {
+    lockFd = openSync(LOCK_FILE, "wx");
+    writeSync(lockFd, String(process.pid));
+  };
+
+  try {
+    tryCreate();
+  } catch (error) {
+    if (error?.code === "EEXIST") {
+      let otherPid = 0;
+      let other = "";
+      try {
+        other = require("node:fs").readFileSync(LOCK_FILE, "utf8").trim();
+        otherPid = Number(other);
+      } catch {
+        // ignore
+      }
+      // Stale lock after a crash — reclaim so the watchdog can bring us back.
+      if (!pidAlive(otherPid)) {
+        try {
+          unlinkSync(LOCK_FILE);
+        } catch {
+          // ignore
+        }
+        try {
+          tryCreate();
+          console.warn(
+            `⚠️  נעילה ישנה (pid ${other || "?"}) נוקתה — ממשיכים.`,
+          );
+        } catch (retryError) {
+          console.error("❌ לא הצלחתי לנעול אחרי ניקוי נעילה ישנה", retryError);
+          process.exit(1);
+        }
+      } else {
+        console.error(
+          `❌ הבוט כבר רץ (pid ${other}). עצור אותו לפני הפעלה מחדש:\n   pkill -f 'flight-deals-whatsapp/(index|supervise)\\.mjs'`,
+        );
+        process.exit(1);
+      }
+    } else {
+      throw error;
+    }
+  }
+  const release = () => {
+    try {
+      if (lockFd != null) closeSync(lockFd);
+    } catch {
+      // ignore
+    }
+    try {
+      unlinkSync(LOCK_FILE);
+    } catch {
+      // ignore
+    }
+    lockFd = null;
+  };
+  process.on("exit", release);
+  process.on("SIGINT", () => {
+    release();
+    process.exit(0);
+  });
+  process.on("SIGTERM", () => {
+    release();
+    process.exit(0);
+  });
+}
+
+async function writeHeartbeat(extra = {}) {
+  try {
+    await writeFile(
+      HEARTBEAT_FILE,
+      JSON.stringify(
+        {
+          at: Date.now(),
+          iso: new Date().toISOString(),
+          pid: process.pid,
+          connected: Boolean(whatsappConnected),
+          groupJid: groupJid || null,
+          supervised: process.env.FLIGHT_DEALS_SUPERVISED === "1",
+          ...extra,
+        },
+        null,
+        2,
+      ) + "\n",
+    );
+  } catch {
+    // ignore
+  }
+}
+
+function wasHandledMessage(msg) {
+  const id = msg?.key?.id;
+  if (!id) return false;
+  return handledMsgIds.has(id);
+}
+
+function markHandledMessage(msg) {
+  const id = msg?.key?.id;
+  if (!id) return;
+  handledMsgIds.add(id);
+  if (handledMsgIds.size > 800) {
+    const first = handledMsgIds.keys().next().value;
+    handledMsgIds.delete(first);
+  }
+}
+
+let decryptFailCount = 0;
+let decryptFailWindowStart = 0;
+let lastGroupHealAt = 0;
+let groupHealInFlight = false;
+
+function noteDecryptFailure(chatId) {
+  const now = Date.now();
+  if (now - decryptFailWindowStart > 5 * 60_000) {
+    decryptFailWindowStart = now;
+    decryptFailCount = 0;
+  }
+  decryptFailCount += 1;
+  log.warn(
+    { chatId, decryptFailCount },
+    "Message arrived undecrypted — will retry; if this keeps happening sessions will auto-repair",
+  );
+  // Group decrypt fails after reconnect are common — heal quickly.
+  const isTargetGroup =
+    chatId?.endsWith("@g.us") && sameChatId(chatId, groupJid);
+  if (isTargetGroup && decryptFailCount >= 2) {
+    decryptFailCount = 0;
+    healGroupCrypto("decrypt-fail").catch((error) => {
+      log.warn({ error }, "Group heal after decrypt fail failed");
+    });
+    return;
+  }
+  if (decryptFailCount >= 8) {
+    decryptFailCount = 0;
+    repairSignalSessions("decrypt-threshold")
+      .then(() => healGroupCrypto("decrypt-threshold"))
+      .catch((error) => {
+        log.warn({ error }, "Auto session repair failed");
+      });
+  }
+}
+
+/** Clear corrupted Signal sessions without unlinking WhatsApp (keeps creds.json). */
+async function repairSignalSessions(reason = "manual") {
+  try {
+    const files = await readdir(AUTH_DIR);
+    let removed = 0;
+    for (const name of files) {
+      if (
+        name.startsWith("session-") ||
+        name.startsWith("sender-key-") ||
+        name.startsWith("sender-key-memory-")
+      ) {
+        await unlink(path.join(AUTH_DIR, name));
+        removed += 1;
+      }
+    }
+    log.warn({ reason, removed }, "Repaired Signal sessions (creds kept)");
+  } catch (error) {
+    log.warn({ error, reason }, "Session repair error");
+  }
+}
+
+/** Clear group sender keys + refresh metadata + send probe so WA redistributes keys. */
+async function healGroupCrypto(reason = "manual") {
+  if (!sock || !groupJid) return false;
+  if (groupHealInFlight) return false;
+  if (Date.now() - lastGroupHealAt < 20_000) {
+    log.info({ reason }, "Group heal skipped — too soon");
+    return false;
+  }
+  groupHealInFlight = true;
+  lastGroupHealAt = Date.now();
+  try {
+    const files = await readdir(AUTH_DIR);
+    let removed = 0;
+    const gid = String(groupJid).split("@")[0];
+    for (const name of files) {
+      if (
+        name.startsWith("sender-key-") ||
+        name.startsWith("sender-key-memory-")
+      ) {
+        // Prefer clearing keys for our group; if unsure, clear all sender keys.
+        if (!gid || name.includes(gid) || reason !== "light") {
+          await unlink(path.join(AUTH_DIR, name)).catch(() => {});
+          removed += 1;
+        }
+      }
+    }
+    await refreshGroupKeys();
+    // Outbound message forces participation in the group sender-key chain.
+    const ok = await sendChat(
+      groupJid,
+      [
+        "🔄 *הבוט חזר אונליין*",
+        "אם כתבתם קודם ולא קיבלתם תשובה — כתבו שוב *אמירטס* או *עזרה*.",
+      ].join("\n"),
+    );
+    log.warn({ reason, removed, ok }, "Healed group crypto + probe sent");
+    return ok;
+  } catch (error) {
+    log.warn({ error, reason }, "healGroupCrypto failed");
+    return false;
+  } finally {
+    groupHealInFlight = false;
+  }
+}
+
+const AIRPORT_LABELS = {
+  TLV: "תל אביב", ATH: "אתונה", LCA: "לרנקה", PFO: "פאפוס", BUD: "בודפשט",
+  OTP: "בוקרשט", SOF: "סופיה", IST: "איסטנבול", AYT: "אנטליה", DXB: "דובאי",
+  BCN: "ברצלונה", FCO: "רומא", CIA: "רומא", MXP: "מילאנו", LIN: "מילאנו",
+  PRG: "פראג", RAK: "מרקש", WAW: "ורשה", KRK: "קרקוב", VCE: "ונציה",
+  NAP: "נאפולי", LGW: "לונדון", LHR: "לונדון", STN: "לונדון", VIE: "וינה",
+  BER: "ברלין", AMS: "אמסטרדם", CDG: "פריז", MAD: "מדריד", SKG: "סלוניקי",
+  BKK: "בנגקוק", DMK: "בנגקוק", HKT: "פוקט", CNX: "צ׳יאנג מאי",
+};
+
+const COUNTRY_LABELS = {
+  ATH: "יוון", SKG: "יוון", LCA: "קפריסין", PFO: "קפריסין", BUD: "הונגריה",
+  OTP: "רומניה", SOF: "בולגריה", IST: "טורקיה", AYT: "טורקיה",
+  RAK: "מרוקו", RBA: "מרוקו", CMN: "מרוקו", VCE: "איטליה", FCO: "איטליה",
+  CIA: "איטליה", MXP: "איטליה", NAP: "איטליה", BCN: "ספרד", MAD: "ספרד",
+  PRG: "צ׳כיה", WAW: "פולין", KRK: "פולין", LGW: "בריטניה", LHR: "בריטניה",
+  VIE: "אוסטריה", BER: "גרמניה", AMS: "הולנד", CDG: "צרפת", DXB: "איחוד האמירויות",
+  BKK: "תאילנד", DMK: "תאילנד", HKT: "תאילנד", CNX: "תאילנד",
+};
+
+function hasHebrew(value) {
+  return /[\u0590-\u05FF]/.test(value);
+}
+
+function isAirportCode(value) {
+  return /^[A-Za-z]{3}$/.test(String(value).trim());
+}
+
+const ENGLISH_CITY_TO_HEBREW = {
+  athens: "אתונה",
+  budapest: "בודפשט",
+  rome: "רומא",
+  milan: "מילאנו",
+  venice: "ונציה",
+  barcelona: "ברצלונה",
+  madrid: "מדריד",
+  london: "לונדון",
+  paris: "פריז",
+  prague: "פראג",
+  vienna: "וינה",
+  warsaw: "ורשה",
+  krakow: "קרקוב",
+  sofia: "סופיה",
+  bucharest: "בוקרשט",
+  istanbul: "איסטנבול",
+  larnaca: "לרנקה",
+  paphos: "פאפוס",
+  dubai: "דובאי",
+  naples: "נאפולי",
+  berlin: "ברלין",
+  amsterdam: "אמסטרדם",
+};
+
+function hebrewDestination(deal) {
+  const candidates = [
+    deal.destinationNameHe,
+    AIRPORT_LABELS[deal.destination],
+    deal.destination,
+  ];
+  for (const raw of candidates) {
+    if (!raw) continue;
+    const value = String(raw).trim();
+    if (!value) continue;
+    if (isAirportCode(value)) {
+      const mapped = AIRPORT_LABELS[value.toUpperCase()];
+      if (mapped) return mapped;
+      continue;
+    }
+    if (hasHebrew(value)) return value;
+    const mappedEnglish = ENGLISH_CITY_TO_HEBREW[value.toLowerCase()];
+    if (mappedEnglish) return mappedEnglish;
+  }
+  return AIRPORT_LABELS[deal.destination] || "יעד לא ידוע";
+}
+
+function hebrewCountry(deal) {
+  const fromDeal = String(deal.countryNameHe || "").trim();
+  if (fromDeal && hasHebrew(fromDeal)) return fromDeal;
+  return COUNTRY_LABELS[deal.destination] || "";
+}
+
+function formatDate(iso) {
+  const [y, m, d] = iso.split("-");
+  return d && m && y ? `${d}/${m}/${y}` : iso;
+}
+
+const DAY_HE = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
+
+function hebrewDay(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return "";
+  return DAY_HE[new Date(Date.UTC(y, m - 1, d)).getUTCDay()] ?? "";
+}
+
+function formatDealMessage(deal) {
+  const dest = hebrewDestination(deal);
+  const country = hebrewCountry(deal);
+  const isThailand = deal.watch === "thailand";
+  const isBudapest = deal.watch === "budapest";
+  const isEmirates =
+    isThailand &&
+    (deal.baggageIncluded === true ||
+      String(deal.airlineLabelHe ?? "").includes("אמירטס") ||
+      String(deal.airline ?? "").toUpperCase() === "EK") &&
+    deal.provider !== "travelpayouts" &&
+    deal.bookWith !== "travelpayouts";
+  const ils = Number.isFinite(deal.priceIls)
+    ? Math.round(deal.priceIls)
+    : Math.round(deal.priceUsd * 3.7);
+  const outDay = hebrewDay(deal.departureDate);
+  const backDay = hebrewDay(deal.returnDate);
+  const header = isThailand
+    ? "🇹🇭 *תאילנד · בנגקוק*"
+    : isBudapest
+      ? "🇭🇺 *בודפשט*"
+      : "🔥 *מכירה מצוינת!*";
+  const sub = isEmirates
+    ? "אמירטס · מזוודה כלולה"
+    : isThailand
+      ? [deal.airlineLabelHe, deal.baggageIncluded ? "מזוודה כלולה" : null]
+          .filter(Boolean)
+          .join(" · ") || "טיסה זמינה"
+      : isBudapest
+        ? deal.airlineLabelHe || "טיסה זמינה"
+        : "";
+  return [
+    header,
+    sub,
+    `📅 יציאה ${outDay} ${formatDate(deal.departureDate)}`,
+    `📅 חזרה ${backDay} ${formatDate(deal.returnDate)}`,
+    deal.scheduleLabelHe ? `🕕 ${deal.scheduleLabelHe}` : "",
+    `💰 *₪${ils}* הלוך ושוב`,
+    isEmirates || (isThailand && deal.baggageIncluded)
+      ? `🧳 *מזוודה כלולה*`
+      : "",
+    !isEmirates && deal.baggageLabelHe ? `🧳 ${deal.baggageLabelHe}` : "",
+    !isThailand && !isBudapest && deal.airlineLabelHe
+      ? `🛫 ${deal.airlineLabelHe}`
+      : "",
+    deal.bookingUrl ? `🔗 ${deal.bookingUrl}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function formatWatchUpdateMessage(deals = []) {
+  const watchDeals = pickWatchDeals(deals);
+  const now = new Date();
+  const hh = String((now.getUTCHours() + 3) % 24).padStart(2, "0");
+  const mm = String(now.getUTCMinutes()).padStart(2, "0");
+  if (!watchDeals.length) {
+    return [
+      `✈️ *עדכון טיסות* · ${hh}:${mm}`,
+      "━━━━━━━━━━━━━━",
+      "",
+      "עדיין אין התאמות במעקבים הקבועים.",
+      "לעדכון: *בוט מחפש*",
+    ].join("\n");
+  }
+  return [
+    `✈️ *עדכון טיסות* · ${hh}:${mm}`,
+    "━━━━━━━━━━━━━━",
+    "",
+    ...watchDeals.flatMap((deal, i) => [
+      ...(i > 0 ? ["", "────────", ""] : []),
+      formatDealMessage(deal),
+    ]),
+    "",
+    "━━━━━━━━━━━━━━",
+    "לעדכון: *בוט מחפש*",
+  ].join("\n");
+}
+
+async function sendChat(chatId, content) {
+  if (!sock || !chatId) return false;
+  const text =
+    typeof content === "string" ? content : formatDealMessage(content);
+  const target = String(chatId).split(":")[0];
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      await sock.sendMessage(target, { text });
+      log.info(
+        { chatId: target, attempt, chars: text.length },
+        "sendChat ok",
+      );
+      return true;
+    } catch (error) {
+      const status = error?.output?.statusCode || error?.data;
+      log.warn({ error, chatId: target, attempt, status }, "sendChat failed");
+      // After group send failure, refresh keys once then retry.
+      if (target.endsWith("@g.us") && attempt === 1) {
+        await refreshGroupKeys().catch(() => {});
+      }
+      if (attempt < 3) await sleep(1500 * attempt);
+    }
+  }
+  return false;
+}
+
+async function sendToGroup(content) {
+  if (!groupJid) return false;
+  const ok = await sendChat(groupJid, content);
+  if (ok) return true;
+
+  // 403 often means wrong/stale group JID or bot not in group — rediscover.
+  const recovered = await resolveGroupByName();
+  if (recovered && !sameChatId(recovered, groupJid)) {
+    groupJid = recovered;
+    await saveState();
+    return sendChat(groupJid, content);
+  }
+  return false;
+}
+
+async function listJoinedGroups() {
+  if (!sock) return [];
+  try {
+    const participating = await sock.groupFetchAllParticipating();
+    return Object.values(participating ?? {}).map((g) => ({
+      id: g.id,
+      subject: String(g.subject ?? "").trim(),
+    }));
+  } catch (error) {
+    log.warn({ error }, "groupFetchAllParticipating failed");
+    return [];
+  }
+}
+
+async function sendStartupUpdate(deals) {
+  const text = formatWatchUpdateMessage(deals);
+  let ok = await sendToGroup(text);
+  if (ok) {
+    log.info("Posted startup Thailand+Budapest update to group");
+    return true;
+  }
+
+  const groups = await listJoinedGroups();
+  log.warn(
+    { groups: groups.map((g) => `${g.subject}|${g.id}`), expected: groupJid },
+    "Could not send to pinned group — listing joined groups",
+  );
+
+  // Try name match among joined groups.
+  if (cfg.groupName) {
+    const match = groups.find((g) => g.subject === cfg.groupName.trim());
+    if (match?.id) {
+      groupJid = match.id;
+      await saveState();
+      ok = await sendChat(groupJid, text);
+      if (ok) {
+        log.info({ groupJid }, "Posted startup update after group rediscovery");
+        return true;
+      }
+    }
+  }
+
+  // Fallback: DM the linked phone owner so something still arrives.
+  const ownerPhone = normalizeWhatsAppPhone(
+    process.env.WHATSAPP_PHONE || process.env.WHATSAPP_PAIR_PHONE,
+  );
+  if (ownerPhone) {
+    const ownerJid = `${ownerPhone}@s.whatsapp.net`;
+    const personalOk = await sendChat(
+      ownerJid,
+      [
+        "⚠️ לא הצלחתי לשלוח לקבוצה (403).",
+        "ודאו שהמספר *054-967-6816* חבר בקבוצת הטיסות.",
+        "",
+        text,
+      ].join("\n"),
+    );
+    log.info({ personalOk, ownerJid }, "Fallback personal startup update");
+    return personalOk;
+  }
+  return false;
+}
+
+/** One DM per subscriber with all matching deals (no per-destination spam). */
+async function notifyPersonalSubscribers(dealsInput) {
+  const deals = (Array.isArray(dealsInput) ? dealsInput : [dealsInput]).filter(
+    (d) => d?.watch,
+  );
+  if (!deals.length) return 0;
+
+  let sent = 0;
+  for (const [jid, user] of listActivePersonalUsers()) {
+    const matched = deals.filter((deal) => shouldAlertPersonalUser(user, deal));
+    if (!matched.length) continue;
+
+    const body = [
+      matched.length > 1 ? "🔔 *התראות אישיות*" : "🔔 *התראה אישית*",
+      "",
+      ...matched.flatMap((deal, i) => [
+        ...(i > 0 ? ["────────", ""] : []),
+        formatDealMessage(deal),
+      ]),
+      "",
+      "_כדי להפסיק: כתוב *עצור*_",
+    ].join("\n");
+
+    const ok = await sendChat(jid, body);
+    if (ok) {
+      sent += 1;
+      const lastAlertByWatch = { ...(user.lastAlertByWatch ?? {}) };
+      for (const deal of matched) {
+        lastAlertByWatch[deal.watch] = Number(deal.priceIls ?? deal.priceUsd);
+      }
+      await upsertPersonalUser(jid, { lastAlertByWatch });
+      log.info(
+        {
+          jid,
+          watches: matched.map((d) => d.watch),
+          prices: matched.map((d) => d.priceIls),
+        },
+        "Personal alert sent",
+      );
+    }
+    await sleep(400);
+  }
+  return sent;
+}
+
+async function loadJson(file, fallback) {
+  if (!existsSync(file)) return fallback;
+  try {
+    return JSON.parse(await readFile(file, "utf8"));
+  } catch {
+    return fallback;
+  }
+}
+
+async function loadSeen() {
+  const raw = await loadJson(SEEN_FILE, []);
+  seenDeals = new Map();
+  // Legacy format: string[] of full deal ids
+  if (Array.isArray(raw)) {
+    for (const id of raw) {
+      if (typeof id !== "string") continue;
+      const parts = id.split("-");
+      // TLV-ATH-2026-10-02-2026-10-11-118.00
+      if (parts.length >= 7) {
+        const fp = parts.slice(0, -1).join("-");
+        const priceUsd = Number(parts.at(-1));
+        seenDeals.set(fp, {
+          priceUsd: Number.isFinite(priceUsd) ? priceUsd : 9999,
+          at: Date.now(),
+          id,
+        });
+      } else {
+        seenDeals.set(id, { priceUsd: 9999, at: Date.now(), id });
+      }
+    }
+    return;
+  }
+  // New format: { fingerprint: { priceUsd, at, id } }
+  if (raw && typeof raw === "object") {
+    for (const [fp, meta] of Object.entries(raw)) {
+      seenDeals.set(fp, {
+        priceUsd: Number(meta?.priceUsd ?? 9999),
+        at: Number(meta?.at ?? Date.now()),
+        id: String(meta?.id ?? fp),
+      });
+    }
+  }
+}
+
+async function saveSeen() {
+  const obj = Object.fromEntries(seenDeals.entries());
+  await writeFile(SEEN_FILE, JSON.stringify(obj, null, 2));
+}
+
+function shouldNotifyDeal(deal) {
+  const fp = dealFingerprint(deal);
+  const prev = seenDeals.get(fp);
+  if (!prev) return true;
+
+  // Fixed watches: re-alert on meaningful ILS price drops.
+  if (deal.watch === "thailand" || deal.watch === "budapest") {
+    const dropEnv =
+      deal.watch === "budapest"
+        ? process.env.FLIGHT_DEALS_BUDAPEST_PRICE_DROP_ILS
+        : process.env.FLIGHT_DEALS_THAILAND_PRICE_DROP_ILS;
+    const dropIls = Number(dropEnv ?? (deal.watch === "budapest" ? "50" : "100"));
+    const next = Number(deal.priceIls ?? deal.priceUsd);
+    const prevPrice = Number(prev.priceIls ?? prev.priceUsd);
+    return next <= prevPrice - dropIls;
+  }
+
+  return false;
+}
+
+function markDealSeen(deal) {
+  seenDeals.set(dealFingerprint(deal), {
+    priceUsd: deal.priceUsd,
+    priceIls: deal.priceIls ?? null,
+    at: Date.now(),
+    id: deal.id,
+  });
+}
+
+async function loadState() {
+  const state = await loadJson(STATE_FILE, {});
+  if (state.groupJid && !groupJid) groupJid = state.groupJid;
+  welcomeSent = Boolean(state.welcomeSent);
+}
+
+async function saveState() {
+  await writeFile(
+    STATE_FILE,
+    JSON.stringify({ groupJid, welcomeSent, groupName: cfg.groupName }, null, 2),
+  );
+}
+
+function msgKeyString(key) {
+  return `${key.remoteJid}:${key.id}:${key.fromMe}:${key.participant || ""}`;
+}
+
+function storeMessage(msg) {
+  if (!msg?.key?.id || !msg.message) return;
+  messageStore.set(msgKeyString(msg.key), msg.message);
+  if (messageStore.size > 500) {
+    const first = messageStore.keys().next().value;
+    messageStore.delete(first);
+  }
+}
+
+function isRecentMessage(msg) {
+  const ts = Number(msg.messageTimestamp || 0);
+  if (!ts) return false;
+  const ms = ts > 1e12 ? ts : ts * 1000;
+  // After reconnect, decrypt retries can arrive several minutes late.
+  return Date.now() - ms < 10 * 60_000;
+}
+
+function sameChatId(a, b) {
+  if (!a || !b) return false;
+  const left = String(a).split(":")[0];
+  const right = String(b).split(":")[0];
+  return left === right || left.split("@")[0] === right.split("@")[0];
+}
+
+function extractMessageText(msg) {
+  const m = msg?.message;
+  if (!m) return "";
+  const inner =
+    m.ephemeralMessage?.message ||
+    m.viewOnceMessage?.message ||
+    m.viewOnceMessageV2?.message ||
+    m;
+  return (
+    inner.conversation ||
+    inner.extendedTextMessage?.text ||
+    inner.imageMessage?.caption ||
+    inner.videoMessage?.caption ||
+    inner.buttonsResponseMessage?.selectedDisplayText ||
+    inner.listResponseMessage?.title ||
+    inner.templateButtonReplyMessage?.selectedDisplayText ||
+    ""
+  );
+}
+
+let lastStatusCommandAt = 0;
+const STATUS_COMMAND_COOLDOWN_MS = 8_000;
+
+function buildStatusReply({ searching = false, personal = false } = {}) {
+  const status = getSearchStatus();
+  const thCfg = thailandWatchConfig();
+  const budCfg = budapestWatchConfig();
+  const ago = lastScanAt
+    ? `${Math.max(1, Math.round((Date.now() - lastScanAt) / 60_000))} דק׳`
+    : "עדיין לא";
+  const th = status.thailand;
+  const bud = status.budapest;
+  return [
+    whatsappConnected ? "כן ✅ *מחפש*" : "⏳ *מתחבר…*",
+    personal ? "🔔 *בוט אישי* — התראות רק אליך" : "",
+    "",
+    "🇹🇭 *תאילנד* · אמירטס · מזוודה",
+    `תאריכים: *${formatDate(thCfg.outbound)} – ${formatDate(thCfg.returnDate)}*`,
+    `לו״ז: *יציאה ${thCfg.outboundDep}→${thCfg.outboundArr}* · *חזרה בלילה*`,
+    th?.lowestIls != null
+      ? `מחיר: *₪${th.lowestIls}*`
+      : "עדיין אין מחיר תאילנד",
+    "",
+    "🇭🇺 *בודפשט*",
+    `תאריכים: *${formatDate(budCfg.outbound)} – ${formatDate(budCfg.returnDate)}*`,
+    bud?.lowestIls != null
+      ? `מחיר: *₪${bud.lowestIls}*${bud.airlineLabelHe ? ` · ${bud.airlineLabelHe}` : ""}`
+      : "עדיין אין מחיר בודפשט",
+    "",
+    `סריקה אחרונה: ${ago}`,
+    searching || scanRunning
+      ? "🔄 *מריץ חיפוש עכשיו ב-Google Flights…*"
+      : personal
+        ? "כתוב שוב *מחפש* או *סטטוס* לעדכון."
+        : "כתבו שוב *בוט מחפש* לעדכון מחיר.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function pickWatchDeals(deals = null, watchesFilter = null) {
+  const fromScan = Array.isArray(deals) ? deals : [];
+  const byWatch = new Map();
+  for (const deal of fromScan) {
+    if (!deal?.watch) continue;
+    const prev = byWatch.get(deal.watch);
+    if (
+      !prev ||
+      Number(deal.priceIls ?? deal.priceUsd) < Number(prev.priceIls ?? prev.priceUsd)
+    ) {
+      byWatch.set(deal.watch, deal);
+    }
+  }
+  for (const deal of getCachedWatchDeals()) {
+    if (!byWatch.has(deal.watch)) byWatch.set(deal.watch, deal);
+  }
+  const order = Array.isArray(watchesFilter) && watchesFilter.length
+    ? watchesFilter
+    : DEFAULT_WATCHES;
+  return order.map((w) => byWatch.get(w)).filter(Boolean);
+}
+
+async function sendCurrentDealResult(chatId, deals = null, watchesFilter = null) {
+  if (!sock || !chatId) return false;
+  const watchDeals = pickWatchDeals(deals, watchesFilter);
+  if (!watchDeals.length) {
+    await sock.sendMessage(chatId, {
+      text: watchesFilter?.length
+        ? `🔎 *תוצאת חיפוש*\nלא נמצאו כרגע טיסות ל־${formatWatchesHe(watchesFilter)}.`
+        : "🔎 *תוצאת חיפוש*\nלא נמצאו כרגע טיסות במעקבים הקבועים.",
+    });
+    return false;
+  }
+
+  try {
+    // Single message for all selected watches — no per-destination spam.
+    const caption = [
+      watchDeals.length > 1
+        ? "🔎 *תוצאות חיפוש עכשיו*"
+        : "🔎 *תוצאת חיפוש עכשיו*",
+      "",
+      ...watchDeals.flatMap((deal, i) => [
+        ...(i > 0 ? ["────────", ""] : []),
+        formatDealMessage(deal),
+      ]),
+    ].join("\n");
+    await sock.sendMessage(chatId, { text: caption });
+    log.info(
+      {
+        chatId,
+        watches: watchDeals.map((d) => d.watch),
+        prices: watchDeals.map((d) => d.priceIls),
+      },
+      "Sent current deal result",
+    );
+    return true;
+  } catch (error) {
+    log.warn({ error }, "Failed to send current deal result");
+    return false;
+  }
+}
+
+async function runStatusSearch(
+  chatId,
+  watchesFilter = null,
+  { quietAck = false } = {},
+) {
+  const personal = Boolean(chatId && !String(chatId).endsWith("@g.us"));
+  if (!quietAck) {
+    try {
+      const ack = personal
+        ? [
+            "🔄 *מחפש…*",
+            watchesFilter?.length
+              ? `יעדים: ${formatWatchesHe(watchesFilter)}`
+              : "",
+          ]
+            .filter(Boolean)
+            .join("\n")
+        : buildStatusReply({ searching: true, personal: false });
+      await sock.sendMessage(chatId, { text: ack });
+    } catch (error) {
+      log.warn({ error }, "Failed to send status ack");
+    }
+  }
+
+  try {
+    // Wait for any in-flight cron scan, then always run a fresh status search.
+    for (let i = 0; i < 120 && scanRunning; i += 1) {
+      await sleep(500);
+    }
+    const deals = await runScan({
+      forceRefresh: true,
+      reason: "status-command",
+      reportCurrent: true,
+    });
+    await sendCurrentDealResult(chatId, deals, watchesFilter);
+  } catch (error) {
+    log.warn({ error }, "Status-triggered scan failed");
+    try {
+      await sock.sendMessage(chatId, {
+        text: "⚠️ החיפוש נכשל כרגע. נסו שוב בעוד דקה.",
+      });
+    } catch {
+      // ignore
+    }
+  }
+}
+
+async function processTriggerFile() {
+  if (!existsSync(TRIGGER_FILE) || !sock) return;
+  try {
+    const raw = JSON.parse(await readFile(TRIGGER_FILE, "utf8"));
+    await unlink(TRIGGER_FILE);
+    if (raw.action === "status") {
+      log.info("Queued status search from trigger file");
+      await runStatusSearch(groupJid || raw.chatId);
+      return;
+    }
+    if (raw.action === "update") {
+      const deals = await runScan({
+        forceRefresh: true,
+        reason: "trigger-update",
+        reportCurrent: true,
+      });
+      await sendStartupUpdate(deals);
+      return;
+    }
+    const text =
+      raw.text ||
+      "✅ *הודעת בדיקה*\n\nהבוט פעיל ומחובר.";
+    const ok = await sendToGroup(text);
+    if (!ok) await sendStartupUpdate([]);
+    log.info({ ok }, "Sent queued test message");
+  } catch (error) {
+    log.warn({ error }, "Failed to process test trigger");
+  }
+}
+
+function startTriggerWatcher() {
+  setInterval(() => {
+    processTriggerFile().catch((error) => {
+      log.warn({ error }, "Trigger watcher error");
+    });
+  }, 5_000);
+}
+
+async function isTargetGroup(chatId) {
+  if (!chatId?.endsWith("@g.us")) return false;
+  if (groupJid) return sameChatId(chatId, groupJid);
+  if (!cfg.groupName || !sock) return false;
+  try {
+    const meta = await sock.groupMetadata(chatId.split(":")[0]);
+    return String(meta?.subject ?? "").trim() === cfg.groupName.trim();
+  } catch {
+    return false;
+  }
+}
+
+function senderJidFromMsg(msg) {
+  const participant =
+    msg.key?.participant ||
+    msg.participant ||
+    msg.key?.participantPn ||
+    msg.key?.participantAlt;
+  if (participant) return String(participant).split(":")[0];
+  return String(msg.key?.remoteJid ?? "").split(":")[0];
+}
+
+async function runThailandFixedSearch(chatId, { skipAck = false } = {}) {
+  const cfg = thailandWatchConfig();
+  if (!skipAck) {
+    const ackOk = await sendChat(
+      chatId,
+      [
+        "✅ *קיבלתי: אמירטס*",
+        "🇹🇭 מחפש דיל אמירטס אמיתי בלבד",
+        `תאריכים: *${formatDate(cfg.outbound)} – ${formatDate(cfg.returnDate)}*`,
+        `מזוודה כלולה · יציאה ${cfg.outboundDep}→${cfg.outboundArr}`,
+        "",
+        "🔄 רגע…",
+      ].join("\n"),
+    );
+    if (!ackOk) {
+      log.warn({ chatId }, "Failed to ack אמירטס command in group");
+    }
+  }
+
+  try {
+    // Wait briefly if another scan is running — don't hang for a minute.
+    for (let i = 0; i < 20 && scanRunning; i += 1) {
+      await sleep(500);
+    }
+    if (scanRunning) {
+      log.warn("Emirates search starting while another scan still runs");
+    }
+    scanRunning = true;
+    let deals = [];
+    try {
+      deals = await searchThailandFixedWatch({ forceRefresh: true });
+      lastScanAt = Date.now();
+      lastScanFound = deals.length;
+    } finally {
+      scanRunning = false;
+    }
+
+    const deal = Array.isArray(deals)
+      ? deals.find((d) => isEmiratesBagDeal(d)) || null
+      : null;
+
+    if (!deal) {
+      const serp = getSerpApiStatus();
+      const why = !serp.configured
+        ? "אין חיבור ל־Google Flights (SerpAPI) לאימות אמירטס."
+        : serp.coolingDown
+          ? `Google Flights חסום זמנית (מכסה/המתנה ~${Math.ceil(serp.coolDownSeconds / 60)} דק׳).`
+          : "מכסת Google Flights החודשית נגמרה (0/250) — בלי זה אי אפשר לאמת אמירטס + מזוודה.";
+      const ok = await sendChat(
+        chatId,
+        [
+          "🇹🇭 *אין כרגע דיל אמירטס אמיתי*",
+          `תאריכים: *${formatDate(cfg.outbound)} – ${formatDate(cfg.returnDate)}*`,
+          "הבוט *כן קיבל* את ההודעה — פשוט אין תוצאה אמיתית להציג.",
+          why,
+          "כשמכסת Google תתחדש — הדיל יופיע כאן לבד.",
+        ].join("\n"),
+      );
+      log.info({ chatId, ok }, "Sent Emirates empty reply");
+      return;
+    }
+
+    const ok = await sendChat(
+      chatId,
+      ["🔎 *דיל אמירטס*", "", formatDealMessage(deal)].join("\n"),
+    );
+    log.info(
+      { chatId, ok, priceIls: deal.priceIls, id: deal.id },
+      "Sent Emirates-only deal",
+    );
+  } catch (error) {
+    log.warn({ error }, "Thailand fixed search failed");
+    await sendChat(chatId, "⚠️ חיפוש אמירטס נכשל כרגע. נסו שוב בעוד דקה.");
+  }
+}
+
+/**
+ * Handle bot commands. Replies go to replyChatId (group or DM).
+ * User settings are keyed by userId (sender in group, chat in DM).
+ */
+async function handleUserCommand({
+  replyChatId,
+  userId,
+  body,
+  pushName,
+  inGroup = false,
+}) {
+  const cmd = inGroup
+    ? parseGroupCommand(body)
+    : parsePersonalCommand(body);
+  if (!cmd) {
+    if (!inGroup) {
+      await sendChat(
+        replyChatId,
+        "לא הבנתי 🙂\nכתוב *עזרה* לתפריט, או *התחל* להצטרף למעקב.",
+      );
+    }
+    return false;
+  }
+
+  if (cmd.type === "help") {
+    await sendChat(replyChatId, personalHelpText());
+    return true;
+  }
+
+  if (cmd.type === "search-thailand") {
+    const ackOk = await sendChat(
+      replyChatId,
+      "✅ *קיבלתי: אמירטס* — מחפש עכשיו דיל אמירטס אמיתי…",
+    );
+    log.info({ replyChatId, ackOk }, "אמירטס ack sent");
+    // Don't block behind other scans more than a few seconds.
+    runThailandFixedSearch(replyChatId, { skipAck: true }).catch((error) => {
+      log.warn({ error }, "Thailand command failed");
+    });
+    return true;
+  }
+
+  if (cmd.type === "start") {
+    const user = await upsertPersonalUser(userId, {
+      active: true,
+      pushName: pushName || null,
+    });
+    await sendChat(
+      replyChatId,
+      [
+        "✅ *נרשמת למעקב!*",
+        `📍 יעדים: *${formatWatchesHe(user.watches)}*`,
+        "",
+        "בחירה: *רק תאילנד* / *רק בודפשט* / *הכל*",
+        "מחפש מחירים עכשיו…",
+      ].join("\n"),
+    );
+    runStatusSearch(replyChatId, user.watches, { quietAck: true }).catch(
+      (error) => {
+        log.warn({ error }, "Start search failed");
+      },
+    );
+    return true;
+  }
+
+  if (cmd.type === "stop") {
+    await upsertPersonalUser(userId, { active: false });
+    await sendChat(
+      replyChatId,
+      "🛑 המעקב הופסק.\nכתוב *התחל* כדי לחזור.",
+    );
+    return true;
+  }
+
+  if (cmd.type === "set-watches") {
+    const user = await upsertPersonalUser(userId, {
+      active: true,
+      pushName: pushName || null,
+      watches: cmd.watches,
+    });
+    await sendChat(
+      replyChatId,
+      [
+        `✅ היעדים עודכנו: *${formatWatchesHe(user.watches)}*`,
+        "מחפש מחירים ליעדים שבחרת…",
+      ].join("\n"),
+    );
+    runStatusSearch(replyChatId, user.watches, { quietAck: true }).catch(
+      (error) => {
+        log.warn({ error }, "Watch-change search failed");
+      },
+    );
+    return true;
+  }
+
+  if (cmd.type === "watches") {
+    const user = getPersonalUser(userId);
+    if (!user?.active) {
+      await sendChat(
+        replyChatId,
+        "עוד לא נרשמת.\nכתוב *התחל*, ואז *רק תאילנד* / *רק בודפשט* / *הכל*.",
+      );
+      return true;
+    }
+    await sendChat(
+      replyChatId,
+      [
+        `📍 היעדים שלך עכשיו: *${formatWatchesHe(user.watches)}*`,
+        "",
+        "לבחירה מחדש:",
+        "• *רק תאילנד*",
+        "• *רק בודפשט*",
+        "• *הכל*",
+      ].join("\n"),
+    );
+    return true;
+  }
+
+  if (cmd.type === "budget") {
+    const maxPriceIls = Math.max(500, Math.min(20000, Number(cmd.maxPriceIls)));
+    const user = await upsertPersonalUser(userId, {
+      active: true,
+      maxPriceIls,
+    });
+    await sendChat(
+      replyChatId,
+      `✅ עודכן תקציב ל־*₪${Math.round(maxPriceIls)}*\n\n${personalStatusText(user, getSearchStatus())}`,
+    );
+    return true;
+  }
+
+  if (cmd.type === "status") {
+    const user = getPersonalUser(userId);
+    const watches =
+      user?.active && user.watches?.length ? user.watches : DEFAULT_WATCHES;
+    // In the group, allow מחפש/בוט מחפש without prior התחל.
+    if (!inGroup && !user?.active) {
+      await sendChat(
+        replyChatId,
+        "עוד לא נרשמת.\nכתוב *התחל* כדי לקבל התראות.",
+      );
+      return true;
+    }
+    runStatusSearch(replyChatId, watches).catch((error) => {
+      log.warn({ error }, "Status search failed");
+    });
+    return true;
+  }
+
+  return false;
+}
+
+async function handleIncomingMessage(msg, upsertType = "notify") {
+  try {
+    if (msg.key?.fromMe) return;
+    // Important: do NOT mark handled before decrypt succeeds.
+    // Failed decrypts often retry with the same id — marking early drops them forever.
+    if (wasHandledMessage(msg)) return;
+
+    const chatId = msg.key?.remoteJid;
+    if (!chatId) return;
+
+    if (!msg.message) {
+      // Recent undecrypted messages — ask WA to retry; don't mark handled.
+      if (isRecentMessage(msg)) {
+        if (chatId.endsWith("@g.us") && sameChatId(chatId, groupJid)) {
+          log.warn(
+            { chatId, id: msg.key?.id, participant: msg.key?.participant },
+            "Undecrypted group message — requesting retry",
+          );
+          try {
+            if (typeof sock?.requestPlaceholderResend === "function") {
+              await sock.requestPlaceholderResend(msg.key).catch(() => {});
+            }
+          } catch {
+            // ignore
+          }
+        }
+        noteDecryptFailure(chatId);
+        try {
+          // Nudge retry pipeline (Baileys uses getMessage + msgRetryCounterCache).
+          if (sock?.readMessages && msg.key) {
+            await sock.readMessages([msg.key]).catch(() => {});
+          }
+        } catch {
+          // ignore
+        }
+      }
+      return;
+    }
+
+    storeMessage(msg);
+
+    const body = extractMessageText(msg);
+    if (!body) return;
+
+    // Live notifies always. After reconnect, fresh messages sometimes arrive as append.
+    const live =
+      upsertType === "notify" ||
+      (upsertType === "append" && isRecentMessage(msg));
+    if (!live) return;
+
+    const isGroup = chatId.endsWith("@g.us");
+
+    // Private DM — full command set
+    if (!isGroup) {
+      markHandledMessage(msg);
+      log.info({ from: chatId, body, upsertType }, "Personal DM received");
+      await handleUserCommand({
+        replyChatId: chatId,
+        userId: chatId,
+        body,
+        pushName: msg.pushName,
+        inGroup: false,
+      });
+      return;
+    }
+
+    if (!(await isTargetGroup(chatId))) {
+      if (/בוט/.test(body)) {
+        log.info({ chatId, expected: groupJid, body }, "Ignored bot message from other group");
+      }
+      return;
+    }
+
+    if (!groupJid && isGroup) {
+      groupJid = chatId.split(":")[0];
+      await saveState();
+      log.info({ groupJid }, "Learned group JID from incoming message");
+    }
+
+    const groupCmd = parseGroupCommand(body);
+    if (!groupCmd) {
+      // Non-command group traffic — don't mark, cheap to ignore again.
+      return;
+    }
+
+    const now = Date.now();
+    if (now - lastStatusCommandAt < STATUS_COMMAND_COOLDOWN_MS) {
+      markHandledMessage(msg);
+      log.info({ body, cmd: groupCmd.type }, "Group command cooldown");
+      await sendChat(chatId.split(":")[0], "⏳ עוד רגע — מחפש כבר…");
+      return;
+    }
+    lastStatusCommandAt = now;
+    markHandledMessage(msg);
+
+    const senderJid = senderJidFromMsg(msg);
+    log.info(
+      { from: chatId, senderJid, body, upsertType, cmd: groupCmd.type },
+      "Group command received",
+    );
+    await handleUserCommand({
+      replyChatId: chatId.split(":")[0],
+      userId: senderJid,
+      body,
+      pushName: msg.pushName,
+      inGroup: true,
+    });
+  } catch (error) {
+    log.warn({ error }, "Failed to handle incoming message");
+  }
+}
+
+async function refreshGroupKeys() {
+  if (!sock || !groupJid) return;
+  try {
+    await sock.groupFetchAllParticipating();
+    await sock.groupMetadata(groupJid);
+    log.info({ groupJid }, "Refreshed group metadata/keys");
+  } catch (error) {
+    log.warn({ error, groupJid }, "refreshGroupKeys failed");
+  }
+}
+
+async function resolveGroupByName() {
+  if (!sock || !cfg.groupName || groupJid) return groupJid;
+
+  try {
+    const participating = await sock.groupFetchAllParticipating();
+    const groups = Object.values(participating ?? {});
+    const match = groups.find(
+      (g) => String(g.subject ?? "").trim() === cfg.groupName.trim(),
+    );
+
+    if (match?.id) {
+      groupJid = match.id;
+      await saveState();
+      console.log(`\n✅ נמצאה קבוצה: "${cfg.groupName}" → ${groupJid}\n`);
+      return groupJid;
+    }
+  } catch (error) {
+    log.warn({ error }, "Group lookup failed");
+  }
+
+  return null;
+}
+
+function startGroupPolling() {
+  if (groupJid || !cfg.groupName || groupPollTimer) return;
+
+  console.log(`\n⏳ מחכה לקבוצה בשם: "${cfg.groupName}"`);
+  console.log("   פתח את הקבוצה, הוסף את המספר המקושר, ואז הבוט יתחבר אוטומטית.\n");
+
+  groupPollTimer = setInterval(async () => {
+    const found = await resolveGroupByName();
+    if (found) {
+      clearInterval(groupPollTimer);
+      groupPollTimer = null;
+      await onGroupReady();
+    }
+  }, GROUP_POLL_MS);
+}
+
+async function onGroupReady() {
+  if (!welcomeSent) {
+    await sendToGroup(
+      [
+        "✅ *הבוט מחובר!*",
+        "",
+        "מעקבים קבועים:",
+        "🇹🇭 תאילנד · אמירטס + מזוודה · 10/02/2027–10/03/2027",
+        "🇭🇺 בודפשט · 11/11/2026–15/11/2026",
+        "",
+        "כתבו *תאילנד* לחיפוש אמירטס+מזוודה, או *עזרה* לתפריט.",
+        cfg.demoMode ? "\n_מצב דמו פעיל._" : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    );
+    welcomeSent = true;
+    await saveState();
+  }
+
+  await processTriggerFile();
+
+  if (!startupScanDone) {
+    startupScanDone = true;
+    const deals = await runScan({ forceRefresh: true, reason: "group-ready" });
+    await sendStartupUpdate(deals);
+  }
+}
+
+async function runScan({
+  forceRefresh = false,
+  reason = "cron",
+  reportCurrent = false,
+} = {}) {
+  if (!groupJid) {
+    log.info("No group yet — skipping scan");
+    return [];
+  }
+
+  if (scanRunning) {
+    if (reason === "status-command" || reportCurrent) {
+      log.info("Waiting for in-flight scan before status refresh");
+      for (let i = 0; i < 120 && scanRunning; i += 1) {
+        await sleep(500);
+      }
+      if (scanRunning) {
+        return getCachedWatchDeals();
+      }
+    } else {
+      if (forceRefresh) scanQueued = true;
+      log.info("Scan already running — %s", scanQueued ? "queued follow-up" : "skipping");
+      return getCachedWatchDeals();
+    }
+  }
+
+  if (!resolveProvider()) {
+    log.warn("No flight provider configured");
+    return [];
+  }
+
+  scanRunning = true;
+  let deals = [];
+
+  try {
+    const shouldForce =
+      forceRefresh ||
+      (Date.now() - lastForceRefreshAt > 90 * 60_000 &&
+        lastScanFound > 0 &&
+        lastScanSent === 0 &&
+        Date.now() - lastScanAt > 8 * 60_000);
+
+    if (shouldForce) lastForceRefreshAt = Date.now();
+
+    log.info(
+      "Scanning permanent watches Thailand+Budapest (%s%s)",
+      reason,
+      shouldForce ? ", force-refresh" : "",
+    );
+    deals = await fetchDeals({ forceRefresh: shouldForce });
+    lastScanFound = deals.length;
+    log.info(
+      "Found %d watch options (TH=%d BUD=%d)",
+      deals.length,
+      deals.filter((d) => d.watch === "thailand").length,
+      deals.filter((d) => d.watch === "budapest").length,
+    );
+
+    let sent = 0;
+    // Cron: alert group + personal DMs on new/drop.
+    // Status command reports the result to the requester separately.
+    if (!reportCurrent) {
+      // One personal DM per subscriber with all matching watches.
+      sent += await notifyPersonalSubscribers(deals);
+
+      for (const deal of deals) {
+        if (!shouldNotifyDeal(deal)) continue;
+        markDealSeen(deal);
+        const ok = await sendToGroup(deal);
+        if (ok) {
+          sent += 1;
+          log.info({ deal: deal.id, watch: deal.watch }, "Sent deal to group");
+        }
+      }
+    } else {
+      const tops = pickWatchDeals(deals);
+      for (const deal of tops) {
+        const prev = seenDeals.get(dealFingerprint(deal));
+        if (!prev) markDealSeen(deal);
+        else if (
+          Number.isFinite(deal.priceIls) &&
+          Number.isFinite(prev.priceIls) &&
+          deal.priceIls < prev.priceIls
+        ) {
+          markDealSeen(deal);
+        }
+      }
+      // Batch personal nudges into one DM (not one per destination).
+      sent += await notifyPersonalSubscribers(tops);
+    }
+
+    lastScanSent = sent;
+    lastScanAt = Date.now();
+    await saveSeen();
+    log.info("Scan done — %d new alert messages sent", sent);
+  } catch (error) {
+    log.error({ error }, "Scan failed");
+  } finally {
+    scanRunning = false;
+    if (scanQueued) {
+      scanQueued = false;
+      setTimeout(() => {
+        runScan({ forceRefresh: true, reason: "queued" }).catch((error) => {
+          log.warn({ error }, "Queued scan failed");
+        });
+      }, 1_000);
+    }
+  }
+
+  return deals;
+}
+
+function normalizeWhatsAppPhone(raw) {
+  let phone = String(raw ?? "").replace(/\D/g, "");
+  // Israeli local 05xxxxxxxx → 9725xxxxxxxx
+  if (phone.startsWith("0") && phone.length >= 9) {
+    phone = `972${phone.slice(1)}`;
+  }
+  return phone;
+}
+
+function printPairingInstructions(code, phone) {
+  console.log("\n════════════════════════════════════════");
+  console.log("🔑 חיבור בלי QR — קוד בלבד");
+  console.log("════════════════════════════════════════");
+  console.log(`חשבון: ${phone}`);
+  console.log(`קוד:   ${code}`);
+  console.log("");
+  console.log("בטלפון (0549676816):");
+  console.log("1. WhatsApp → הגדרות → מכשירים מקושרים");
+  console.log("2. מחק מכשירים ישנים של הבוט");
+  console.log("3. קשר מכשיר → מופיע QR");
+  console.log("4. למטה לחץ: קישור באמצעות מספר טלפון במקום");
+  console.log(`5. הזן רק את הקוד: ${code}  (8 תווים, אותיות+מספרים)`);
+  console.log("");
+  console.log("⚠️ אל תחכה — הקוד תקף דקות ספורות בלבד");
+  console.log("⚠️ אם אין כפתור 'מספר טלפון במקום' — חייבים QR ממסך אחר");
+  console.log("════════════════════════════════════════\n");
+}
+
+async function startPairingCodeFlow(activeSock, phone, creds) {
+  if (creds?.registered || !phone) return;
+
+  if (pairingStarted && creds?.pairingCode) {
+    printPairingInstructions(creds.pairingCode, phone);
+    return;
+  }
+
+  pairingStarted = true;
+  try {
+    const code =
+      creds?.pairingCode || (await activeSock.requestPairingCode(phone));
+    printPairingInstructions(code, phone);
+  } catch (error) {
+    pairingStarted = false;
+    log.warn({ error }, "Pairing code request failed");
+    console.error("❌ לא הצלחתי ליצור קוד — בדוק ש-WHATSAPP_PHONE מוגדר נכון");
+  }
+}
+
+function scheduleReconnect(delayMs = 8_000, { repairSessions = false } = {}) {
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    (async () => {
+      if (repairSessions || reconnectFailures >= 2) {
+        await repairSignalSessions(
+          repairSessions ? "forced-reconnect" : "reconnect-backoff",
+        );
+      }
+      await connectWhatsApp();
+    })().catch((error) => {
+      log.error({ error }, "Reconnect failed");
+      scheduleReconnect(12_000, { repairSessions: true });
+    });
+  }, delayMs);
+}
+
+async function connectWhatsApp() {
+  if (connecting) {
+    log.info("WhatsApp connect already in progress");
+    return;
+  }
+  connecting = true;
+  const generation = ++connectGeneration;
+
+  await mkdir(AUTH_DIR, { recursive: true });
+
+  if (sock) {
+    try {
+      sock.ev.removeAllListeners();
+      sock.end(undefined);
+    } catch {
+      // ignore
+    }
+    sock = null;
+  }
+
+  try {
+    const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+    const { version } = await fetchLatestBaileysVersion();
+    const pairingOnly = process.env.FLIGHT_DEALS_PAIRING_ONLY === "true";
+    const phone = normalizeWhatsAppPhone(
+      process.env.WHATSAPP_PAIR_PHONE || process.env.WHATSAPP_PHONE,
+    );
+    const silent = pino({ level: "silent" });
+    const retryCache = {
+      _data: new Map(),
+      get: (key) => retryCache._data.get(key),
+      set: (key, value) => retryCache._data.set(key, value),
+      del: (key) => retryCache._data.delete(key),
+    };
+
+    sock = makeWASocket({
+      version,
+      auth: {
+        creds: state.creds,
+        keys: makeCacheableSignalKeyStore(state.keys, silent),
+      },
+      browser: Browsers.ubuntu("Chrome"),
+      logger: silent,
+      printQRInTerminal: false,
+      markOnlineOnConnect: true,
+      emitOwnEvents: false,
+      // Needed so group sender keys distribute; history sync stays off.
+      fireInitQueries: true,
+      syncFullHistory: false,
+      shouldSyncHistoryMessage: () => false,
+      maxMsgRetryCount: 8,
+      msgRetryCounterCache: retryCache,
+      getMessage: async (key) => {
+        const cached = messageStore.get(msgKeyString(key));
+        if (cached) return cached;
+        // Returning undefined makes Baileys ask the phone to resend ciphertext.
+        return undefined;
+      },
+    });
+
+    sock.ev.on("creds.update", saveCreds);
+    sock.ev.on("messages.upsert", async ({ messages, type }) => {
+      if (generation !== connectGeneration) return;
+      for (const msg of messages) {
+        try {
+          await handleIncomingMessage(msg, type);
+        } catch (error) {
+          log.warn({ error }, "Message handler error");
+        }
+      }
+    });
+    // Some retries land as message updates with newly filled content.
+    sock.ev.on("messages.update", async (updates) => {
+      if (generation !== connectGeneration) return;
+      for (const upd of updates) {
+        try {
+          if (!upd?.update?.message || !upd?.key) continue;
+          await handleIncomingMessage(
+            {
+              key: upd.key,
+              message: upd.update.message,
+              messageTimestamp: Math.floor(Date.now() / 1000),
+              pushName: upd.update.pushName,
+            },
+            "notify",
+          );
+        } catch (error) {
+          log.warn({ error }, "messages.update handler error");
+        }
+      }
+    });
+
+    if (pairingOnly && !state.creds.registered && phone) {
+      setTimeout(() => {
+        if (generation !== connectGeneration) return;
+        startPairingCodeFlow(sock, phone, state.creds).catch((error) => {
+          log.warn({ error }, "Pairing flow failed");
+        });
+      }, 3_000);
+    }
+
+    sock.ev.on("connection.update", async (update) => {
+      if (generation !== connectGeneration) return;
+      const { connection, lastDisconnect, qr } = update;
+
+      if (qr && !pairingOnly) {
+        const qrLink = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(qr)}`;
+        try {
+          await writeFile(path.join(__dirname, "qr-link.txt"), `${qrLink}\n`);
+        } catch {
+          // ignore
+        }
+        console.log("\n════════════════════════════════════════");
+        console.log("📱 פתח את הקישור במחשב / טאבלט וסרוק מהטלפון:");
+        console.log(qrLink);
+        console.log("════════════════════════════════════════\n");
+        console.log("בטלפון: WhatsApp → הגדרות → מכשירים מקושרים → קשר מכשיר → סרוק\n");
+        qrcode.generate(qr, { small: true });
+      }
+
+      if (connection === "open") {
+        whatsappConnected = true;
+        reconnectFailures = 0;
+        decryptFailCount = 0;
+        connecting = false;
+        if (pairingRefreshTimer) {
+          clearInterval(pairingRefreshTimer);
+          pairingRefreshTimer = null;
+        }
+        console.log("\n✅ WhatsApp מחובר בהצלחה!\n");
+        log.info("WhatsApp connected");
+        (async () => {
+          const afterDrop = whatsappWasDisconnected;
+          whatsappWasDisconnected = false;
+          if (afterDrop) {
+            log.warn("Reconnect after drop — healing group crypto");
+          }
+          // Always heal group sender keys on connect so commands decrypt.
+          await healGroupCrypto(afterDrop ? "reconnect-open" : "boot-open");
+          if (groupJid) {
+            onGroupReady().catch((error) => {
+              log.warn({ error }, "onGroupReady failed");
+            });
+          } else if (cfg.groupName) {
+            const found = await resolveGroupByName();
+            if (found) {
+              await healGroupCrypto("group-discovered");
+              onGroupReady().catch((error) => {
+                log.warn({ error }, "onGroupReady failed");
+              });
+            } else {
+              startGroupPolling();
+            }
+          } else {
+            console.error("❌ הגדר WHATSAPP_GROUP_NAME או WHATSAPP_GROUP_CHAT_ID");
+          }
+        })().catch((error) => log.warn({ error }, "post-connect setup failed"));
+      }
+
+      if (connection === "close") {
+        whatsappConnected = false;
+        whatsappWasDisconnected = true;
+        connecting = false;
+        const status = lastDisconnect?.error?.output?.statusCode;
+        const awaitingPairing =
+          pairingOnly && sock?.authState?.creds && !sock.authState.creds.registered;
+        log.warn({ status, awaitingPairing }, "WhatsApp disconnected");
+
+        if (status === DisconnectReason.loggedOut) {
+          console.error(
+            "❌ WhatsApp התנתק (logged out) — מנקה auth ומחכה ל-QR חדש…",
+          );
+          try {
+            if (existsSync(AUTH_DIR)) {
+              const files = await readdir(AUTH_DIR);
+              for (const name of files) {
+                await unlink(path.join(AUTH_DIR, name)).catch(() => {});
+              }
+            }
+          } catch (error) {
+            log.warn({ error }, "Failed to wipe auth after logout");
+          }
+          reconnectFailures = 0;
+          pairingStarted = false;
+          scheduleReconnect(3_000, { repairSessions: false });
+          return;
+        }
+        if (awaitingPairing) return;
+
+        reconnectFailures += 1;
+        if (reconnectFailures >= 12) {
+          console.error("❌ יותר מדי ניסיונות חיבור שנכשלו — ממתין ומנסה שוב…");
+          reconnectFailures = 0;
+          scheduleReconnect(60_000, { repairSessions: true });
+          return;
+        }
+        scheduleReconnect(Math.min(30_000, 5_000 + reconnectFailures * 2_000), {
+          repairSessions: reconnectFailures >= 1,
+        });
+      }
+    });
+  } catch (error) {
+    connecting = false;
+    log.error({ error }, "connectWhatsApp failed — will retry");
+    scheduleReconnect(8_000, { repairSessions: true });
+  }
+}
+
+async function main() {
+  acquireInstanceLock();
+
+  process.on("uncaughtException", (error) => {
+    log.error({ error }, "uncaughtException — keeping bot alive + reconnect");
+    try {
+      whatsappConnected = false;
+      scheduleReconnect(5_000, { repairSessions: true });
+    } catch (reconnectError) {
+      log.error({ reconnectError }, "reconnect after uncaughtException failed");
+    }
+  });
+  process.on("unhandledRejection", (error) => {
+    log.error({ error }, "unhandledRejection — keeping bot alive");
+  });
+
+  await loadEnvFile();
+  cfg = envConfig();
+  groupJid = cfg.groupJidEnv;
+
+  if (!cfg.groupJidEnv && !cfg.groupName) {
+    console.error("❌ הגדר WHATSAPP_GROUP_CHAT_ID או WHATSAPP_GROUP_NAME");
+    process.exit(1);
+  }
+
+  if (!resolveProvider()) {
+    console.error(
+      "❌ חסר TRAVELPAYOUTS_TOKEN או SERPAPI_API_KEY (או FLIGHT_DEALS_DEMO=true)",
+    );
+    process.exit(1);
+  }
+
+  await loadSeen();
+  await loadState();
+  await loadPersonalUsers();
+  // Prefer pinned group JID from env/state — never guess from random groups.
+  if (!groupJid && cfg.groupJidEnv) groupJid = cfg.groupJidEnv;
+  startTriggerWatcher();
+  await connectWhatsApp();
+
+  cron.schedule(cfg.cronExpr, () => {
+    log.info("Cron triggered (%s)", cfg.cronExpr);
+    runScan({ reason: "cron" }).catch((error) => {
+      log.warn({ error }, "Cron scan failed");
+    });
+  });
+
+  setInterval(() => {
+    log.info(
+      { connected: whatsappConnected, groupJid: groupJid || null },
+      "Bot heartbeat",
+    );
+    writeHeartbeat({ reason: "interval" }).catch(() => {});
+    // If WA dropped and nothing is reconnecting, nudge it.
+    if (!whatsappConnected && !connecting && !reconnectTimer) {
+      log.warn("Heartbeat found disconnected socket — scheduling reconnect");
+      scheduleReconnect(2_000, { repairSessions: false });
+    }
+  }, 60_000);
+
+  await writeHeartbeat({ reason: "boot" });
+
+  const bud = budapestWatchConfig();
+  log.info(
+    "Watches ready — Thailand + Budapest %s→%s | cron %s | group %s",
+    bud.outbound,
+    bud.returnDate,
+    cfg.cronExpr,
+    groupJid || cfg.groupName || "?",
+  );
+}
+
+main().catch((error) => {
+  console.error(error);
+  // Under supervisor: exit non-zero so it restarts us.
+  // Without supervisor: still exit so systemd/cron wrappers can restart.
+  process.exit(1);
+});
