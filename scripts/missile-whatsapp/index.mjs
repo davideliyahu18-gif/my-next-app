@@ -26,6 +26,7 @@ const STATE_FILE = path.join(__dirname, "bot-state.json");
 const SEEN_FILE = path.join(__dirname, "seen-alerts.json");
 const TEST_TRIGGER = path.join(__dirname, "test-trigger.json");
 const SEND_NOW_FILE = path.join(__dirname, "send-now.json");
+const CATCHUP_BATCH_FILE = path.join(__dirname, "catchup-batch.json");
 const LATEST_SENT_FILE = path.join(__dirname, "latest-sent.json");
 
 const require = createRequire(import.meta.url);
@@ -276,16 +277,41 @@ async function sendLocation(location) {
 
 async function sendAlert(alert, options = {}) {
   if (!sock || !groupJid) return false;
-  const text = boldEveryLine(alert.text);
-  await sock.sendMessage(groupJid, { text });
-  if (options.textOnly) return true;
-  if (alert.location) {
-    await sendLocation(alert.location);
+  try {
+    const text = boldEveryLine(alert.text);
+    await sock.sendMessage(groupJid, { text });
+    if (options.textOnly) {
+      await writeFile(
+        LATEST_SENT_FILE,
+        JSON.stringify(
+          { id: alert.id || null, at: new Date().toISOString(), ok: true },
+          null,
+          2,
+        ),
+        "utf8",
+      );
+      return true;
+    }
+    if (alert.location) {
+      await sendLocation(alert.location);
+    }
+    if (cfg.sendLaunchPin && alert.launchLocation) {
+      await sendLocation(alert.launchLocation);
+    }
+    await writeFile(
+      LATEST_SENT_FILE,
+      JSON.stringify(
+        { id: alert.id || null, at: new Date().toISOString(), ok: true },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    return true;
+  } catch (error) {
+    console.error("❌ שליחה נכשלה — לא מסמנים כנשלח:", alert?.id, error);
+    return false;
   }
-  if (cfg.sendLaunchPin && alert.launchLocation) {
-    await sendLocation(alert.launchLocation);
-  }
-  return true;
 }
 
 async function sendDemoIfNeeded() {
@@ -316,9 +342,15 @@ async function pollOnce() {
     const toSend = alerts.filter((a) => a?.id && !seen.has(a.id));
     const sentIds = [];
     for (const alert of toSend) {
-      await sendAlert(alert);
+      const ok = await sendAlert(alert);
+      if (!ok) {
+        console.error("⚠️ דילוג על markSeen בגלל כשל שליחה:", alert.id);
+        continue;
+      }
       sentIds.push(alert.id);
       log.info({ id: alert.id }, "Sent live missile alert with location");
+      // Small gap to reduce WhatsApp rate-limits.
+      await new Promise((r) => setTimeout(r, 1500));
     }
     if (sentIds.length) {
       await markSeen(sentIds);
@@ -358,6 +390,33 @@ async function handleTestTrigger() {
   }
 }
 
+async function handleCatchupBatch() {
+  if (!existsSync(CATCHUP_BATCH_FILE)) return;
+  try {
+    const raw = await readFile(CATCHUP_BATCH_FILE, "utf8");
+    if (!raw.trim()) return;
+    const payload = JSON.parse(raw);
+    await unlink(CATCHUP_BATCH_FILE).catch(() => {});
+    if (!(await resolveGroup())) return;
+    const alerts = Array.isArray(payload.alerts) ? payload.alerts : [];
+    const seen = await loadSeen();
+    for (const alert of alerts) {
+      if (!alert?.id || !alert?.text) continue;
+      if (seen.has(alert.id)) continue;
+      const ok = await sendAlert(alert, { textOnly: !alert.location });
+      if (ok) {
+        await markSeen([alert.id]);
+        console.log(`✅ catch-up נשלח: ${alert.id}`);
+        await new Promise((r) => setTimeout(r, 2000));
+      } else {
+        console.error(`❌ catch-up נכשל: ${alert.id}`);
+      }
+    }
+  } catch (error) {
+    log.error({ err: error }, "Catch-up batch failed");
+  }
+}
+
 async function handleSendNow() {
   if (!existsSync(SEND_NOW_FILE)) return;
   try {
@@ -381,14 +440,16 @@ async function handleSendNow() {
       return;
     }
 
-    await sendAlert(alert, { textOnly: Boolean(payload.textOnly) });
+    const ok = await sendAlert(alert, { textOnly: Boolean(payload.textOnly) });
+    if (!ok) {
+      console.error("❌ send-now נכשל:", alert.id);
+      return;
+    }
     if (alert.id) await markSeen([alert.id]);
-    await writeFile(
-      LATEST_SENT_FILE,
-      JSON.stringify({ id: alert.id, at: new Date().toISOString() }, null, 2),
-      "utf8",
-    );
     console.log(`✅ נשלחה התראה חיה: ${alert.id || "unknown"}`);
+    if (payload.thenBatch) {
+      await handleCatchupBatch();
+    }
   } catch (error) {
     log.error({ err: error }, "Send-now failed");
   }
@@ -493,6 +554,7 @@ async function main() {
   setInterval(() => {
     void handleTestTrigger();
     void handleSendNow();
+    void handleCatchupBatch();
   }, 2000);
 
   console.log(

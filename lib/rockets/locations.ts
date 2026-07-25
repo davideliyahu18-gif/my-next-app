@@ -176,8 +176,23 @@ export const PLACES: NamedPlace[] = [
       "סעודיה",
       "السعودية",
       "saudi",
+      "ksa",
     ],
     position: { lat: 26.4207, lng: 50.0888 },
+    kind: "target",
+  },
+  {
+    id: "saudi-jazan",
+    labelHe: "ג׳אזאן / ארמקו",
+    aliases: ["jazan", "ג׳אזאן", "جازان", "aramco", "ארמקו", "yanbu", "ינבו"],
+    position: { lat: 16.8892, lng: 42.5706 },
+    kind: "target",
+  },
+  {
+    id: "saudi-khamis",
+    labelHe: "ח׳מיס מושייט",
+    aliases: ["khamis", "khamis mushait", "חמיס מושייט", "خميس مشيط"],
+    position: { lat: 18.3, lng: 42.73 },
     kind: "target",
   },
   {
@@ -269,6 +284,8 @@ const GULF_PLACE_IDS = new Set([
   "uae-abu-dhabi",
   "qatar",
   "saudi-dammam",
+  "saudi-jazan",
+  "saudi-khamis",
 ]);
 
 export function mentionsKuwait(text: string): boolean {

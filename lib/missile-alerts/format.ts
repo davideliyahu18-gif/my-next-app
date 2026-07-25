@@ -139,17 +139,26 @@ function isRegionalRelevant(track: RocketTrack, text: string): boolean {
 function isGulfStrikeMessage(text: string): boolean {
   if (!regionalMode()) return false;
 
-  // Ignore outbound Saudi/UAE strikes on Yemen etc.
+  // Ignore outbound coalition strikes INTO Yemen (not alerts for the Gulf).
   if (
-    /סעודיה תקפה|saudi\s+arabia\s+bombed|bombed\s+the\s+port\s+of\s+hodeidah|חות.?ים|houthis|תימן|yemen/i.test(
+    /סעודיה תקפה|saudi\s+arabia\s+bombed|bombed\s+the\s+port\s+of\s+hodeidah/i.test(
       text,
-    ) &&
-    !/כווית|bahrain|בחריין|kuwait|קטאר|qatar|דובאי|dubai/i.test(text)
+    )
   ) {
     return false;
   }
 
+  // Saudi / ARAMCO / Gulf airbases as TARGET (including Yemen→Saudi waves).
+  const saudiAsTarget =
+    /(?:target|targets|attack|attacks|missile|ballistic|drone|impact|פגיעה|תקיפה|שיגור).{0,60}(?:saudi|סעודיה|aramco|jazan|yanbu|khamis|dammam|dhahran|riyadh)/i.test(
+      text,
+    ) ||
+    /(?:saudi|סעודיה|aramco|jazan|yanbu|khamis|dammam|dhahran).{0,60}(?:target|attack|missile|ballistic|drone|impact|פגיעה|fire)/i.test(
+      text,
+    );
+
   const gulfAsTarget =
+    saudiAsTarget ||
     /(?:על|ל|לעבר|toward|towards|on|in)\s*(?:כווית|בחריין|קטאר|דובאי|אבו דאבי|אמירויות|bahrain|kuwait|qatar|dubai|abu dhabi|uae|dammam)/i.test(
       text,
     ) ||
@@ -164,7 +173,7 @@ function isGulfStrikeMessage(text: string): boolean {
 
   if (!gulfAsTarget) return false;
 
-  return /שיגור|טיל|בליסטי|כטב.?מ|ירי|פגיעה|תקיפה|ballistic|missile|drone|attack|impact|strike|rocket/i.test(
+  return /שיגור|טיל|בליסטי|כטב.?מ|ירי|פגיעה|תקיפה|ballistic|missile|drone|attack|impact|strike|rocket|fire/i.test(
     text,
   );
 }
