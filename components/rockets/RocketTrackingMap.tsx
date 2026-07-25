@@ -143,10 +143,26 @@ export default function RocketTrackingMap() {
   const [forceDemo, setForceDemo] = useState(false);
   const [running, setRunning] = useState(true);
   const [newIds, setNewIds] = useState<Set<string>>(new Set());
+  const [telegramConfigured, setTelegramConfigured] = useState(false);
   const lastTs = useRef<number | null>(null);
   const selectedTrackIdRef = useRef<string | null>(null);
   const seenIdsRef = useRef<Set<string>>(new Set());
   selectedTrackIdRef.current = selectedTrackId;
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/rockets/telegram-status")
+      .then((res) => res.json())
+      .then((data: { configured?: boolean }) => {
+        if (!cancelled) setTelegramConfigured(Boolean(data.configured));
+      })
+      .catch(() => {
+        if (!cancelled) setTelegramConfigured(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (forceDemo) {
@@ -439,17 +455,41 @@ export default function RocketTrackingMap() {
             </p>
           ) : null}
 
-          <div className="mt-3 rounded-2xl border border-[#25D366]/35 bg-[#25D366]/10 px-3 py-3">
+          <div className="mt-3 rounded-2xl border border-sky-300/50 bg-sky-50 px-3 py-3">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-xs font-bold text-slate-800">
-                  WhatsApp · יעד ההתראות
+                  Telegram · יעד ההתראות
+                </p>
+                <p className="mt-0.5 text-[11px] text-slate-600">
+                  {telegramConfigured
+                    ? "מחובר — התראות שיגור נשלחות אוטומטית"
+                    : "עדיין לא מחובר — צריך בוט + צ׳אט"}
+                </p>
+                <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+                  1) פתח BotFather → /newbot · 2) הוסף את הבוט לקבוצה/ערוץ ·
+                  3) שלח לי TOKEN + chat_id
+                </p>
+              </div>
+              <a
+                href="https://t.me/BotFather"
+                target="_blank"
+                rel="noreferrer"
+                className="shrink-0 rounded-full bg-sky-600 px-3 py-1.5 text-[11px] font-black text-white"
+              >
+                BotFather
+              </a>
+            </div>
+          </div>
+
+          <div className="mt-2 rounded-2xl border border-[#25D366]/35 bg-[#25D366]/10 px-3 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold text-slate-800">
+                  WhatsApp · גיבוי
                 </p>
                 <p className="mt-0.5 text-[11px] text-slate-600">
                   {ROCKETS_WHATSAPP_GROUP_NAME}
-                </p>
-                <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
-                  הודעות שיגור יגיעו לקבוצה הזו (אחרי חיבור הבוט לקבוצה).
                 </p>
               </div>
               <a

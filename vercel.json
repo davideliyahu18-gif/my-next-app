@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/rockets/notify",
+      "schedule": "*/2 * * * *"
+    }
+  ]
+}
