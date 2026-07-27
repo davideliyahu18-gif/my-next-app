@@ -434,9 +434,13 @@ export async function runFootballBotCommand(
           teamNameHe: team.nameHe,
         });
         const reply = formatRosterMessage(roster);
+        const newcomers = roster.players
+          .filter((player) => player.isNewSigning)
+          .map((player) => player.nameHe || player.name);
         const caption = [
           `🧍 *סגל — ${team.nameHe}*`,
           roster.seasonLabel ? `עונה: ${roster.seasonLabel}` : null,
+          newcomers.length ? `🆕 רכש: ${newcomers.join(" · ")}` : null,
           "⭐ במעקב · כתבו *סגל ריאל* לקבוצה אחרת",
         ]
           .filter(Boolean)

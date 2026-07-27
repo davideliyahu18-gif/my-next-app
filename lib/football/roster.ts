@@ -10,10 +10,14 @@ import {
 export type FootballRosterPlayer = {
   id: string;
   name: string;
+  /** Hebrew nickname / short name when known. */
+  nameHe: string | null;
   jersey: string | null;
   position: string;
   positionHe: string;
   age: number | null;
+  /** Summer / recent signing highlight. */
+  isNewSigning: boolean;
 };
 
 export type FootballTeamRoster = {
@@ -34,10 +38,67 @@ const POSITION_HE: Record<string, string> = {
 
 const POSITION_ORDER = ["שוערים", "הגנה", "קישור", "התקפה", "אחר"];
 
+/** Hebrew display names for notable players (esp. new Barça signings). */
+const PLAYER_NAME_HE: Record<string, string> = {
+  "karim adeyemi": "אדיימי",
+  "anthony gordon": "גורדון",
+  "lamine yamal": "למין ימאל",
+  raphinha: "רפיניה",
+  "ferran torres": "פראן טורס",
+  "robert lewandowski": "לבנדובסקי",
+  pedri: "פדרי",
+  gavi: "גאבי",
+  "frenkie de jong": "דה יונג",
+  "dani olmo": "דני אולמו",
+  "ronald araújo": "אראוחו",
+  "ronald araujo": "אראוחו",
+  "pau cubarsí": "קובארסי",
+  "pau cubarsi": "קובארסי",
+  "alejandro balde": "באלדה",
+  "jules koundé": "קונדה",
+  "jules kounde": "קונדה",
+  "marc-andré ter stegen": "טר שטגן",
+  "marc-andre ter stegen": "טר שטגן",
+  "wojciech szczesny": "שצ'סני",
+  "joan garcía": "חואן גרסיה",
+  "joan garcia": "חואן גרסיה",
+  "roony bardghji": "בארדג'י",
+};
+
+/** Players signed this window — shown first + 🆕 badge. */
+const NEW_SIGNING_KEYS = new Set([
+  "karim adeyemi",
+  "anthony gordon",
+]);
+
 function asRecord(value: unknown): EspnJson | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as EspnJson)
     : null;
+}
+
+function normalizePlayerKey(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/['׳״`]/g, "");
+}
+
+function playerNameHe(name: string): string | null {
+  const key = normalizePlayerKey(name);
+  return PLAYER_NAME_HE[key] ?? PLAYER_NAME_HE[name.trim().toLowerCase()] ?? null;
+}
+
+function isNewSigning(name: string): boolean {
+  const key = normalizePlayerKey(name);
+  return NEW_SIGNING_KEYS.has(key) || NEW_SIGNING_KEYS.has(name.trim().toLowerCase());
+}
+
+function displayPlayerName(player: FootballRosterPlayer): string {
+  if (player.nameHe) return `${player.nameHe} (${player.name})`;
+  return player.name;
 }
 
 function positionHe(raw: string): string {
@@ -90,10 +151,12 @@ export function parseEspnRoster(
     players.push({
       id: String(athlete.id || name),
       name,
+      nameHe: playerNameHe(name),
       jersey,
       position: posEn || "Unknown",
       positionHe: positionHe(posEn),
       age: Number.isFinite(ageNum) ? Math.trunc(ageNum) : null,
+      isNewSigning: isNewSigning(name),
     });
   }
 
@@ -101,6 +164,8 @@ export function parseEspnRoster(
     const ai = POSITION_ORDER.indexOf(a.positionHe);
     const bi = POSITION_ORDER.indexOf(b.positionHe);
     if (ai !== bi) return ai - bi;
+    // New signings first within the group (Adeyemi / Gordon visible).
+    if (a.isNewSigning !== b.isNewSigning) return a.isNewSigning ? -1 : 1;
     const aj = a.jersey ? Number(a.jersey) : 999;
     const bj = b.jersey ? Number(b.jersey) : 999;
     if (Number.isFinite(aj) && Number.isFinite(bj) && aj !== bj) return aj - bj;
@@ -146,15 +211,26 @@ export function formatRosterMessage(roster: FootballTeamRoster): string {
     return lines.join("\n");
   }
 
+  const newcomers = roster.players.filter((player) => player.isNewSigning);
+  if (newcomers.length) {
+    lines.push(
+      `🆕 רכש חדש: ${newcomers
+        .map((player) => player.nameHe || player.name)
+        .join(" · ")}`,
+    );
+    lines.push("");
+  }
+
   let currentPos = "";
   for (const player of roster.players) {
     if (player.positionHe !== currentPos) {
       currentPos = player.positionHe;
       lines.push(`*${currentPos}*`);
     }
+    const badge = player.isNewSigning ? "🆕 " : "";
     const num = player.jersey ? `#${player.jersey}` : "#—";
     const age = player.age != null ? ` · ${player.age}` : "";
-    lines.push(`${num} ${player.name}${age}`);
+    lines.push(`${badge}${num} ${displayPlayerName(player)}${age}`);
   }
 
   lines.push("");

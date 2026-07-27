@@ -37,7 +37,13 @@ export async function renderRosterPng(
 
   type Row =
     | { kind: "section"; title: string }
-    | { kind: "player"; jersey: string; name: string; age: string };
+    | {
+        kind: "player";
+        jersey: string;
+        name: string;
+        age: string;
+        isNew: boolean;
+      };
 
   const rows: Row[] = [];
   let current = "";
@@ -46,11 +52,19 @@ export async function renderRosterPng(
       current = player.positionHe;
       rows.push({ kind: "section", title: current });
     }
+    const label = player.nameHe
+      ? `${player.nameHe} · ${player.name}`
+      : player.name;
     rows.push({
       kind: "player",
-      jersey: player.jersey ? `#${player.jersey}` : "#—",
-      name: truncate(player.name, 32),
+      jersey: player.isNewSigning
+        ? `🆕${player.jersey ? player.jersey : "—"}`
+        : player.jersey
+          ? `#${player.jersey}`
+          : "#—",
+      name: truncate(label, 36),
       age: player.age != null ? String(player.age) : "—",
+      isNew: player.isNewSigning,
     });
   }
 
@@ -71,11 +85,16 @@ export async function renderRosterPng(
         y += sectionH;
         return block;
       }
-      const bg = index % 2 === 0 ? "rgba(255,255,255,0.03)" : "transparent";
+      const bg = row.isNew
+        ? "rgba(165,0,68,0.18)"
+        : index % 2 === 0
+          ? "rgba(255,255,255,0.03)"
+          : "transparent";
+      const nameFill = row.isNew ? "#fde68a" : "#f8fafc";
       const block = `
         <rect x="0" y="${y}" width="${width}" height="${rowH}" fill="${bg}"/>
         <text x="${padX}" y="${y + 25}" text-anchor="start" class="num" fill="#4ade80" font-size="18" font-weight="700">${escapeXml(row.jersey)}</text>
-        <text x="${padX + 70}" y="${y + 25}" text-anchor="start" class="team" fill="#f8fafc" font-size="18">${escapeXml(row.name)}</text>
+        <text x="${padX + 78}" y="${y + 25}" text-anchor="start" class="team" fill="${nameFill}" font-size="18">${escapeXml(row.name)}</text>
         <text x="${width - padX}" y="${y + 25}" text-anchor="end" class="num" fill="#94a3b8" font-size="16">${escapeXml(row.age)}</text>
       `;
       y += rowH;
