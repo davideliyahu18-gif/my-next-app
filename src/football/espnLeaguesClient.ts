@@ -10,6 +10,11 @@ export const ESPN_SOCCER_BASE =
   process.env.FOOTBALL_ESPN_BASE_URL?.replace(/\/$/, "") ||
   "https://site.api.espn.com/apis/site/v2/sports/soccer";
 
+/** Standings live under /apis/v2 (site/v2 returns empty {}). */
+export const ESPN_SOCCER_STANDINGS_BASE =
+  process.env.FOOTBALL_ESPN_STANDINGS_BASE_URL?.replace(/\/$/, "") ||
+  "https://site.api.espn.com/apis/v2/sports/soccer";
+
 export type EspnJson = Record<string, unknown>;
 
 export class EspnClientError extends Error {
@@ -40,9 +45,10 @@ function toEspnDate(value: string | Date): string {
 async function espnGet(
   path: string,
   params?: Record<string, string | number | undefined>,
-  options?: { fresh?: boolean },
+  options?: { fresh?: boolean; baseUrl?: string },
 ): Promise<EspnJson> {
-  const url = new URL(`${ESPN_SOCCER_BASE}/${path.replace(/^\//, "")}`);
+  const base = (options?.baseUrl || ESPN_SOCCER_BASE).replace(/\/$/, "");
+  const url = new URL(`${base}/${path.replace(/^\//, "")}`);
   if (params) {
     for (const [key, value] of Object.entries(params)) {
       if (value === undefined || value === "") continue;
@@ -108,6 +114,17 @@ export async function getEspnSummary(
   );
 }
 
+/** League table / standings (current season). */
+export async function getEspnStandings(
+  leagueId: string,
+  options?: { fresh?: boolean },
+): Promise<EspnJson> {
+  return espnGet(`${leagueId}/standings`, undefined, {
+    fresh: options?.fresh ?? true,
+    baseUrl: ESPN_SOCCER_STANDINGS_BASE,
+  });
+}
+
 /** Events list from a scoreboard payload. */
 export function espnScoreboardEvents(scoreboard: EspnJson): EspnJson[] {
   return (scoreboard.events as EspnJson[] | undefined) ?? [];
@@ -115,8 +132,10 @@ export function espnScoreboardEvents(scoreboard: EspnJson): EspnJson[] {
 
 export const espnLeaguesClient = {
   baseUrl: ESPN_SOCCER_BASE,
+  standingsBaseUrl: ESPN_SOCCER_STANDINGS_BASE,
   getEspnScoreboard,
   getEspnSummary,
+  getEspnStandings,
   espnScoreboardEvents,
 };
 

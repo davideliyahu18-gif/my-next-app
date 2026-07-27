@@ -170,6 +170,11 @@ function looksLikeOperatorCommand(raw) {
     "הרכב",
     "הרכבים",
     "lineup",
+    "טבלה",
+    "טבלת",
+    "דירוג",
+    "standings",
+    "table",
     "עקוב",
     "מעקב",
     "הסר",
@@ -205,7 +210,7 @@ let startingSocket = false;
 let cronsStarted = false;
 let morningTask = null;
 let pollTask = null;
-/** @type {Map<string, { intent: "schedule" | "lineup"; expiresAt: number }>} */
+/** @type {Map<string, { intent: "schedule" | "lineup" | "standings"; expiresAt: number }>} */
 const pendingByChat = new Map();
 /** Prevent one hung chat command from stacking forever. */
 const commandInFlight = new Set();
@@ -291,12 +296,13 @@ function extractInteractiveId(msg) {
 /** Map fb:schedule:eng.1 / fb:lineup:all → Hebrew command text. */
 function commandFromInteractiveId(rawId) {
   const id = String(rawId || "").trim();
-  const match = /^fb:(schedule|lineup):(.+)$/i.exec(id);
+  const match = /^fb:(schedule|lineup|standings):(.+)$/i.exec(id);
   if (!match) return null;
   const intent = match[1].toLowerCase();
   const pick = match[2].trim();
   if (!pick) return null;
-  const prefix = intent === "lineup" ? "הרכב" : "לוח";
+  const prefix =
+    intent === "lineup" ? "הרכב" : intent === "standings" ? "טבלה" : "לוח";
   const arg = pick.toLowerCase() === "all" ? "הכל" : pick;
   return `${prefix} ${arg}`;
 }
@@ -332,6 +338,11 @@ function looksLikeRemoteCommand(raw) {
     "הרכב",
     "הרכבים",
     "lineup",
+    "טבלה",
+    "טבלת",
+    "דירוג",
+    "standings",
+    "table",
     "עקוב",
     "מעקב",
     "הסר",
@@ -651,6 +662,8 @@ async function handleIncomingMessage(msg) {
     // If the user sends a full new command, don't wrap it with pending intent.
     const isFullScheduleCmd = /^(לוח|לוז|לו״ז|schedule)(?:\s|$)/i.test(body);
     const isFullLineupCmd = /^(הרכב|הרכבים|lineup|lineups)(?:\s|$)/i.test(body);
+    const isFullStandingsCmd =
+      /^(טבלה|טבלת|דירוג|standings|table)(?:\s|$)/i.test(body);
     const isOtherTopLevelCmd =
       /^(עזרה|help|בוט|סטטוס|תוצאה|תוצאות|מחר|ליגות|מעקב|עקוב|הסר|בוקר|morning)(?:\s|$)/i.test(
         body,
@@ -661,6 +674,7 @@ async function handleIncomingMessage(msg) {
       pending?.intent === "schedule" &&
       !isFullScheduleCmd &&
       !isFullLineupCmd &&
+      !isFullStandingsCmd &&
       !isOtherTopLevelCmd
     ) {
       commandText = `לוח ${body}`;
@@ -669,9 +683,19 @@ async function handleIncomingMessage(msg) {
       pending?.intent === "lineup" &&
       !isFullLineupCmd &&
       !isFullScheduleCmd &&
+      !isFullStandingsCmd &&
       !isOtherTopLevelCmd
     ) {
       commandText = `הרכב ${body}`;
+    } else if (
+      !fromButton &&
+      pending?.intent === "standings" &&
+      !isFullStandingsCmd &&
+      !isFullScheduleCmd &&
+      !isFullLineupCmd &&
+      !isOtherTopLevelCmd
+    ) {
+      commandText = `טבלה ${body}`;
     }
 
     log.info(
@@ -687,7 +711,7 @@ async function handleIncomingMessage(msg) {
 
     // Ack only for slower commands — menus answer instantly with text.
     const isLikelyMenu =
-      /^(לוח|לוז|לו״ז|schedule|הרכב|הרכבים|lineup|lineups)$/i.test(
+      /^(לוח|לוז|לו״ז|schedule|הרכב|הרכבים|lineup|lineups|טבלה|טבלת|דירוג|standings|table)$/i.test(
         commandText.trim(),
       );
     if (!isLikelyMenu) {
@@ -711,7 +735,13 @@ async function handleIncomingMessage(msg) {
         setPending(chatId, "schedule");
       } else if (command === "lineup_menu") {
         setPending(chatId, "lineup");
-      } else if (command === "schedule" || command === "lineup") {
+      } else if (command === "standings_menu") {
+        setPending(chatId, "standings");
+      } else if (
+        command === "schedule" ||
+        command === "lineup" ||
+        command === "standings"
+      ) {
         clearPending(chatId);
       } else if (command && command !== "unknown") {
         clearPending(chatId);
@@ -723,7 +753,9 @@ async function handleIncomingMessage(msg) {
 
       if (
         interactive?.kind === "league_select" &&
-        (command === "schedule_menu" || command === "lineup_menu")
+        (command === "schedule_menu" ||
+          command === "lineup_menu" ||
+          command === "standings_menu")
       ) {
         // Optional buttons — never block on them.
         sendLeagueInteractive(chatId, interactive).catch(() => {});
@@ -806,8 +838,8 @@ async function welcomeGroup() {
       "התראות ליגות + מעקב קבוצות.",
       "כל יום ב־08:00 — סטטוס בוקר עם משחקים קרובים ⚽️🔥",
       "",
-      "שלט רחוק: *לוח* · *הרכב* · *מעקב* · *בוקר* · *עזרה*",
-      "ב־*לוח* / *הרכב* נפתחת רשימת כפתורים לבחירת ליגה.",
+      "שלט רחוק: *לוח* · *טבלה* · *הרכב* · *מעקב* · *בוקר* · *עזרה*",
+      "ב־*לוח* / *טבלה* / *הרכב* נפתחת רשימת בחירת ליגה.",
       "",
       "שני המספרים בקבוצה יכולים לכתוב פקודות ✓",
       "כולל *0523123944*",

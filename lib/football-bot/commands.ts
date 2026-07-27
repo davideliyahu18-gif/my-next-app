@@ -22,12 +22,15 @@ import {
 import {
   buildLineupLeagueSelect,
   buildScheduleLeagueSelect,
+  buildStandingsLeagueSelect,
 } from "./interactive";
 import {
   extractLineupLeagueQuery,
   extractScheduleLeagueQuery,
+  extractStandingsLeagueQuery,
   formatLineupLeagueMenu,
   formatScheduleLeagueMenu,
+  formatStandingsLeagueMenu,
   resolveLeaguePick,
 } from "./league-menu";
 import {
@@ -38,6 +41,10 @@ import {
   loadWatchlist,
   removeWatchedTeam,
 } from "./watchlist";
+import {
+  fetchLeagueStandings,
+  formatStandingsMessage,
+} from "@/lib/football/standings";
 import type { FootballBotCommand, FootballBotCommandResult } from "./types";
 
 function normalize(text: string): string {
@@ -114,6 +121,11 @@ export function parseFootballBotCommand(raw: string): FootballBotCommand {
   const lineupQuery = extractLineupLeagueQuery(raw);
   if (lineupQuery !== null) {
     return lineupQuery === "" ? "lineup_menu" : "lineup";
+  }
+
+  const standingsQuery = extractStandingsLeagueQuery(raw);
+  if (standingsQuery !== null) {
+    return standingsQuery === "" ? "standings_menu" : "standings";
   }
 
   const scheduleQuery = extractScheduleLeagueQuery(raw);
@@ -304,6 +316,57 @@ export async function runFootballBotCommand(
         command,
         reply: await replyLineupForMatches(filtered, pick.competition.nameHe),
       };
+    }
+    case "standings_menu":
+      return {
+        command,
+        reply: formatStandingsLeagueMenu(getEnabledFootballCompetitions()),
+        interactive: buildStandingsLeagueSelect(),
+      };
+    case "standings": {
+      const standingsQuery = extractStandingsLeagueQuery(raw);
+      const leagueRaw =
+        standingsQuery === null || standingsQuery === ""
+          ? raw
+          : standingsQuery;
+      const pick = resolveLeaguePick(leagueRaw);
+
+      if (pick.kind === "none" || pick.kind === "all") {
+        return {
+          command: "standings_menu",
+          reply: [
+            pick.kind === "all"
+              ? "בחרו ליגה אחת לטבלה (אין טבלה ל־הכל)."
+              : "לא זיהיתי את הליגה 🙈",
+            "",
+            formatStandingsLeagueMenu(getEnabledFootballCompetitions()),
+          ].join("\n"),
+          interactive: buildStandingsLeagueSelect(),
+        };
+      }
+
+      try {
+        const table = await fetchLeagueStandings(
+          pick.competition.id,
+          pick.competition.nameHe,
+        );
+        return {
+          command,
+          reply: formatStandingsMessage(table),
+        };
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "שגיאה בטבלה";
+        return {
+          command,
+          reply: [
+            `⚠️ לא הצלחתי להביא טבלה ל־*${pick.competition.nameHe}*`,
+            message.slice(0, 120),
+            "",
+            "נסו שוב: *טבלה 1* · *טבלה אנגלית*",
+          ].join("\n"),
+        };
+      }
     }
     case "watch": {
       const query = extractFollowQuery(raw) ?? "";

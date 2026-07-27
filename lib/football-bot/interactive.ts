@@ -12,7 +12,7 @@ export type FootballInteractiveOption = {
 
 export type FootballLeagueSelectInteractive = {
   kind: "league_select";
-  intent: "schedule" | "lineup";
+  intent: "schedule" | "lineup" | "standings";
   title: string;
   body: string;
   footer: string;
@@ -87,15 +87,39 @@ export function buildLineupLeagueSelect(
   };
 }
 
+export function buildStandingsLeagueSelect(
+  competitions: FootballCompetition[] = getEnabledFootballCompetitions(),
+): FootballLeagueSelectInteractive {
+  const options: FootballInteractiveOption[] = competitions.map(
+    (competition) => ({
+      id: `fb:standings:${competition.id}`,
+      title: shortLeagueTitle(competition),
+      description: leagueDescription(competition),
+    }),
+  );
+
+  return {
+    kind: "league_select",
+    intent: "standings",
+    title: "📊 טבלה",
+    body: "בחרו ליגה לטבלה העדכנית 👇",
+    footer: "דוד – עדכוני כדורגל ⚽",
+    buttonText: "בחרו ליגה",
+    sectionTitle: "ליגות",
+    options,
+  };
+}
+
 /** Map a WhatsApp button/list id back to a Hebrew bot command. */
 export function commandFromInteractiveId(rawId: string): string | null {
   const id = rawId.trim();
-  const match = /^fb:(schedule|lineup):(.+)$/i.exec(id);
+  const match = /^fb:(schedule|lineup|standings):(.+)$/i.exec(id);
   if (!match) return null;
   const intent = match[1].toLowerCase();
   const pick = match[2].trim();
   if (!pick) return null;
-  const prefix = intent === "lineup" ? "הרכב" : "לוח";
+  const prefix =
+    intent === "lineup" ? "הרכב" : intent === "standings" ? "טבלה" : "לוח";
   const arg = pick.toLowerCase() === "all" ? "הכל" : pick;
   return `${prefix} ${arg}`;
 }

@@ -152,6 +152,19 @@ export function extractLineupLeagueQuery(raw: string): string | null {
   return null;
 }
 
+/** Extract "טבלה …" / "דירוג …" trailing league query, if any. */
+export function extractStandingsLeagueQuery(raw: string): string | null {
+  const text = normalizeLeagueQuery(raw);
+  const prefixes = ["טבלה", "טבלת", "דירוג", "standings", "table"];
+  for (const prefix of prefixes) {
+    if (text === prefix) return "";
+    if (text.startsWith(`${prefix} `)) {
+      return text.slice(prefix.length).trim();
+    }
+  }
+  return null;
+}
+
 export function formatScheduleLeagueMenu(
   competitions: FootballCompetition[] = getEnabledFootballCompetitions(),
 ): string {
@@ -190,5 +203,24 @@ export function formatLineupLeagueMenu(
   lines.push("👆 בוואטסאפ נפתחת גם רשימת כפתורים לבחירה");
   lines.push("או: *הרכב 1* · *הרכב אנגלית* · *הרכב ספרדית*");
   lines.push("הרכבים נשלחים גם אוטומטית בתזכורת לפני המשחק.");
+  return lines.join("\n");
+}
+
+export function formatStandingsLeagueMenu(
+  competitions: FootballCompetition[] = getEnabledFootballCompetitions(),
+): string {
+  const lines = [
+    "📊 *טבלה — איזו ליגה?*",
+    "",
+    "בחרו מספר או שם:",
+  ];
+
+  competitions.forEach((competition, index) => {
+    lines.push(`${index + 1}️⃣ *${competition.nameHe}*`);
+  });
+
+  lines.push("");
+  lines.push("👆 בוואטסאפ נפתחת גם רשימת כפתורים לבחירה");
+  lines.push("או: *טבלה 1* · *טבלה אנגלית* · *טבלה ספרדית*");
   return lines.join("\n");
 }

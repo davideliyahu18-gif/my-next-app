@@ -7,6 +7,8 @@ export type FootballBotCommand =
   | "schedule_menu"
   | "lineup"
   | "lineup_menu"
+  | "standings"
+  | "standings_menu"
   | "watch"
   | "unwatch"
   | "watchlist"
@@ -16,7 +18,7 @@ export type FootballBotCommand =
 
 export type FootballBotInteractive = {
   kind: "league_select";
-  intent: "schedule" | "lineup";
+  intent: "schedule" | "lineup" | "standings";
   title: string;
   body: string;
   footer: string;
