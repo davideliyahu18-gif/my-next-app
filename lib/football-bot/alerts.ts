@@ -20,6 +20,10 @@ import {
   markAlertsSeen,
   saveMatchSnapshots,
 } from "./store";
+import {
+  loadWatchlist,
+  matchInvolvesWatchedTeam,
+} from "./watchlist";
 import type {
   FootballBotAlert,
   FootballBotMatchSnapshot,
@@ -29,6 +33,9 @@ const REMINDER_30_MIN = Number(process.env.FOOTBALL_BOT_REMINDER_MINUTES ?? "30"
 const REMINDER_60_MIN = Number(process.env.FOOTBALL_BOT_REMINDER_60_MINUTES ?? "60");
 const REMINDER_TOLERANCE_MIN = 4;
 const LINEUP_WINDOW_MIN = Number(process.env.FOOTBALL_BOT_LINEUP_MINUTES ?? "90");
+/** When watchlist is set, filter auto-alerts to watched teams only. */
+const WATCHLIST_FILTER_ALERTS =
+  process.env.FOOTBALL_BOT_WATCHLIST_FILTER !== "false";
 
 function mapStatus(
   status: FootballMatch["status"],
@@ -101,6 +108,7 @@ export async function collectFootballBotAlerts(): Promise<{
   };
   const alerts: FootballBotAlert[] = [];
   const now = Date.now();
+  const watchlist = await loadWatchlist();
 
   const matches = await fetchFootballAlertCandidates(true);
   let liveMatches = 0;
@@ -116,10 +124,17 @@ export async function collectFootballBotAlerts(): Promise<{
     }
     if (snapshot.status === "upcoming") upcomingMatches += 1;
 
+    const watchedMatch =
+      !WATCHLIST_FILTER_ALERTS ||
+      matchInvolvesWatchedTeam(match, watchlist);
+
     // First sighting: seed timeline goals so we don't spam history.
     if (!prev) {
       snapshot.goalEventIds = match.goals.map((goal) => goal.eventId);
-      if (snapshot.status === "live" || snapshot.status === "pause") {
+      if (
+        watchedMatch &&
+        (snapshot.status === "live" || snapshot.status === "pause")
+      ) {
         const minuteNum = Number(String(snapshot.minute).replace(/\D/g, ""));
         if (!Number.isFinite(minuteNum) || minuteNum <= 3) {
           const start = await buildAlert({
@@ -131,6 +146,17 @@ export async function collectFootballBotAlerts(): Promise<{
           if (start) alerts.push(start);
         }
       }
+      nextSnapshots[match.id] = snapshot;
+      continue;
+    }
+
+    if (!watchedMatch) {
+      snapshot.goalEventIds = [
+        ...new Set([
+          ...(snapshot.goalEventIds ?? []),
+          ...match.goals.map((goal) => goal.eventId),
+        ]),
+      ];
       nextSnapshots[match.id] = snapshot;
       continue;
     }

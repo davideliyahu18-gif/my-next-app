@@ -7,6 +7,9 @@ export type FootballBotCommand =
   | "schedule_menu"
   | "lineup"
   | "lineup_menu"
+  | "watch"
+  | "unwatch"
+  | "watchlist"
   | "leagues"
   | "unknown";
 

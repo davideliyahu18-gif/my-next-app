@@ -25,6 +25,14 @@ import {
   formatScheduleLeagueMenu,
   resolveLeaguePick,
 } from "./league-menu";
+import {
+  addWatchedTeam,
+  extractFollowQuery,
+  extractUnfollowQuery,
+  formatWatchlistMessage,
+  loadWatchlist,
+  removeWatchedTeam,
+} from "./watchlist";
 import type { FootballBotCommand } from "./types";
 
 function normalize(text: string): string {
@@ -73,12 +81,26 @@ export function parseFootballBotCommand(raw: string): FootballBotCommand {
     return "tomorrow";
   }
 
+  if (
+    text === "מעקב" ||
+    text === "המעקב" ||
+    text === "watchlist" ||
+    text === "קבוצות במעקב"
+  ) {
+    return "watchlist";
+  }
+
+  const unfollowQuery = extractUnfollowQuery(raw);
+  if (unfollowQuery !== null) return "unwatch";
+
+  const followQuery = extractFollowQuery(raw);
+  if (followQuery !== null) return "watch";
+
   const lineupQuery = extractLineupLeagueQuery(raw);
   if (lineupQuery !== null) {
     return lineupQuery === "" ? "lineup_menu" : "lineup";
   }
 
-  // Bare לוח → menu. לוח אנגלית / לוח 1 → schedule.
   const scheduleQuery = extractScheduleLeagueQuery(raw);
   if (scheduleQuery !== null) {
     return scheduleQuery === "" ? "schedule_menu" : "schedule";
@@ -124,29 +146,20 @@ async function replyLineupForMatches(
     ].join("\n");
   }
 
-  const blocks: string[] = [];
-  for (const match of upcoming) {
-    const lineups = await fetchMatchLineups(match, true);
-    if (!lineups) {
-      blocks.push(
-        [
-          `🏟️ *${match.homeTeam}* נגד *${match.awayTeam}*`,
-          `🏆 ${match.competition}`,
-          `🕐 ${formatKickoffHe(match.utcDate.toISOString())}`,
-          "",
-          "אין מקור הרכב למשחק הזה עדיין.",
-        ].join("\n"),
-      );
-      continue;
-    }
-    blocks.push(
-      formatMatchLineupsMessage(match, lineups, {
-        title: `🧍 *הרכבים — ${leagueLabel}*`,
-      }),
-    );
+  const match = upcoming[0];
+  const lineups = await fetchMatchLineups(match, true);
+  if (!lineups) {
+    return [
+      `🏟️ *${match.homeTeam}* נגד *${match.awayTeam}*`,
+      `🏆 ${match.competition}`,
+      `🕐 ${formatKickoffHe(match.utcDate.toISOString())}`,
+      "",
+      "אין מקור הרכב למשחק הזה עדיין.",
+    ].join("\n");
   }
-
-  return blocks.join("\n\n————————\n\n");
+  return formatMatchLineupsMessage(match, lineups, {
+    title: `🧍 *הרכבים — ${leagueLabel}*`,
+  });
 }
 
 export async function runFootballBotCommand(
@@ -160,16 +173,24 @@ export async function runFootballBotCommand(
     case "status": {
       const board = await fetchFootballBoard(true);
       const next = board.upcoming[0];
+      const watchlist = await loadWatchlist();
       return {
         command,
-        reply: formatStatusMessage({
-          liveCount: board.live.length,
-          nextLabel: next
-            ? `${formatScoreLineForMatch(next)} · ${formatKickoffHe(next.utcDate.toISOString())}`
-            : null,
-          leagueCount: board.competitions.length,
-          alertsEnabled: process.env.FOOTBALL_BOT_ALERTS !== "false",
-        }),
+        reply: [
+          formatStatusMessage({
+            liveCount: board.live.length,
+            nextLabel: next
+              ? `${formatScoreLineForMatch(next)} · ${formatKickoffHe(next.utcDate.toISOString())}`
+              : null,
+            leagueCount: board.competitions.length,
+            alertsEnabled: process.env.FOOTBALL_BOT_ALERTS !== "false",
+          }),
+          watchlist.length
+            ? `\n⭐ במעקב: ${watchlist.map((t) => t.nameHe).join(" · ")}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(""),
       };
     }
     case "score": {
@@ -240,14 +261,7 @@ export async function runFootballBotCommand(
         lineupQuery === null || lineupQuery === "" ? raw : lineupQuery;
       const pick = resolveLeaguePick(leagueRaw);
 
-      if (pick.kind === "none" || pick.kind === "all") {
-        if (pick.kind === "all") {
-          const board = await fetchFootballBoard(true);
-          return {
-            command,
-            reply: await replyLineupForMatches(board.upcoming, "כל הליגות"),
-          };
-        }
+      if (pick.kind === "none") {
         return {
           command: "lineup_menu",
           reply: [
@@ -259,11 +273,74 @@ export async function runFootballBotCommand(
       }
 
       const board = await fetchFootballBoard(true);
+      if (pick.kind === "all") {
+        return {
+          command,
+          reply: await replyLineupForMatches(board.upcoming, "כל הליגות"),
+        };
+      }
+
       const filtered = filterByLeague(board.upcoming, pick.competition.id);
       return {
         command,
         reply: await replyLineupForMatches(filtered, pick.competition.nameHe),
       };
+    }
+    case "watch": {
+      const query = extractFollowQuery(raw) ?? "";
+      if (!query) {
+        return {
+          command,
+          reply: [
+            "⭐ כתבו איזו קבוצה לעקוב:",
+            "• *עקוב ברצלונה*",
+            "• *עקוב ארסנל*",
+            "• *עקוב מכבי חיפה*",
+            "",
+            "רשימה: *מעקב*",
+          ].join("\n"),
+        };
+      }
+      const result = await addWatchedTeam(query);
+      if (!result.ok || !result.team) {
+        return { command, reply: result.error || "לא הצלחתי להוסיף." };
+      }
+      if (result.already) {
+        return {
+          command,
+          reply: `⭐ *${result.team.nameHe}* כבר במעקב.\nכתבו *מעקב* לרשימה.`,
+        };
+      }
+      return {
+        command,
+        reply: [
+          `✅ נוספה למעקב: *${result.team.nameHe}* (${result.team.nameEn})`,
+          "",
+          "מעכשיו תזכורות · הרכבים · שערים · סיום — בעיקר לקבוצות במעקב.",
+          "כתבו *מעקב* לרשימה המלאה.",
+        ].join("\n"),
+      };
+    }
+    case "unwatch": {
+      const query = extractUnfollowQuery(raw) ?? "";
+      if (!query) {
+        return {
+          command,
+          reply: "כתבו למשל: *הסר ברצלונה*",
+        };
+      }
+      const result = await removeWatchedTeam(query);
+      if (!result.ok || !result.team) {
+        return { command, reply: result.error || "לא הצלחתי להסיר." };
+      }
+      return {
+        command,
+        reply: `🗑️ הוסרה מהמעקב: *${result.team.nameHe}*`,
+      };
+    }
+    case "watchlist": {
+      const teams = await loadWatchlist();
+      return { command, reply: formatWatchlistMessage(teams) };
     }
     case "leagues": {
       return {

@@ -164,6 +164,12 @@ function looksLikeRemoteCommand(raw) {
     "הרכב",
     "הרכבים",
     "lineup",
+    "עקוב",
+    "מעקב",
+    "הסר",
+    "follow",
+    "watch",
+    "ברצלונה",
   ];
   if (keys.some((k) => t === k || t.startsWith(`${k} `) || t.includes(k))) {
     return true;
