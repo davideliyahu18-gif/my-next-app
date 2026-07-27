@@ -209,14 +209,15 @@ export function formatUpcomingSchedule(
 
 export function formatLeagues(competitions: FootballCompetition[]): string {
   if (!competitions.length) {
-    return "🏆 אין ליגות מוגדרות. הוסיפו ב־FOOTBALL_FIFA_COMPETITIONS.";
+    return "🏆 אין ליגות מוגדרות. הוסיפו ב־FOOTBALL_LEAGUES.";
   }
   const lines = ["🏆 *ליגות במעקב*", ""];
   for (const competition of competitions) {
-    lines.push(`• *${competition.nameHe}* (\`${competition.id}\`)`);
+    const provider = competition.provider === "fifa" ? "FIFA" : "ESPN";
+    lines.push(`• *${competition.nameHe}* (\`${competition.id}\` · ${provider})`);
   }
   lines.push("");
-  lines.push("מקור: api.fifa.com/api/v3 (calendar · live · timelines)");
+  lines.push("אנגלית · ספרדית · ישראלית · איטלקית");
   return lines.join("\n");
 }
 

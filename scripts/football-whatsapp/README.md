@@ -54,26 +54,26 @@ npm run football-bot:start
 3. הבוט שולח הודעת «בוט כדורגל מחובר»
 4. כתבו בקבוצה `עזרה` או `תוצאה`
 
-## מקור FIFA
+## מקורות משחקים
 
-הלקוח נמצא ב־`src/football/fifaLiveClient.ts`:
+### ליגות מקומיות (ברירת מחדל)
+ESPN scoreboard — `src/football/espnLeaguesClient.ts`
 
-| קריאה | נתיב |
-|--------|------|
-| גילוי משחקים | `GET /calendar/matches` — `language` · `count` · `idCompetition` · `idSeason` · `from` · `to` (YYYY-MM-DD) |
-| לייב | `GET /live/football/{fifaMatchId}` — `language` · `_={timestamp}` |
-| ציר אירועים | `GET /timelines/{fifaMatchId}` — `language` · `_={timestamp}` |
+| ליגה | מזהה |
+|------|------|
+| פרמייר ליג (אנגלית) | `eng.1` |
+| לה ליגה (ספרדית) | `esp.1` |
+| ליגת העל (ישראלית) | `isr.1` |
+| סרייה א׳ (איטלקית) | `ita.1` |
 
-ברירת מחדל:
+### FIFA (מונדיאל וכו׳)
+`src/football/fifaLiveClient.ts` — `api.fifa.com/api/v3`
+
 ```bash
-FOOTBALL_FIFA_BASE_URL=https://api.fifa.com/api/v3
-FIFA_ID_COMPETITION=17
-FIFA_ID_SEASON=285023
-FIFA_API_LANGUAGE=en
-FOOTBALL_MATCH_COUNT=500
+# FOOTBALL_LEAGUES=eng.1,esp.1,isr.1,ita.1
+# FIFA_ID_COMPETITION=17
+# FIFA_ID_SEASON=285023
 ```
-
-כשתביא מקור FIFA / מזהי ליגות נוספים — עדכן `FOOTBALL_FIFA_COMPETITIONS`.
 
 ## פקודות
 
