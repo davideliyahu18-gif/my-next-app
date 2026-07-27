@@ -102,7 +102,7 @@ export function parseEspnStandings(
       rows.length + 1;
     rows.push({
       rank: Math.max(1, Math.trunc(rank)),
-      teamName: hebrewTeamName(englishName) || englishName,
+      teamName: hebrewTeamName("", englishName) || englishName,
       teamId: String(team.id || ""),
       played: Math.trunc(statValue(stats, ["gamesplayed", "played"]) ?? 0),
       won: Math.trunc(statValue(stats, ["wins", "win"]) ?? 0),
