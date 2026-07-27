@@ -230,13 +230,21 @@ let lastWsActivityAt = 0;
 const pendingByChat = new Map();
 /** Prevent one hung chat command from stacking forever. */
 const commandInFlight = new Set();
+/** @type {Map<string, number>} */
+const commandLockStartedAt = new Map();
 const PENDING_TTL_MS = 5 * 60 * 1000;
 const API_TIMEOUT_MS = 25_000;
 const SEND_TIMEOUT_MS = 20_000;
-const MAX_RECONNECT_ATTEMPTS = 50;
-const WATCHDOG_MS = 60_000;
+const COMMAND_LOCK_TTL_MS = 45_000;
+const MAX_RECONNECT_ATTEMPTS = 80;
+const WATCHDOG_MS = 20_000;
 /** If no successful WA activity for this long while "connected", force reconnect. */
-const STALE_CONNECTION_MS = 12 * 60_000;
+const STALE_CONNECTION_MS = 2.5 * 60_000;
+const HEARTBEAT_FILE = path.join(__dirname, "heartbeat.json");
+const HEARTBEAT_EVERY_MS = 10_000;
+let heartbeatTimer = null;
+let selfHealTimer = null;
+let lastReconnectAt = 0;
 
 async function loadJson(file, fallback) {
   if (!existsSync(file)) return fallback;
@@ -477,14 +485,25 @@ async function safeSendMessage(chatId, content) {
   if (!sock || !waConnected) {
     throw new Error("WhatsApp not connected");
   }
-  const result = await withTimeout(
-    sock.sendMessage(chatId, content),
-    SEND_TIMEOUT_MS,
-    "sendMessage",
-  );
-  lastSuccessfulSendAt = Date.now();
-  lastWsActivityAt = Date.now();
-  return result;
+  try {
+    const result = await withTimeout(
+      sock.sendMessage(chatId, content),
+      SEND_TIMEOUT_MS,
+      "sendMessage",
+    );
+    lastSuccessfulSendAt = Date.now();
+    lastWsActivityAt = Date.now();
+    return result;
+  } catch (error) {
+    // Send failures usually mean the socket is half-dead — heal immediately.
+    log.warn(
+      { error: String(error?.message || error), chatId },
+      "sendMessage failed — scheduling fast reconnect",
+    );
+    waConnected = false;
+    scheduleReconnect("send-fail", { immediate: true });
+    throw error;
+  }
 }
 
 async function sendToGroup(text) {
@@ -757,6 +776,7 @@ async function handleIncomingMessage(msg) {
 
     // One command at a time per chat — drop pile-ups instead of hanging forever.
     const chatLock = `chat:${chatId}`;
+    expireStaleCommandLocks();
     if (commandInFlight.has(chatLock)) {
       log.warn({ chatId, body }, "Skipping command — previous still in flight");
       try {
@@ -770,6 +790,8 @@ async function handleIncomingMessage(msg) {
     }
     commandInFlight.add(chatLock);
     commandInFlight.add(lockKey);
+    commandLockStartedAt.set(chatLock, Date.now());
+    commandLockStartedAt.set(lockKey, Date.now());
 
     let commandText = body;
     // If the user sends a full new command, don't wrap it with pending intent.
@@ -778,7 +800,7 @@ async function handleIncomingMessage(msg) {
     const isFullStandingsCmd =
       /^(טבלה|טבלת|דירוג|standings|table)(?:\s|$)/i.test(body);
     const isOtherTopLevelCmd =
-      /^(עזרה|help|בוט|סטטוס|תוצאה|תוצאות|מחר|ליגות|מעקב|עקוב|הסר|בוקר|morning)(?:\s|$)/i.test(
+      /^(עזרה|help|בוט|סטטוס|תוצאה|תוצאות|מחר|ליגות|מעקב|עקוב|הסר|בוקר|morning|סגל|שחקנים|roster|squad)(?:\s|$)/i.test(
         body,
       );
 
@@ -908,10 +930,14 @@ async function handleIncomingMessage(msg) {
     } finally {
       commandInFlight.delete(chatLock);
       commandInFlight.delete(lockKey);
+      commandLockStartedAt.delete(chatLock);
+      commandLockStartedAt.delete(lockKey);
     }
   } catch (error) {
     commandInFlight.delete(lockKey);
     commandInFlight.delete(`chat:${chatId}`);
+    commandLockStartedAt.delete(lockKey);
+    commandLockStartedAt.delete(`chat:${chatId}`);
     log.warn(
       { error: String(error?.message || error) },
       "Failed to handle incoming message",
@@ -1097,6 +1123,9 @@ async function onConnected() {
 
   startWatchdog();
   startOutboxWatcher();
+  startHeartbeat();
+  startSelfHeal();
+  await writeHeartbeat({ connected: true });
 }
 
 function disconnectStatusCode(lastDisconnect) {
@@ -1111,10 +1140,26 @@ function disconnectStatusCode(lastDisconnect) {
 
 function clearCommandLocks() {
   commandInFlight.clear();
+  commandLockStartedAt.clear();
 }
 
-function scheduleReconnect(code) {
-  if (reconnectTimer) return;
+function expireStaleCommandLocks() {
+  const now = Date.now();
+  for (const [key, started] of commandLockStartedAt.entries()) {
+    if (now - started > COMMAND_LOCK_TTL_MS) {
+      commandInFlight.delete(key);
+      commandLockStartedAt.delete(key);
+      log.warn({ key }, "Cleared stale command lock");
+    }
+  }
+}
+
+/**
+ * Fast auto-reconnect. Never waits "a whole day" — caps at a few seconds.
+ * @param {unknown} code
+ * @param {{ immediate?: boolean }} [opts]
+ */
+function scheduleReconnect(code, opts = {}) {
   if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
     console.error(
       `❌ יותר מדי ניסיונות reconnect (${MAX_RECONNECT_ATTEMPTS}). supervisor will restart the process.`,
@@ -1123,18 +1168,94 @@ function scheduleReconnect(code) {
     process.exit(42);
     return;
   }
+
+  // Coalesce bursts: if a timer is already pending, keep the sooner one.
+  if (reconnectTimer && !opts.immediate) return;
+  if (reconnectTimer && opts.immediate) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+
   reconnectAttempts += 1;
-  const delay = Math.min(30_000, 1500 * 2 ** Math.min(reconnectAttempts - 1, 4));
+  // 0.4s → ~0.8 → 1.6 → 3.2 → max 6s (never multi-minute / day waits)
+  const delay = opts.immediate
+    ? 400
+    : Math.min(6_000, 400 * 2 ** Math.min(reconnectAttempts - 1, 4));
   console.log(
     `🔄 מתחבר מחדש בעוד ${Math.round(delay / 1000)}ש (ניסיון ${reconnectAttempts}, code=${code})…`,
   );
+  lastReconnectAt = Date.now();
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     startSocket().catch((error) => {
       console.error("reconnect failed", error);
-      scheduleReconnect(code);
+      scheduleReconnect(code, { immediate: true });
     });
   }, delay);
+}
+
+async function writeHeartbeat(extra = {}) {
+  try {
+    await writeFile(
+      HEARTBEAT_FILE,
+      JSON.stringify({
+        at: new Date().toISOString(),
+        ts: Date.now(),
+        pid: process.pid,
+        waConnected,
+        groupJid: groupJid || null,
+        reconnectAttempts,
+        lastWsActivityAt,
+        lastSuccessfulSendAt,
+        ...extra,
+      }),
+      "utf8",
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+function startHeartbeat() {
+  if (heartbeatTimer) return;
+  writeHeartbeat({ boot: true }).catch(() => {});
+  heartbeatTimer = setInterval(() => {
+    expireStaleCommandLocks();
+    writeHeartbeat().catch(() => {});
+  }, HEARTBEAT_EVERY_MS);
+  if (typeof heartbeatTimer.unref === "function") heartbeatTimer.unref();
+}
+
+function startSelfHeal() {
+  if (selfHealTimer) return;
+  selfHealTimer = setInterval(async () => {
+    try {
+      expireStaleCommandLocks();
+      // If we think we're offline and nothing is reconnecting — kick it.
+      if (!waConnected && !startingSocket && !reconnectTimer) {
+        console.warn("🩺 self-heal: offline without pending reconnect — forcing");
+        scheduleReconnect("self-heal-offline", { immediate: true });
+        return;
+      }
+      if (!waConnected || !sock || !groupJid) return;
+      const lastBeat = Math.max(
+        lastSuccessfulSendAt,
+        lastWsActivityAt,
+        lastConnectionOpenAt,
+      );
+      if (lastBeat && Date.now() - lastBeat > STALE_CONNECTION_MS) {
+        console.warn("🩺 self-heal: stale socket — forcing reconnect");
+        waConnected = false;
+        scheduleReconnect("self-heal-stale", { immediate: true });
+      }
+    } catch (error) {
+      log.warn(
+        { error: String(error?.message || error) },
+        "self-heal tick failed",
+      );
+    }
+  }, 15_000);
+  if (typeof selfHealTimer.unref === "function") selfHealTimer.unref();
 }
 
 async function endSocketQuietly() {
@@ -1173,31 +1294,35 @@ function startWatchdog() {
       if (!lastBeat) return;
       const staleFor = now - lastBeat;
 
-      // Soft probe before declaring the socket dead.
+      // Soft probe before declaring the socket dead (~half of stale window).
       if (staleFor > STALE_CONNECTION_MS / 2 && groupJid) {
         try {
           await withTimeout(
             sock.groupMetadata(groupJid),
-            10_000,
+            8_000,
             "watchdog.groupMetadata",
           );
           lastWsActivityAt = Date.now();
+          await writeHeartbeat({ probe: "ok" });
           return;
         } catch (error) {
           log.warn(
             { error: String(error?.message || error) },
-            "watchdog probe failed",
+            "watchdog probe failed — reconnecting now",
           );
+          waConnected = false;
+          scheduleReconnect("watchdog-probe-fail", { immediate: true });
+          return;
         }
       }
 
       if (staleFor < STALE_CONNECTION_MS) return;
 
       console.warn(
-        `🩺 watchdog: חיבור נראה תקוע (${Math.round(staleFor / 1000)}ש בלי פעילות) — reconnect`,
+        `🩺 watchdog: חיבור נראה תקוע (${Math.round(staleFor / 1000)}ש בלי פעילות) — reconnect מיידי`,
       );
       waConnected = false;
-      scheduleReconnect("watchdog-stale");
+      scheduleReconnect("watchdog-stale", { immediate: true });
     } catch (error) {
       log.warn(
         { error: String(error?.message || error) },
@@ -1287,9 +1412,9 @@ async function startSocket() {
 
       if (connection === "close") {
         waConnected = false;
+        clearCommandLocks();
         const code = disconnectStatusCode(lastDisconnect);
         const loggedOut = code === DisconnectReason.loggedOut;
-        const replaced = code === DisconnectReason.connectionReplaced;
         log.warn({ code }, "WhatsApp connection closed");
         console.log(`⚠️ חיבור וואטסאפ נסגר (code=${code}).`);
 
@@ -1297,15 +1422,26 @@ async function startSocket() {
           console.log(
             "התנתקתם מהמכשיר המקושר. מחקו את תיקיית auth וסרקו ברקוד מחדש.",
           );
+          await writeHeartbeat({ loggedOut: true });
           return;
         }
-        if (replaced) {
+
+        // 408/428/440/500/515/connectionReplaced — always try to come back fast.
+        // Waiting forever (or refusing reconnect) is worse than a quick retry.
+        const immediate =
+          code === 515 ||
+          code === 408 ||
+          code === 428 ||
+          code === 503 ||
+          code === DisconnectReason.connectionReplaced ||
+          code === DisconnectReason.restartRequired ||
+          code === DisconnectReason.timedOut;
+        if (code === DisconnectReason.connectionReplaced || code === 440) {
           console.log(
-            "החיבור הוחלף במכשיר אחר — לא מתחברים מחדש אוטומטית.",
+            "החיבור הוחלף/נפל — מתחברים מחדש אוטומטית תוך שנייה…",
           );
-          return;
         }
-        scheduleReconnect(code);
+        scheduleReconnect(code, { immediate });
       }
     });
   } finally {
@@ -1346,13 +1482,19 @@ async function main() {
     log.warn({ reason: String(reason) }, "unhandledRejection");
   });
   process.on("uncaughtException", (error) => {
-    // Log but do NOT exit — WhatsApp sockets sometimes throw recoverable noise.
-    log.error(
-      { error: String(error?.message || error) },
-      "uncaughtException (kept alive)",
-    );
+    const msg = String(error?.message || error);
+    log.error({ error: msg }, "uncaughtException");
+    // Fatal / socket-corrupt errors → exit so supervisor restarts in seconds.
+    const fatal =
+      /out of memory|ENOMEM|Cannot read prop|EADDRINUSE|FATAL/i.test(msg);
+    if (fatal) {
+      console.error("💥 fatal uncaughtException — exiting for supervisor restart");
+      process.exit(1);
+    }
   });
 
+  startHeartbeat();
+  startSelfHeal();
   startWatchdog();
   await startSocket();
 }

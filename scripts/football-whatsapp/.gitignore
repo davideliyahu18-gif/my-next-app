@@ -3,4 +3,6 @@ auth/
 bot-state.json
 qr.png
 outbox/
+heartbeat.json
+auth.bak/
 *.lock

@@ -47,3 +47,5 @@ next-env.d.ts
 /scripts/football-whatsapp/bot-state.json
 /scripts/football-whatsapp/qr.png
 /scripts/football-whatsapp/outbox/
+/scripts/football-whatsapp/heartbeat.json
+/scripts/football-whatsapp/auth.bak/
