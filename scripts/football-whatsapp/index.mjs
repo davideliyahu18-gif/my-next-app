@@ -175,6 +175,11 @@ function looksLikeOperatorCommand(raw) {
     "דירוג",
     "standings",
     "table",
+    "סגל",
+    "שחקנים",
+    "רשימת",
+    "roster",
+    "squad",
     "עקוב",
     "מעקב",
     "הסר",
@@ -354,6 +359,11 @@ function looksLikeRemoteCommand(raw) {
     "דירוג",
     "standings",
     "table",
+    "סגל",
+    "שחקנים",
+    "רשימת",
+    "roster",
+    "squad",
     "עקוב",
     "מעקב",
     "הסר",
@@ -726,7 +736,7 @@ async function handleIncomingMessage(msg) {
 
     // Ack only for slower commands — menus answer instantly with text.
     const isLikelyMenu =
-      /^(לוח|לוז|לו״ז|schedule|הרכב|הרכבים|lineup|lineups|טבלה|טבלת|דירוג|standings|table)$/i.test(
+      /^(לוח|לוז|לו״ז|schedule|הרכב|הרכבים|lineup|lineups|טבלה|טבלת|דירוג|standings|table|סגל|שחקנים|roster|squad)$/i.test(
         commandText.trim(),
       );
     if (!isLikelyMenu) {
@@ -881,8 +891,9 @@ async function welcomeGroup() {
       "התראות ליגות + מעקב קבוצות.",
       "כל יום ב־08:00 — סטטוס בוקר עם משחקים קרובים ⚽️🔥",
       "",
-      "שלט רחוק: *לוח* · *טבלה* · *הרכב* · *מעקב* · *בוקר* · *עזרה*",
+      "שלט רחוק: *לוח* · *טבלה* · *סגל* · *הרכב* · *מעקב* · *בוקר* · *עזרה*",
       "ב־*לוח* / *טבלה* / *הרכב* נפתחת רשימת בחירת ליגה.",
+      "*סגל* — רשימת שחקני ברצלונה עדכנית (במעקב).",
       "",
       "שני המספרים בקבוצה יכולים לכתוב פקודות ✓",
       "כולל *0523123944*",

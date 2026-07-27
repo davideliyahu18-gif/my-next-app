@@ -13,6 +13,8 @@ export interface WatchedTeam {
   nameEn: string;
   aliases: string[];
   leagueId?: string;
+  /** ESPN site team id for roster/squad lookups. */
+  espnTeamId?: string;
   addedAt: string;
 }
 
@@ -38,6 +40,7 @@ export const KNOWN_TEAMS: Omit<WatchedTeam, "addedAt">[] = [
       "fcb",
     ],
     leagueId: "esp.1",
+    espnTeamId: "83",
   },
   {
     id: "real-madrid",
@@ -45,6 +48,7 @@ export const KNOWN_TEAMS: Omit<WatchedTeam, "addedAt">[] = [
     nameEn: "Real Madrid",
     aliases: ["ריאל", "ריאל מדריד", "real madrid", "madrid", "rmcf"],
     leagueId: "esp.1",
+    espnTeamId: "86",
   },
   {
     id: "maccabi-tel-aviv",
@@ -281,6 +285,7 @@ export function formatWatchlistMessage(teams: WatchedTeam[]): string {
     lines.push(`• *${team.nameHe}* (${team.nameEn})`);
   }
   lines.push("");
+  lines.push("סגל עדכני: *סגל* / *סגל ברצלונה*");
   lines.push("הוספה: *עקוב ארסנל*");
   lines.push("הסרה: *הסר ברצלונה*");
   return lines.join("\n");
@@ -302,4 +307,94 @@ export function extractUnfollowQuery(raw: string): string | null {
     if (text.startsWith(`${prefix} `)) return text.slice(prefix.length).trim();
   }
   return null;
+}
+
+/** Extract "סגל …" / "שחקנים …" / "רשימת שחקני …" team query, if any. */
+export function extractRosterQuery(raw: string): string | null {
+  const text = normalizeTeamText(raw);
+  const prefixes = [
+    "רשימת שחקני",
+    "רשימת שחקנים",
+    "רשימת שחקן",
+    "רשית שחקני",
+    "רשית שחקנים",
+    "סגל שחקנים",
+    "סגל",
+    "שחקנים",
+    "roster",
+    "squad",
+  ];
+  for (const prefix of prefixes) {
+    if (text === prefix) return "";
+    if (text.startsWith(`${prefix} `)) {
+      return text
+        .slice(prefix.length)
+        .trim()
+        .replace(/\bעדכני\b/g, " ")
+        .replace(/\bבמעקב\b/g, " ")
+        .replace(/\bשל\b/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+  }
+  return null;
+}
+
+/** Resolve a roster team: explicit query, else Barcelona on watchlist, else Barcelona. */
+export async function resolveRosterTeam(
+  query: string,
+): Promise<WatchedTeam | null> {
+  const watchlist = await loadWatchlist();
+  const cleaned = normalizeTeamText(query);
+
+  function withEspnIds(team: WatchedTeam): WatchedTeam {
+    if (team.espnTeamId && team.leagueId) return team;
+    const known = KNOWN_TEAMS.find((row) => row.id === team.id);
+    if (!known) return team;
+    return {
+      ...team,
+      leagueId: team.leagueId ?? known.leagueId,
+      espnTeamId: team.espnTeamId ?? known.espnTeamId,
+      aliases: team.aliases?.length ? team.aliases : known.aliases,
+    };
+  }
+
+  if (cleaned) {
+    const known = resolveKnownTeam(cleaned);
+    if (known) {
+      const onList = watchlist.find((team) => team.id === known.id);
+      return withEspnIds(
+        onList ?? { ...known, addedAt: new Date().toISOString() },
+      );
+    }
+    for (const team of watchlist) {
+      const aliases = [team.nameHe, team.nameEn, ...team.aliases].map(
+        normalizeTeamText,
+      );
+      if (
+        aliases.some(
+          (alias) =>
+            alias === cleaned ||
+            cleaned.includes(alias) ||
+            alias.includes(cleaned),
+        )
+      ) {
+        return withEspnIds(team);
+      }
+    }
+    return null;
+  }
+
+  const barcelona = watchlist.find((team) => team.id === "barcelona");
+  if (barcelona) return withEspnIds(barcelona);
+
+  const withEspn = watchlist
+    .map(withEspnIds)
+    .find((team) => Boolean(team.espnTeamId));
+  if (withEspn) return withEspn;
+
+  const knownBarca = resolveKnownTeam("ברצלונה");
+  return knownBarca
+    ? { ...knownBarca, addedAt: new Date().toISOString() }
+    : null;
 }

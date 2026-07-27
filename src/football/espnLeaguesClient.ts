@@ -125,6 +125,17 @@ export async function getEspnStandings(
   });
 }
 
+/** Team squad / roster. */
+export async function getEspnTeamRoster(
+  leagueId: string,
+  teamId: string,
+  options?: { fresh?: boolean },
+): Promise<EspnJson> {
+  return espnGet(`${leagueId}/teams/${teamId}/roster`, undefined, {
+    fresh: options?.fresh ?? true,
+  });
+}
+
 /** Events list from a scoreboard payload. */
 export function espnScoreboardEvents(scoreboard: EspnJson): EspnJson[] {
   return (scoreboard.events as EspnJson[] | undefined) ?? [];
@@ -136,6 +147,7 @@ export const espnLeaguesClient = {
   getEspnScoreboard,
   getEspnSummary,
   getEspnStandings,
+  getEspnTeamRoster,
   espnScoreboardEvents,
 };
 

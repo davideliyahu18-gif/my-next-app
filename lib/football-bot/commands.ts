@@ -36,16 +36,23 @@ import {
 import {
   addWatchedTeam,
   extractFollowQuery,
+  extractRosterQuery,
   extractUnfollowQuery,
   formatWatchlistMessage,
   loadWatchlist,
   removeWatchedTeam,
+  resolveRosterTeam,
 } from "./watchlist";
 import {
   fetchLeagueStandings,
   formatStandingsMessage,
 } from "@/lib/football/standings";
 import { renderStandingsPng } from "@/lib/football/standings-image";
+import {
+  fetchTeamRoster,
+  formatRosterMessage,
+} from "@/lib/football/roster";
+import { renderRosterPng } from "@/lib/football/roster-image";
 import type { FootballBotCommand, FootballBotCommandResult } from "./types";
 
 function normalize(text: string): string {
@@ -127,6 +134,11 @@ export function parseFootballBotCommand(raw: string): FootballBotCommand {
   const standingsQuery = extractStandingsLeagueQuery(raw);
   if (standingsQuery !== null) {
     return standingsQuery === "" ? "standings_menu" : "standings";
+  }
+
+  const rosterQuery = extractRosterQuery(raw);
+  if (rosterQuery !== null) {
+    return "roster";
   }
 
   const scheduleQuery = extractScheduleLeagueQuery(raw);
@@ -386,6 +398,76 @@ export async function runFootballBotCommand(
             message.slice(0, 120),
             "",
             "נסו שוב: *טבלה 1* · *טבלה אנגלית*",
+          ].join("\n"),
+        };
+      }
+    }
+    case "roster": {
+      const rosterQuery = extractRosterQuery(raw) ?? "";
+      const team = await resolveRosterTeam(rosterQuery);
+      if (!team) {
+        return {
+          command,
+          reply: [
+            "🧍 *סגל שחקנים*",
+            "",
+            "לא זיהיתי קבוצה.",
+            "נסו: *סגל ברצלונה* · *סגל ריאל*",
+            "או הוסיפו למעקב ואז *סגל*.",
+          ].join("\n"),
+        };
+      }
+      if (!team.espnTeamId || !team.leagueId) {
+        return {
+          command,
+          reply: [
+            `🧍 אין סגל ESPN עדיין ל־*${team.nameHe}*`,
+            "כרגע נתמך: *ברצלונה* · *ריאל מדריד*",
+          ].join("\n"),
+        };
+      }
+
+      try {
+        const roster = await fetchTeamRoster({
+          leagueId: team.leagueId,
+          espnTeamId: team.espnTeamId,
+          teamNameHe: team.nameHe,
+        });
+        const reply = formatRosterMessage(roster);
+        const caption = [
+          `🧍 *סגל — ${team.nameHe}*`,
+          roster.seasonLabel ? `עונה: ${roster.seasonLabel}` : null,
+          "⭐ במעקב · כתבו *סגל ריאל* לקבוצה אחרת",
+        ]
+          .filter(Boolean)
+          .join("\n");
+
+        try {
+          const png = await renderRosterPng(roster);
+          return {
+            command,
+            reply,
+            media: {
+              kind: "image",
+              mime: "image/png",
+              base64: png.toString("base64"),
+              caption,
+            },
+          };
+        } catch (imageError) {
+          console.error("[football-bot/roster-image]", imageError);
+          return { command, reply };
+        }
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "שגיאה בסגל";
+        return {
+          command,
+          reply: [
+            `⚠️ לא הצלחתי להביא סגל ל־*${team.nameHe}*`,
+            message.slice(0, 120),
+            "",
+            "נסו שוב: *סגל ברצלונה*",
           ].join("\n"),
         };
       }
