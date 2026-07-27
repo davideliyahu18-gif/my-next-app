@@ -53,6 +53,7 @@ function toSnapshot(
       (status === "pause" ? "HT" : status === "finished" ? "FT" : "—"),
     kickoffAt: match.utcDate.toISOString(),
     competition: match.competition,
+    goalEventIds: previous?.goalEventIds ?? [],
     halfTimeSent: previous?.halfTimeSent ?? false,
     reminderSent: previous?.reminderSent ?? false,
   };
@@ -96,10 +97,10 @@ export async function collectFootballBotAlerts(): Promise<{
     }
     if (snapshot.status === "upcoming") upcomingMatches += 1;
 
-    // Seed first sighting so we don't spam historical goals.
+    // First sighting: seed timeline goals so we don't spam history.
     if (!prev) {
+      snapshot.goalEventIds = match.goals.map((goal) => goal.eventId);
       if (snapshot.status === "live" || snapshot.status === "pause") {
-        // Still announce kickoff only if match just started (minute very early).
         const minuteNum = Number(String(snapshot.minute).replace(/\D/g, ""));
         if (!Number.isFinite(minuteNum) || minuteNum <= 3) {
           const start = await buildAlert({
@@ -111,6 +112,7 @@ export async function collectFootballBotAlerts(): Promise<{
           if (start) alerts.push(start);
         }
       }
+      nextSnapshots[match.id] = snapshot;
       continue;
     }
 
@@ -127,21 +129,47 @@ export async function collectFootballBotAlerts(): Promise<{
       if (alert) alerts.push(alert);
     }
 
-    const prevTotal = totalScore(prev.homeScore, prev.awayScore);
-    const nextTotal = totalScore(snapshot.homeScore, snapshot.awayScore);
-    if (
-      (snapshot.status === "live" ||
-        snapshot.status === "pause" ||
-        snapshot.status === "finished") &&
-      nextTotal > prevTotal
-    ) {
+    const seenGoals = new Set(snapshot.goalEventIds ?? []);
+    let announcedFromTimeline = false;
+
+    for (const goal of match.goals) {
+      if (seenGoals.has(goal.eventId)) continue;
+      seenGoals.add(goal.eventId);
       const alert = await buildAlert({
-        id: `goal:${snapshot.id}:${snapshot.homeScore}-${snapshot.awayScore}`,
+        id: `goal:${snapshot.id}:${goal.eventId}`,
         kind: "goal",
         matchId: snapshot.id,
-        text: formatGoalAlert(snapshot),
+        text: formatGoalAlert(snapshot, {
+          scorer: goal.scorer,
+          teamName: goal.teamName,
+          minute: goal.minute,
+        }),
       });
-      if (alert) alerts.push(alert);
+      if (alert) {
+        alerts.push(alert);
+        announcedFromTimeline = true;
+      }
+    }
+    snapshot.goalEventIds = [...seenGoals];
+
+    // Fallback if timeline lags behind the scoreboard.
+    if (!announcedFromTimeline) {
+      const prevTotal = totalScore(prev.homeScore, prev.awayScore);
+      const nextTotal = totalScore(snapshot.homeScore, snapshot.awayScore);
+      if (
+        (snapshot.status === "live" ||
+          snapshot.status === "pause" ||
+          snapshot.status === "finished") &&
+        nextTotal > prevTotal
+      ) {
+        const alert = await buildAlert({
+          id: `goal:${snapshot.id}:${snapshot.homeScore}-${snapshot.awayScore}`,
+          kind: "goal",
+          matchId: snapshot.id,
+          text: formatGoalAlert(snapshot),
+        });
+        if (alert) alerts.push(alert);
+      }
     }
 
     if (

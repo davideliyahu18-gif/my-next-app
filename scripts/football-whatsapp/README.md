@@ -56,12 +56,24 @@ npm run football-bot:start
 
 ## מקור FIFA
 
-ברירת מחדל: `https://api.fifa.com/api/v3` עם כמה תחרויות FIFA.
+הלקוח נמצא ב־`src/football/fifaLiveClient.ts`:
 
-כשתביא מקור FIFA / מזהי ליגות נוספים — עדכן:
+| קריאה | נתיב |
+|--------|------|
+| גילוי משחקים | `GET /calendar/matches` — `language` · `count` · `idCompetition` · `idSeason` · `from` · `to` (YYYY-MM-DD) |
+| לייב | `GET /live/football/{fifaMatchId}` — `language` · `_={timestamp}` |
+| ציר אירועים | `GET /timelines/{fifaMatchId}` — `language` · `_={timestamp}` |
 
-- `FOOTBALL_FIFA_BASE_URL`
-- `FOOTBALL_FIFA_COMPETITIONS`
+ברירת מחדל:
+```bash
+FOOTBALL_FIFA_BASE_URL=https://api.fifa.com/api/v3
+FIFA_ID_COMPETITION=17
+FIFA_ID_SEASON=285023
+FIFA_API_LANGUAGE=en
+FOOTBALL_MATCH_COUNT=500
+```
+
+כשתביא מקור FIFA / מזהי ליגות נוספים — עדכן `FOOTBALL_FIFA_COMPETITIONS`.
 
 ## פקודות
 

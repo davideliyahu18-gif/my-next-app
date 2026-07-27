@@ -1,6 +1,5 @@
 /**
- * Multi-league football data source (FIFA API).
- * Swap FOOTBALL_FIFA_BASE_URL / FOOTBALL_FIFA_COMPETITIONS when you bring a new FIFA source.
+ * Football domain source — maps FIFA live client payloads into bot matches.
  */
 
 import { countryFlag, hebrewTeamName } from "@/lib/team-display";
@@ -8,18 +7,39 @@ import {
   getEnabledFootballCompetitions,
   type FootballCompetition,
 } from "./competitions";
-
-const USER_AGENT =
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+import {
+  FIFA_LIVE_DEFAULTS,
+  getCalendarMatchesForDayOffset,
+  getLiveFootballMatch,
+  getMatchTimeline,
+  type FifaJson,
+} from "@/src/football/fifaLiveClient";
 
 const PERIOD_IN_PLAY = new Set([3, 5, 7, 9]);
 const PERIOD_FINISHED = new Set([10, 11]);
+const GOAL_EVENT_TYPES = new Set([0, 34, 39, 41]);
+const OWN_GOAL_EVENT_TYPE = 34;
+
+const SCORER_DESCRIPTION_SPLIT =
+  /\s+(?:scores?(?:!!|!| an own goal\.?| from the penalty(?: spot)?!!?)|successfully converts the penalty!)/i;
+const OWN_GOAL_DESCRIPTION = /\bown goal\b/i;
+const PLACEHOLDER_SCORER =
+  /^(?:assisted by\b|unknown\b|.+?\sscore!?)$/i;
 
 export type FootballMatchStatus =
   | "SCHEDULED"
   | "IN_PLAY"
   | "PAUSE"
   | "FINISHED";
+
+export interface FootballGoal {
+  eventId: string;
+  minute: string;
+  scorer: string;
+  teamName: string;
+  teamId: string;
+  ownGoal: boolean;
+}
 
 export interface FootballMatch {
   id: string;
@@ -38,30 +58,20 @@ export interface FootballMatch {
   matchTime: string | null;
   period: number | null;
   stage: string | null;
+  goals: FootballGoal[];
 }
 
 type LocalizedItem = { Locale?: string; Description?: string };
-type CalendarRow = Record<string, unknown>;
-
-function baseUrl(): string {
-  return (
-    process.env.FOOTBALL_FIFA_BASE_URL ||
-    process.env.FIFA_API_BASE_URL ||
-    "https://api.fifa.com/api/v3"
-  ).replace(/\/$/, "");
-}
-
-function language(): string {
-  return process.env.FIFA_API_LANGUAGE ?? "en";
-}
 
 function localizedName(
-  items: LocalizedItem[] | null | undefined,
+  items: LocalizedItem[] | LocalizedItem | null | undefined,
   preferredLocales: string[] = ["he", "en"],
 ): string {
-  if (!items?.length) return "";
+  const list = Array.isArray(items) ? items : items ? [items] : [];
+  if (!list.length) return "";
+
   const byLocale: Record<string, string> = {};
-  for (const item of items) {
+  for (const item of list) {
     const locale = String(item.Locale ?? "").toLowerCase();
     const description = String(item.Description ?? "");
     if (locale) byLocale[locale] = description;
@@ -71,7 +81,7 @@ function localizedName(
       if (locale.includes(preferred) && description) return description;
     }
   }
-  for (const item of items) {
+  for (const item of list) {
     if (item.Description) return String(item.Description);
   }
   return "";
@@ -82,39 +92,6 @@ function parseDatetime(value: string | null | undefined): Date {
   return new Date(value.replace("Z", "+00:00"));
 }
 
-async function fifaGet(
-  path: string,
-  params?: Record<string, string | number>,
-  fresh = false,
-): Promise<Record<string, unknown>> {
-  const url = new URL(`${baseUrl()}/${path.replace(/^\//, "")}`);
-  if (params) {
-    for (const [key, value] of Object.entries(params)) {
-      if (value !== "" && value !== undefined) {
-        url.searchParams.set(key, String(value));
-      }
-    }
-  }
-
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent": USER_AGENT,
-      Accept: "application/json",
-    },
-    ...(fresh
-      ? { cache: "no-store" as const }
-      : { next: { revalidate: 30 } }),
-  });
-
-  if (!response.ok) {
-    throw new Error(
-      `FIFA football source ${response.status} for ${path}: ${await response.text()}`,
-    );
-  }
-
-  return response.json() as Promise<Record<string, unknown>>;
-}
-
 function mapStatus(period: number | null): FootballMatchStatus {
   if (period === 4) return "PAUSE";
   if (period !== null && PERIOD_FINISHED.has(period)) return "FINISHED";
@@ -122,29 +99,29 @@ function mapStatus(period: number | null): FootballMatchStatus {
   return "SCHEDULED";
 }
 
-function teamLabels(side: Record<string, unknown>) {
+function teamLabels(side: FifaJson) {
   const code = String(side.Abbreviation ?? side.IdCountry ?? "");
   const english = localizedName(side.TeamName as LocalizedItem[] | undefined);
+  const shortClub =
+    typeof side.ShortClubName === "string" ? side.ShortClubName : "";
+  const nameRaw = english || shortClub;
   const name =
     process.env.ENABLE_HEBREW_TEAM_NAMES === "false"
-      ? english
-      : hebrewTeamName(code, english);
+      ? nameRaw
+      : hebrewTeamName(code, nameRaw);
   const flag =
     process.env.ENABLE_TEAM_FLAGS === "false" ? "" : countryFlag(code);
   return { name, flag, code };
 }
 
-function competitionLabel(
-  row: CalendarRow,
-  competition: FootballCompetition,
-): string {
+function competitionLabel(row: FifaJson, competition: FootballCompetition) {
   const fromRow = localizedName(
     row.CompetitionName as LocalizedItem[] | undefined,
   );
   return fromRow || competition.nameHe || competition.nameEn || competition.id;
 }
 
-function scoreFromSide(side: Record<string, unknown>): number | null {
+function scoreFromSide(side: FifaJson): number | null {
   const score = side.Score;
   if (typeof score === "number") return score;
   if (typeof score === "string" && score.trim() !== "") {
@@ -154,12 +131,62 @@ function scoreFromSide(side: Record<string, unknown>): number | null {
   return null;
 }
 
+function parseScorer(description: string): string {
+  if (!description) return "";
+  const parts = description.split(SCORER_DESCRIPTION_SPLIT);
+  return (parts[0]?.trim() ?? "").replace(/\s*\([^)]+\)\s*$/, "").trim();
+}
+
+function isPlaceholderScorer(scorer: string): boolean {
+  const cleaned = scorer.trim();
+  if (!cleaned) return true;
+  if (PLACEHOLDER_SCORER.test(cleaned)) return true;
+  if (cleaned.toLowerCase().startsWith("assisted by")) return true;
+  return false;
+}
+
+function parseGoalsFromTimeline(
+  timeline: FifaJson,
+  homeTeamId: string,
+  awayTeamId: string,
+  homeTeam: string,
+  awayTeam: string,
+): FootballGoal[] {
+  const events = (timeline.Event as FifaJson[] | undefined) ?? [];
+  const goals: FootballGoal[] = [];
+
+  for (const event of events) {
+    const eventType = Number(event.Type);
+    if (!GOAL_EVENT_TYPES.has(eventType)) continue;
+
+    const teamId = String(event.IdTeam ?? "");
+    const teamName =
+      teamId === homeTeamId ? homeTeam : teamId === awayTeamId ? awayTeam : "";
+    const description = localizedName(
+      event.EventDescription as LocalizedItem[] | LocalizedItem | undefined,
+    );
+    const scorer = parseScorer(description) || "Unknown scorer";
+
+    goals.push({
+      eventId: String(event.EventId ?? `${event.MatchMinute}:${scorer}`),
+      minute: String(event.MatchMinute ?? "?"),
+      scorer,
+      teamName,
+      teamId,
+      ownGoal:
+        eventType === OWN_GOAL_EVENT_TYPE || OWN_GOAL_DESCRIPTION.test(description),
+    });
+  }
+
+  return goals;
+}
+
 function calendarRowToMatch(
-  row: CalendarRow,
+  row: FifaJson,
   competition: FootballCompetition,
 ): FootballMatch {
-  const home = (row.Home as Record<string, unknown> | undefined) ?? {};
-  const away = (row.Away as Record<string, unknown> | undefined) ?? {};
+  const home = (row.Home as FifaJson | undefined) ?? {};
+  const away = (row.Away as FifaJson | undefined) ?? {};
   const homeLabels = teamLabels(home);
   const awayLabels = teamLabels(away);
   const period =
@@ -180,7 +207,7 @@ function calendarRowToMatch(
     awayFlag: awayLabels.flag,
     utcDate: parseDatetime(row.Date as string | undefined),
     status: mapStatus(Number.isFinite(period) ? period : null),
-    competitionId: competition.id,
+    competitionId: String(row.IdCompetition ?? competition.id),
     competition: competitionLabel(row, competition),
     homeScore: scoreFromSide(home),
     awayScore: scoreFromSide(away),
@@ -190,6 +217,7 @@ function calendarRowToMatch(
       localizedName(row.StageName as LocalizedItem[] | undefined) ||
       localizedName(row.GroupName as LocalizedItem[] | undefined) ||
       null,
+    goals: [],
   };
 }
 
@@ -198,28 +226,16 @@ async function getCalendarForCompetition(
   dayOffset: number,
   fresh: boolean,
 ): Promise<FootballMatch[]> {
-  const day = new Date();
-  day.setUTCDate(day.getUTCDate() + dayOffset);
-  const start = new Date(
-    Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate()),
-  );
-  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000 - 1000);
-
-  const params: Record<string, string | number> = {
-    from: start.toISOString().replace(/\.\d{3}Z$/, "Z"),
-    to: end.toISOString().replace(/\.\d{3}Z$/, "Z"),
-    language: language(),
-    count: Number(process.env.FOOTBALL_MATCH_COUNT ?? "200"),
-    IdCompetition: competition.id,
-  };
-  if (competition.seasonId) params.IdSeason = competition.seasonId;
-
   try {
-    const data = await fifaGet("calendar/matches", params, fresh);
-    const rows = (data.Results as CalendarRow[] | undefined) ?? [];
+    const rows = await getCalendarMatchesForDayOffset(dayOffset, {
+      fresh,
+      idCompetition: competition.id,
+      idSeason: competition.seasonId ?? FIFA_LIVE_DEFAULTS.idSeason,
+      count: FIFA_LIVE_DEFAULTS.count,
+      language: FIFA_LIVE_DEFAULTS.language,
+    });
     return rows.map((row) => calendarRowToMatch(row, competition));
   } catch {
-    // Competition/season may be inactive — skip quietly.
     return [];
   }
 }
@@ -229,27 +245,40 @@ async function enrichLiveMatch(
   fresh: boolean,
 ): Promise<FootballMatch> {
   try {
-    const live = await fifaGet(
-      `live/football/${match.id}`,
-      { language: language() },
-      fresh,
-    );
-    const home = (live.HomeTeam as Record<string, unknown> | undefined) ?? {};
-    const away = (live.AwayTeam as Record<string, unknown> | undefined) ?? {};
+    const [live, timeline] = await Promise.all([
+      getLiveFootballMatch(match.id, { fresh }),
+      getMatchTimeline(match.id, { fresh }).catch(() => ({ Event: [] })),
+    ]);
+
+    const home = (live.HomeTeam as FifaJson | undefined) ?? {};
+    const away = (live.AwayTeam as FifaJson | undefined) ?? {};
+    const homeTeamId = String(home.IdTeam ?? "");
+    const awayTeamId = String(away.IdTeam ?? "");
     const period =
       live.Period == null || live.Period === "" ? null : Number(live.Period);
     const matchTimeRaw = live.MatchTime ?? live.MatchTimeShort;
 
+    const homeScore =
+      typeof live.HomeTeamScore === "number"
+        ? live.HomeTeamScore
+        : scoreFromSide(home) ?? match.homeScore;
+    const awayScore =
+      typeof live.AwayTeamScore === "number"
+        ? live.AwayTeamScore
+        : scoreFromSide(away) ?? match.awayScore;
+
+    const goals = parseGoalsFromTimeline(
+      timeline,
+      homeTeamId,
+      awayTeamId,
+      match.homeTeam,
+      match.awayTeam,
+    );
+
     return {
       ...match,
-      homeScore:
-        typeof live.HomeTeamScore === "number"
-          ? live.HomeTeamScore
-          : scoreFromSide(home) ?? match.homeScore,
-      awayScore:
-        typeof live.AwayTeamScore === "number"
-          ? live.AwayTeamScore
-          : scoreFromSide(away) ?? match.awayScore,
+      homeScore,
+      awayScore,
       period: Number.isFinite(period) ? period : match.period,
       status: mapStatus(
         Number.isFinite(period) ? (period as number) : match.period,
@@ -258,6 +287,7 @@ async function enrichLiveMatch(
         matchTimeRaw == null || String(matchTimeRaw).trim() === ""
           ? match.matchTime
           : String(matchTimeRaw),
+      goals: goals.filter((goal) => !isPlaceholderScorer(goal.scorer)),
     };
   } catch {
     return match;
@@ -274,7 +304,7 @@ function dedupeMatches(matches: FootballMatch[]): FootballMatch[] {
   );
 }
 
-/** Calendar matches across all enabled FIFA competitions. */
+/** Calendar matches across enabled FIFA competitions. */
 export async function fetchFootballCalendar(
   dayOffsets: number[],
   fresh = false,
@@ -290,7 +320,7 @@ export async function fetchFootballCalendar(
   return dedupeMatches(batches.flat());
 }
 
-/** Live / pause matches right now (all leagues). */
+/** Live / pause matches right now. */
 export async function fetchLiveFootballMatches(
   fresh = false,
 ): Promise<FootballMatch[]> {

@@ -34,6 +34,8 @@ export interface FootballBotMatchSnapshot {
   minute: string;
   kickoffAt: string;
   competition: string;
+  /** Timeline goal event ids already announced. */
+  goalEventIds?: string[];
   halfTimeSent?: boolean;
   reminderSent?: boolean;
 }

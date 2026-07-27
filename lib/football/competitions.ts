@@ -1,43 +1,25 @@
 /**
- * FIFA competitions the multi-league football bot tracks.
- * Add IdCompetition (+ optional IdSeason) when you bring more FIFA sources.
+ * FIFA competitions the football bot tracks via fifaLiveClient.
+ * Default source: idCompetition=17, idSeason=285023 (World Cup).
  */
 
 export interface FootballCompetition {
   id: string;
   nameHe: string;
   nameEn: string;
-  /** Optional FIFA season id — leave empty to use live calendar defaults. */
+  /** FIFA season id (idSeason). */
   seasonId?: string;
   enabled: boolean;
 }
 
-/** Built-in FIFA competitions (expand when you paste more source ids). */
+/** Primary FIFA source from the live client defaults. */
 export const DEFAULT_FOOTBALL_COMPETITIONS: FootballCompetition[] = [
   {
-    id: "17",
+    id: process.env.FIFA_ID_COMPETITION ?? "17",
     nameHe: "גביע העולם",
     nameEn: "FIFA World Cup",
     seasonId: process.env.FIFA_ID_SEASON ?? "285023",
     enabled: true,
-  },
-  {
-    id: "10005",
-    nameHe: "גביע העולם למועדונים",
-    nameEn: "FIFA Club World Cup",
-    enabled: true,
-  },
-  {
-    id: "158",
-    nameHe: "המשחקים האולימפיים — גברים",
-    nameEn: "Olympic Football Tournament Men",
-    enabled: true,
-  },
-  {
-    id: "103",
-    nameHe: "גביע הקונפדרציות",
-    nameEn: "FIFA Confederations Cup",
-    enabled: false,
   },
 ];
 
@@ -53,19 +35,25 @@ function parseCompetitionsFromEnv(): FootballCompetition[] | null {
     for (const item of parsed) {
       if (!item || typeof item !== "object") continue;
       const row = item as Record<string, unknown>;
-      const id = String(row.id ?? row.IdCompetition ?? "").trim();
+      const id = String(
+        row.id ?? row.idCompetition ?? row.IdCompetition ?? "",
+      ).trim();
       if (!id) continue;
       competitions.push({
         id,
         nameHe: String(row.nameHe ?? row.name ?? id),
         nameEn: String(row.nameEn ?? row.name ?? id),
-        seasonId: row.seasonId ? String(row.seasonId) : undefined,
+        seasonId: row.seasonId
+          ? String(row.seasonId)
+          : row.idSeason
+            ? String(row.idSeason)
+            : undefined,
         enabled: row.enabled !== false,
       });
     }
     return competitions.length ? competitions : null;
   } catch {
-    // Comma-separated ids: 17,10005,158
+    // Comma-separated competition ids (season from FIFA_ID_SEASON)
     return raw
       .split(",")
       .map((id) => id.trim())
@@ -74,6 +62,7 @@ function parseCompetitionsFromEnv(): FootballCompetition[] | null {
         id,
         nameHe: id,
         nameEn: id,
+        seasonId: process.env.FIFA_ID_SEASON ?? "285023",
         enabled: true,
       }));
   }

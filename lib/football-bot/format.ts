@@ -216,7 +216,7 @@ export function formatLeagues(competitions: FootballCompetition[]): string {
     lines.push(`• *${competition.nameHe}* (\`${competition.id}\`)`);
   }
   lines.push("");
-  lines.push("כשתביא מקור FIFA נוסף — נוסיף אותו לרשימה.");
+  lines.push("מקור: api.fifa.com/api/v3 (calendar · live · timelines)");
   return lines.join("\n");
 }
 
@@ -256,12 +256,25 @@ function boldLine(text: string): string {
   return `*${trimmed}*`;
 }
 
-export function formatGoalAlert(snapshot: FootballBotMatchSnapshot): string {
+export function formatGoalAlert(
+  snapshot: FootballBotMatchSnapshot,
+  options?: { scorer?: string; teamName?: string; minute?: string },
+): string {
+  const minute = options?.minute || snapshot.minute;
+  const scorer = options?.scorer?.trim();
+  const teamName = options?.teamName?.trim();
+  const scorerLine = scorer
+    ? teamName
+      ? `*👤 כובש: ${scorer} | ${teamName}*`
+      : `*👤 כובש: ${scorer}*`
+    : `*👤 כובש: מתעדכן...*`;
+
   return [
     `*⚽🔥 שער!!!*`,
     `*🏟️ ${snapshot.homeFlag} ${snapshot.home} 🆚 ${snapshot.awayFlag} ${snapshot.away}*`,
     `*🏆 ${snapshot.competition}*`,
-    snapshot.minute ? `*⏱️ דקה ${snapshot.minute}*` : "",
+    minute ? `*⏱️ דקה ${minute}*` : "",
+    scorerLine,
     `*🥅 תוצאה כעת:*`,
     `*${snapshot.homeFlag} ${formatEmojiScore(snapshot.homeScore, snapshot.awayScore)} ${snapshot.awayFlag}*`,
     "",
