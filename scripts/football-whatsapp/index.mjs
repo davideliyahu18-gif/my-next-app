@@ -198,9 +198,21 @@ let groupPollTimer = null;
 let welcomeSent = false;
 let pollRunning = false;
 let cfg = envConfig();
+let waConnected = false;
+let reconnectAttempts = 0;
+let reconnectTimer = null;
+let startingSocket = false;
+let cronsStarted = false;
+let morningTask = null;
+let pollTask = null;
 /** @type {Map<string, { intent: "schedule" | "lineup"; expiresAt: number }>} */
 const pendingByChat = new Map();
+/** Prevent one hung chat command from stacking forever. */
+const commandInFlight = new Set();
 const PENDING_TTL_MS = 5 * 60 * 1000;
+const API_TIMEOUT_MS = 25_000;
+const SEND_TIMEOUT_MS = 20_000;
+const MAX_RECONNECT_ATTEMPTS = 50;
 
 async function loadJson(file, fallback) {
   if (!existsSync(file)) return fallback;
@@ -358,6 +370,23 @@ function clearPending(chatId) {
   pendingByChat.delete(chatId);
 }
 
+async function withTimeout(promise, ms, label) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`${label} timeout after ${ms}ms`)),
+          ms,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 async function apiFetch(pathname, options = {}) {
   const headers = {
     "Content-Type": "application/json",
@@ -365,26 +394,33 @@ async function apiFetch(pathname, options = {}) {
   };
   if (cfg.secret) headers.Authorization = `Bearer ${cfg.secret}`;
 
-  const response = await fetch(`${cfg.siteUrl}${pathname}`, {
-    ...options,
-    headers,
-  });
-
-  const text = await response.text();
-  let json = null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
   try {
-    json = text ? JSON.parse(text) : null;
-  } catch {
-    json = { raw: text };
-  }
+    const response = await fetch(`${cfg.siteUrl}${pathname}`, {
+      ...options,
+      headers,
+      signal: controller.signal,
+    });
 
-  if (!response.ok) {
-    const err = new Error(
-      `API ${pathname} failed: ${response.status} ${text.slice(0, 200)}`,
-    );
-    throw err;
+    const text = await response.text();
+    let json = null;
+    try {
+      json = text ? JSON.parse(text) : null;
+    } catch {
+      json = { raw: text };
+    }
+
+    if (!response.ok) {
+      const err = new Error(
+        `API ${pathname} failed: ${response.status} ${text.slice(0, 200)}`,
+      );
+      throw err;
+    }
+    return json;
+  } finally {
+    clearTimeout(timer);
   }
-  return json;
 }
 
 async function runRemoteCommand(text) {
@@ -399,9 +435,20 @@ async function runRemoteCommand(text) {
   };
 }
 
+async function safeSendMessage(chatId, content) {
+  if (!sock || !waConnected) {
+    throw new Error("WhatsApp not connected");
+  }
+  return withTimeout(
+    sock.sendMessage(chatId, content),
+    SEND_TIMEOUT_MS,
+    "sendMessage",
+  );
+}
+
 async function sendToGroup(text) {
-  if (!sock || !groupJid) return false;
-  await sock.sendMessage(groupJid, { text });
+  if (!sock || !groupJid || !waConnected) return false;
+  await safeSendMessage(groupJid, { text });
   return true;
 }
 
@@ -410,7 +457,7 @@ async function sendToGroup(text) {
  * Best-effort only — caller should already send the text menu.
  */
 async function sendLeagueInteractive(chatId, interactive) {
-  if (!sock || !interactive || !cfg.buttonsEnabled) {
+  if (!sock || !interactive || !cfg.buttonsEnabled || !waConnected) {
     return false;
   }
 
@@ -466,35 +513,31 @@ async function sendLeagueInteractive(chatId, interactive) {
     };
 
     const generated = generateWAMessageFromContent(chatId, content, {});
-    const relayPromise = sock.relayMessage(chatId, generated.message, {
-      messageId: generated.key.id,
-      additionalNodes: [
-        {
-          tag: "biz",
-          attrs: {},
-          content: [
-            {
-              tag: "interactive",
-              attrs: { type: "native_flow", v: "1" },
-              content: [
-                {
-                  tag: "native_flow",
-                  attrs: { name: "mixed", v: "9" },
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    });
-
-    // Don't let broken interactive rendering block the user on "בודק…".
-    await Promise.race([
-      relayPromise,
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("interactive relay timeout")), 8_000),
-      ),
-    ]);
+    await withTimeout(
+      sock.relayMessage(chatId, generated.message, {
+        messageId: generated.key.id,
+        additionalNodes: [
+          {
+            tag: "biz",
+            attrs: {},
+            content: [
+              {
+                tag: "interactive",
+                attrs: { type: "native_flow", v: "1" },
+                content: [
+                  {
+                    tag: "native_flow",
+                    attrs: { name: "mixed", v: "9" },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+      8_000,
+      "interactive relay",
+    );
 
     log.info({ chatId, options: rows.length }, "Sent interactive league menu");
     return true;
@@ -548,9 +591,11 @@ async function resolveGroupByName() {
 }
 
 async function handleIncomingMessage(msg) {
+  const chatId = msg.key?.remoteJid || "";
+  const lockKey = `${chatId}:${msg.key?.id || Date.now()}`;
   try {
-    const chatId = msg.key.remoteJid;
     if (!chatId || !chatId.endsWith("@g.us")) return;
+    if (!waConnected || !sock) return;
 
     const interactiveId = extractInteractiveId(msg);
     const fromButton = commandFromInteractiveId(interactiveId);
@@ -585,6 +630,22 @@ async function handleIncomingMessage(msg) {
       groupJid = chatId;
       await saveState();
     }
+
+    // One command at a time per chat — drop pile-ups instead of hanging forever.
+    const chatLock = `chat:${chatId}`;
+    if (commandInFlight.has(chatLock)) {
+      log.warn({ chatId, body }, "Skipping command — previous still in flight");
+      try {
+        await safeSendMessage(chatId, {
+          text: "⏳ עוד רגע — מסיים את הבקשה הקודמת…",
+        });
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    commandInFlight.add(chatLock);
+    commandInFlight.add(lockKey);
 
     let commandText = body;
     // If the user sends a full new command, don't wrap it with pending intent.
@@ -630,12 +691,22 @@ async function handleIncomingMessage(msg) {
         commandText.trim(),
       );
     if (!isLikelyMenu) {
-      await sock.sendMessage(chatId, { text: "⏳ רגע, בודק…" });
+      try {
+        await safeSendMessage(chatId, { text: "⏳ רגע, בודק…" });
+      } catch (error) {
+        log.warn(
+          { error: String(error?.message || error) },
+          "Ack send failed",
+        );
+      }
     }
 
     try {
-      const { reply, command, interactive } =
-        await runRemoteCommand(commandText);
+      const { reply, command, interactive } = await withTimeout(
+        runRemoteCommand(commandText),
+        API_TIMEOUT_MS,
+        "runRemoteCommand",
+      );
       if (command === "schedule_menu") {
         setPending(chatId, "schedule");
       } else if (command === "lineup_menu") {
@@ -647,7 +718,8 @@ async function handleIncomingMessage(msg) {
       }
 
       // Always send plain text first so the chat never looks "stuck".
-      await sock.sendMessage(chatId, { text: reply });
+      await safeSendMessage(chatId, { text: reply });
+      log.info({ command, chatId }, "Command reply sent");
 
       if (
         interactive?.kind === "league_select" &&
@@ -657,19 +729,34 @@ async function handleIncomingMessage(msg) {
         sendLeagueInteractive(chatId, interactive).catch(() => {});
       }
     } catch (error) {
-      log.warn({ error }, "Command API failed");
-      await sock.sendMessage(chatId, {
-        text: "⚠️ לא הצלחתי לדבר עם שרת האתר.\nבדקו ש-`npm run dev` רץ ו־FOOTBALL_BOT_SITE_URL נכון.",
-      });
+      log.warn(
+        { error: String(error?.message || error) },
+        "Command API/send failed",
+      );
+      try {
+        await safeSendMessage(chatId, {
+          text: "⚠️ משהו נתקע רגע — נסו שוב: *לוח* · *עזרה*",
+        });
+      } catch {
+        /* connection may be dead; reconnect will recover */
+      }
+    } finally {
+      commandInFlight.delete(chatLock);
+      commandInFlight.delete(lockKey);
     }
   } catch (error) {
-    log.warn({ error }, "Failed to handle incoming message");
+    commandInFlight.delete(lockKey);
+    commandInFlight.delete(`chat:${chatId}`);
+    log.warn(
+      { error: String(error?.message || error) },
+      "Failed to handle incoming message",
+    );
   }
 }
 
 async function pollAlerts() {
   if (!cfg.alertsEnabled) return;
-  if (!sock || !groupJid || pollRunning) return;
+  if (!sock || !groupJid || !waConnected || pollRunning) return;
   pollRunning = true;
   try {
     const summary = await apiFetch("/api/cron/football-bot?dry=1", {
@@ -696,7 +783,7 @@ async function pollAlerts() {
 
 async function sendMorningStatus() {
   if (!cfg.morningEnabled) return;
-  if (!sock || !groupJid) return;
+  if (!sock || !groupJid || !waConnected) return;
   try {
     const { reply } = await runRemoteCommand("בוקר");
     if (reply) {
@@ -742,6 +829,8 @@ async function saveQrPng(qr) {
 }
 
 async function onConnected() {
+  waConnected = true;
+  reconnectAttempts = 0;
   console.log("\n✅ מחובר לוואטסאפ.");
   console.log(`   קבוצה: "${cfg.groupName}"`);
   console.log(
@@ -755,81 +844,186 @@ async function onConnected() {
     console.log(`   מפעילים: ${cfg.operators.join(", ")}`);
   }
   console.log("   שני המספרים בקבוצה יכולים לכתוב פקודות.");
-  console.log("   הוסיפו את המספר המקושר לקבוצה — ואז הבוט ישלח הודעת חיבור.\n");
+  console.log("   חיבור יציב + reconnect אוטומטי פעיל.\n");
+
+  if (groupPollTimer) {
+    clearInterval(groupPollTimer);
+    groupPollTimer = null;
+  }
 
   groupPollTimer = setInterval(async () => {
-    await resolveGroupByName();
-    if (groupJid) {
-      await welcomeGroup();
-      clearInterval(groupPollTimer);
-      groupPollTimer = null;
-      pollAlerts().catch(() => {});
+    try {
+      await resolveGroupByName();
+      if (groupJid) {
+        await welcomeGroup();
+        clearInterval(groupPollTimer);
+        groupPollTimer = null;
+        pollAlerts().catch(() => {});
+      }
+    } catch (error) {
+      log.warn(
+        { error: String(error?.message || error) },
+        "Group resolve tick failed",
+      );
     }
   }, 8_000);
 
-  cron.schedule(cfg.pollCron, () => {
-    pollAlerts().catch(() => {});
-  });
+  // Schedule crons only once across reconnects.
+  if (!cronsStarted) {
+    cronsStarted = true;
+    pollTask = cron.schedule(cfg.pollCron, () => {
+      pollAlerts().catch((error) => {
+        log.warn(
+          { error: String(error?.message || error) },
+          "Alert poll cron error",
+        );
+      });
+    });
 
-  if (cfg.morningEnabled) {
-    cron.schedule(
-      cfg.morningCron,
-      () => {
-        sendMorningStatus().catch(() => {});
-      },
-      { timezone: cfg.morningTimezone },
+    if (cfg.morningEnabled) {
+      morningTask = cron.schedule(
+        cfg.morningCron,
+        () => {
+          sendMorningStatus().catch((error) => {
+            log.warn(
+              { error: String(error?.message || error) },
+              "Morning cron error",
+            );
+          });
+        },
+        { timezone: cfg.morningTimezone },
+      );
+    }
+  }
+}
+
+function disconnectStatusCode(lastDisconnect) {
+  const err = lastDisconnect?.error;
+  return (
+    err?.output?.statusCode ??
+    err?.statusCode ??
+    err?.data ??
+    undefined
+  );
+}
+
+function scheduleReconnect(code) {
+  if (reconnectTimer) return;
+  if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+    console.error(
+      `❌ יותר מדי ניסיונות reconnect (${MAX_RECONNECT_ATTEMPTS}). עצרו והפעילו מחדש.`,
     );
+    return;
+  }
+  reconnectAttempts += 1;
+  const delay = Math.min(30_000, 1500 * 2 ** Math.min(reconnectAttempts - 1, 4));
+  console.log(
+    `🔄 מתחבר מחדש בעוד ${Math.round(delay / 1000)}ש (ניסיון ${reconnectAttempts}, code=${code})…`,
+  );
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    startSocket().catch((error) => {
+      console.error("reconnect failed", error);
+      scheduleReconnect(code);
+    });
+  }, delay);
+}
+
+async function endSocketQuietly() {
+  const current = sock;
+  sock = null;
+  waConnected = false;
+  if (!current) return;
+  try {
+    current.ev.removeAllListeners();
+  } catch {
+    /* ignore */
+  }
+  try {
+    await current.end(undefined);
+  } catch {
+    /* ignore */
   }
 }
 
 async function startSocket() {
-  await mkdir(AUTH_DIR, { recursive: true });
-  const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-  const { version } = await fetchLatestBaileysVersion();
+  if (startingSocket) return;
+  startingSocket = true;
+  try {
+    await endSocketQuietly();
+    await mkdir(AUTH_DIR, { recursive: true });
+    const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+    const { version } = await fetchLatestBaileysVersion();
 
-  sock = makeWASocket({
-    version,
-    auth: state,
-    printQRInTerminal: false,
-    logger: pino({ level: "silent" }),
-  });
+    sock = makeWASocket({
+      version,
+      auth: state,
+      printQRInTerminal: false,
+      logger: pino({ level: "silent" }),
+      markOnlineOnConnect: false,
+      syncFullHistory: false,
+      emitOwnEvents: true,
+      connectTimeoutMs: 60_000,
+      defaultQueryTimeoutMs: 60_000,
+      keepAliveIntervalMs: 15_000,
+      retryRequestDelayMs: 500,
+    });
 
-  sock.ev.on("creds.update", saveCreds);
-  sock.ev.on("messages.upsert", async ({ messages, type }) => {
-    if (type !== "notify" && type !== "append") return;
-    for (const msg of messages) {
-      await handleIncomingMessage(msg);
-    }
-  });
-
-  sock.ev.on("connection.update", async (update) => {
-    const { connection, lastDisconnect, qr } = update;
-
-    if (qr) {
-      console.log("\n📷 סרקו את הברקוד עם WhatsApp → מכשירים מקושרים:\n");
-      qrcodeTerminal.generate(qr, { small: true });
-      await saveQrPng(qr);
-      const qrLink = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(qr)}`;
-      console.log(`\nאו פתחו במובייל: ${qrLink}\n`);
-    }
-
-    if (connection === "open") {
-      await onConnected();
-    }
-
-    if (connection === "close") {
-      const code = lastDisconnect?.error?.output?.statusCode;
-      const shouldReconnect = code !== DisconnectReason.loggedOut;
-      log.warn({ code }, "WhatsApp connection closed");
-      if (shouldReconnect) {
-        setTimeout(() => startSocket().catch(console.error), 2000);
-      } else {
-        console.log(
-          "התנתקתם מהמכשיר המקושר. מחקו את תיקיית auth וסרקו ברקוד מחדש.",
-        );
+    sock.ev.on("creds.update", saveCreds);
+    sock.ev.on("messages.upsert", ({ messages, type }) => {
+      if (type !== "notify" && type !== "append") return;
+      for (const msg of messages) {
+        // Never await here — a hung send must not freeze the whole bot.
+        handleIncomingMessage(msg).catch((error) => {
+          log.warn(
+            { error: String(error?.message || error) },
+            "Unhandled command error",
+          );
+        });
       }
-    }
-  });
+    });
+
+    sock.ev.on("connection.update", async (update) => {
+      const { connection, lastDisconnect, qr } = update;
+
+      if (qr) {
+        console.log("\n📷 סרקו את הברקוד עם WhatsApp → מכשירים מקושרים:\n");
+        qrcodeTerminal.generate(qr, { small: true });
+        await saveQrPng(qr);
+        const qrLink = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(qr)}`;
+        console.log(`\nאו פתחו במובייל: ${qrLink}\n`);
+      }
+
+      if (connection === "open") {
+        await onConnected();
+      }
+
+      if (connection === "close") {
+        waConnected = false;
+        const code = disconnectStatusCode(lastDisconnect);
+        const loggedOut = code === DisconnectReason.loggedOut;
+        const replaced = code === DisconnectReason.connectionReplaced;
+        log.warn({ code }, "WhatsApp connection closed");
+        console.log(`⚠️ חיבור וואטסאפ נסגר (code=${code}).`);
+
+        if (loggedOut) {
+          console.log(
+            "התנתקתם מהמכשיר המקושר. מחקו את תיקיית auth וסרקו ברקוד מחדש.",
+          );
+          return;
+        }
+        if (replaced) {
+          console.log(
+            "החיבור הוחלף במכשיר אחר — לא מתחברים מחדש אוטומטית.",
+          );
+          return;
+        }
+        scheduleReconnect(code);
+      }
+    });
+  } finally {
+    startingSocket = false;
+  }
 }
 
 async function main() {
@@ -843,6 +1037,13 @@ async function main() {
   console.log(`   Group: ${cfg.groupName}`);
   console.log(`   Alerts: ${cfg.alertsEnabled ? "on" : "off"}`);
   console.log("");
+
+  process.on("unhandledRejection", (reason) => {
+    log.warn({ reason: String(reason) }, "unhandledRejection");
+  });
+  process.on("uncaughtException", (error) => {
+    log.error({ error: String(error?.message || error) }, "uncaughtException");
+  });
 
   await startSocket();
 }

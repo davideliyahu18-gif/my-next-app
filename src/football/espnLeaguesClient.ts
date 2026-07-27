@@ -50,16 +50,29 @@ async function espnGet(
     }
   }
 
-  const response = await fetch(url, {
-    headers: {
-      Accept: "application/json",
-      "User-Agent":
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    },
-    ...(options?.fresh
-      ? { cache: "no-store" as const }
-      : { next: { revalidate: 30 } }),
-  });
+  const controller = new AbortController();
+  const timeoutMs = Number(process.env.FOOTBALL_ESPN_TIMEOUT_MS || 12_000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        Accept: "application/json",
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      },
+      signal: controller.signal,
+      ...(options?.fresh
+        ? { cache: "no-store" as const }
+        : { next: { revalidate: 30 } }),
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "ESPN fetch failed";
+    throw new EspnClientError(`ESPN timeout/network for ${path}: ${message}`, undefined, path);
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!response.ok) {
     throw new EspnClientError(
