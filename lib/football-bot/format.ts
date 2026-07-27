@@ -50,12 +50,13 @@ function scoreLine(match: {
 
 export function formatHelpMessage(): string {
   return [
-    "⚽ *בוט כדורגל — כל הליגות*",
+    "⚽ *בוט כדורגל — ליגות*",
     "",
     "כתבו בקבוצה:",
+    "• *לוח* — תפריט בחירת ליגה",
+    "• *לוח 1* / *לוח אנגלית* — לוח לליגה",
     "• *תוצאה* — משחקים חיים / הקרובים",
     "• *מחר* — משחקי מחר",
-    "• *לוח* — המשחקים הבאים",
     "• *ליגות* — מה הבוט עוקב אחריו",
     "• *סטטוס* / *בוט* — האם הבוט חי",
     "• *עזרה* — ההודעה הזאת",
@@ -193,17 +194,28 @@ export function formatTomorrowMatches(upcoming: FootballMatch[]): string {
 export function formatUpcomingSchedule(
   upcoming: FootballMatch[],
   limit = 8,
+  leagueLabel?: string,
 ): string {
   const matches = upcoming.slice(0, limit);
-  if (!matches.length) return "📋 אין משחקים קרובים ברשימה.";
+  const title = leagueLabel
+    ? `📋 *לוח — ${leagueLabel}*`
+    : "📋 *המשחקים הבאים*";
 
-  const lines = ["📋 *המשחקים הבאים*", ""];
+  if (!matches.length) {
+    return leagueLabel
+      ? `${title}\n\nאין כרגע משחקים קרובים בליגה הזאת.\nכתבו *לוח* לבחירה מחדש.`
+      : "📋 אין משחקים קרובים ברשימה.\nכתבו *לוח* לבחירת ליגה.";
+  }
+
+  const lines = [title, ""];
   for (const match of matches) {
     const view = toView(match);
     const prefix = view.status === "live" || view.status === "pause" ? "🔴 " : "";
     lines.push(`${prefix}${scoreLine(view)}`);
     lines.push(`   ${formatKickoffHe(view.kickoffAt)} · ${match.competition}`);
   }
+  lines.push("");
+  lines.push("כתבו *לוח* לבחירת ליגה אחרת.");
   return lines.join("\n");
 }
 

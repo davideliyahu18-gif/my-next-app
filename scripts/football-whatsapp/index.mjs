@@ -92,6 +92,9 @@ let groupPollTimer = null;
 let welcomeSent = false;
 let pollRunning = false;
 let cfg = envConfig();
+/** @type {Map<string, { intent: "schedule"; expiresAt: number }>} */
+const pendingByChat = new Map();
+const PENDING_TTL_MS = 5 * 60 * 1000;
 
 async function loadJson(file, fallback) {
   if (!existsSync(file)) return fallback;
@@ -150,8 +153,42 @@ function looksLikeRemoteCommand(raw) {
     "חי",
     "לייב",
     "פקודות",
+    "אנגלית",
+    "ספרדית",
+    "ישראלית",
+    "איטלקית",
+    "הכל",
+    "פרמייר",
+    "סרייה",
+    "סריה",
   ];
-  return keys.some((k) => t === k || t.startsWith(`${k} `) || t.includes(k));
+  if (keys.some((k) => t === k || t.startsWith(`${k} `) || t.includes(k))) {
+    return true;
+  }
+  // Menu picks: 0-4
+  if (/^[0-4]$/.test(t.trim())) return true;
+  return false;
+}
+
+function getPending(chatId) {
+  const pending = pendingByChat.get(chatId);
+  if (!pending) return null;
+  if (Date.now() > pending.expiresAt) {
+    pendingByChat.delete(chatId);
+    return null;
+  }
+  return pending;
+}
+
+function setSchedulePending(chatId) {
+  pendingByChat.set(chatId, {
+    intent: "schedule",
+    expiresAt: Date.now() + PENDING_TTL_MS,
+  });
+}
+
+function clearPending(chatId) {
+  pendingByChat.delete(chatId);
 }
 
 async function apiFetch(pathname, options = {}) {
@@ -188,7 +225,10 @@ async function runRemoteCommand(text) {
     method: "POST",
     body: JSON.stringify({ text }),
   });
-  return result.reply || "אין תשובה מהשרת.";
+  return {
+    reply: result.reply || "אין תשובה מהשרת.",
+    command: result.command || "",
+  };
 }
 
 async function sendToGroup(text) {
@@ -244,7 +284,12 @@ async function handleIncomingMessage(msg) {
     if (!chatId || !chatId.endsWith("@g.us")) return;
 
     const body = extractText(msg).trim();
-    if (!body || !looksLikeRemoteCommand(body)) return;
+    if (!body) return;
+
+    const pending = getPending(chatId);
+    const treatAsCommand =
+      looksLikeRemoteCommand(body) || Boolean(pending);
+    if (!treatAsCommand) return;
 
     if (groupJid && !sameChatId(chatId, groupJid)) return;
 
@@ -253,11 +298,26 @@ async function handleIncomingMessage(msg) {
       await saveState();
     }
 
-    log.info({ from: chatId, body }, "Remote command received");
+    let commandText = body;
+    if (pending?.intent === "schedule") {
+      const alreadySchedule = /^(לוח|לוז|לו״ז|schedule)\b/i.test(body.trim());
+      if (!alreadySchedule) {
+        commandText = `לוח ${body}`;
+      }
+    }
+
+    log.info({ from: chatId, body, commandText }, "Remote command received");
     await sock.sendMessage(chatId, { text: "⏳ רגע, בודק…" });
 
     try {
-      const reply = await runRemoteCommand(body);
+      const { reply, command } = await runRemoteCommand(commandText);
+      if (command === "schedule_menu") {
+        setSchedulePending(chatId);
+      } else if (command === "schedule") {
+        clearPending(chatId);
+      } else if (command && command !== "unknown") {
+        clearPending(chatId);
+      }
       await sock.sendMessage(chatId, { text: reply });
     } catch (error) {
       log.warn({ error }, "Command API failed");

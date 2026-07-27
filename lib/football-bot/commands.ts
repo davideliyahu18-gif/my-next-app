@@ -1,6 +1,7 @@
 import {
   fetchFootballBoard,
   fetchFootballCalendar,
+  type FootballMatch,
 } from "@/lib/football/source";
 import { getEnabledFootballCompetitions } from "@/lib/football/competitions";
 import {
@@ -13,6 +14,11 @@ import {
   formatUpcomingSchedule,
   formatKickoffHe,
 } from "./format";
+import {
+  extractScheduleLeagueQuery,
+  formatScheduleLeagueMenu,
+  resolveLeaguePick,
+} from "./league-menu";
 import type { FootballBotCommand } from "./types";
 
 function normalize(text: string): string {
@@ -61,14 +67,10 @@ export function parseFootballBotCommand(raw: string): FootballBotCommand {
     return "tomorrow";
   }
 
-  if (
-    text === "לוח" ||
-    text === "לוז" ||
-    text === "לו״ז" ||
-    text === "schedule" ||
-    text.includes("משחקים הבאים")
-  ) {
-    return "schedule";
+  // Bare לוח → menu. לוח אנגלית / לוח 1 → schedule.
+  const scheduleQuery = extractScheduleLeagueQuery(raw);
+  if (scheduleQuery !== null) {
+    return scheduleQuery === "" ? "schedule_menu" : "schedule";
   }
 
   if (
@@ -85,6 +87,13 @@ export function parseFootballBotCommand(raw: string): FootballBotCommand {
 
 export function isFootballBotRemoteCommand(raw: string): boolean {
   return parseFootballBotCommand(raw) !== "unknown";
+}
+
+function filterByLeague(
+  matches: FootballMatch[],
+  competitionId: string,
+): FootballMatch[] {
+  return matches.filter((match) => match.competitionId === competitionId);
 }
 
 export async function runFootballBotCommand(
@@ -125,11 +134,46 @@ export async function runFootballBotCommand(
       const upcoming = await fetchFootballCalendar([0, 1, 2], true);
       return { command, reply: formatTomorrowMatches(upcoming) };
     }
-    case "schedule": {
-      const board = await fetchFootballBoard(true);
+    case "schedule_menu":
       return {
         command,
-        reply: formatUpcomingSchedule(board.upcoming),
+        reply: formatScheduleLeagueMenu(getEnabledFootballCompetitions()),
+      };
+    case "schedule": {
+      const scheduleQuery = extractScheduleLeagueQuery(raw);
+      const leagueRaw =
+        scheduleQuery === null || scheduleQuery === ""
+          ? raw
+          : scheduleQuery;
+      const pick = resolveLeaguePick(leagueRaw);
+
+      if (pick.kind === "none") {
+        return {
+          command: "schedule_menu",
+          reply: [
+            "לא זיהיתי את הליגה 🙈",
+            "",
+            formatScheduleLeagueMenu(getEnabledFootballCompetitions()),
+          ].join("\n"),
+        };
+      }
+
+      const board = await fetchFootballBoard(true);
+      if (pick.kind === "all") {
+        return {
+          command,
+          reply: formatUpcomingSchedule(board.upcoming, 10, "כל הליגות"),
+        };
+      }
+
+      const filtered = filterByLeague(board.upcoming, pick.competition.id);
+      return {
+        command,
+        reply: formatUpcomingSchedule(
+          filtered,
+          10,
+          pick.competition.nameHe,
+        ),
       };
     }
     case "leagues": {

@@ -4,6 +4,7 @@ export type FootballBotCommand =
   | "score"
   | "tomorrow"
   | "schedule"
+  | "schedule_menu"
   | "leagues"
   | "unknown";
 
