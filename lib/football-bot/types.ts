@@ -36,6 +36,13 @@ export type FootballBotCommandResult = {
   command: FootballBotCommand;
   reply: string;
   interactive?: FootballBotInteractive;
+  /** Optional WhatsApp image (e.g. standings table). */
+  media?: {
+    kind: "image";
+    mime: string;
+    base64: string;
+    caption?: string;
+  };
 };
 
 export type FootballBotAlertKind =

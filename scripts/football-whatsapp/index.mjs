@@ -443,6 +443,7 @@ async function runRemoteCommand(text) {
     reply: result.reply || "אין תשובה מהשרת.",
     command: result.command || "",
     interactive: result.interactive || null,
+    media: result.media || null,
   };
 }
 
@@ -726,7 +727,7 @@ async function handleIncomingMessage(msg) {
     }
 
     try {
-      const { reply, command, interactive } = await withTimeout(
+      const { reply, command, interactive, media } = await withTimeout(
         runRemoteCommand(commandText),
         API_TIMEOUT_MS,
         "runRemoteCommand",
@@ -747,9 +748,29 @@ async function handleIncomingMessage(msg) {
         clearPending(chatId);
       }
 
-      // Always send plain text first so the chat never looks "stuck".
-      await safeSendMessage(chatId, { text: reply });
-      log.info({ command, chatId }, "Command reply sent");
+      let imageSent = false;
+      if (media?.kind === "image" && media.base64) {
+        try {
+          const image = Buffer.from(media.base64, "base64");
+          await safeSendMessage(chatId, {
+            image,
+            caption: media.caption || reply.slice(0, 900),
+            mimetype: media.mime || "image/png",
+          });
+          imageSent = true;
+          log.info({ command, chatId, bytes: image.length }, "Image reply sent");
+        } catch (imageError) {
+          log.warn(
+            { error: String(imageError?.message || imageError) },
+            "Image send failed — falling back to text",
+          );
+        }
+      }
+
+      if (!imageSent) {
+        await safeSendMessage(chatId, { text: reply });
+        log.info({ command, chatId }, "Command reply sent");
+      }
 
       if (
         interactive?.kind === "league_select" &&

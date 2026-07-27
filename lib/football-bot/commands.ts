@@ -45,6 +45,7 @@ import {
   fetchLeagueStandings,
   formatStandingsMessage,
 } from "@/lib/football/standings";
+import { renderStandingsPng } from "@/lib/football/standings-image";
 import type { FootballBotCommand, FootballBotCommandResult } from "./types";
 
 function normalize(text: string): string {
@@ -350,10 +351,31 @@ export async function runFootballBotCommand(
           pick.competition.id,
           pick.competition.nameHe,
         );
-        return {
-          command,
-          reply: formatStandingsMessage(table),
-        };
+        const reply = formatStandingsMessage(table);
+        const caption = [
+          `📊 *טבלה — ${pick.competition.nameHe}*`,
+          table.seasonLabel ? `עונה: ${table.seasonLabel}` : null,
+          "כתבו *טבלה* לבחירת ליגה אחרת",
+        ]
+          .filter(Boolean)
+          .join("\n");
+
+        try {
+          const png = await renderStandingsPng(table);
+          return {
+            command,
+            reply,
+            media: {
+              kind: "image",
+              mime: "image/png",
+              base64: png.toString("base64"),
+              caption,
+            },
+          };
+        } catch (imageError) {
+          console.error("[football-bot/standings-image]", imageError);
+          return { command, reply };
+        }
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "שגיאה בטבלה";
