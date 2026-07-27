@@ -584,18 +584,30 @@ async function handleIncomingMessage(msg) {
     }
 
     let commandText = body;
-    if (!fromButton && pending?.intent === "schedule") {
-      const alreadySchedule = /^(לוח|לוז|לו״ז|schedule)\b/i.test(body.trim());
-      if (!alreadySchedule) {
-        commandText = `לוח ${body}`;
-      }
-    } else if (!fromButton && pending?.intent === "lineup") {
-      const alreadyLineup = /^(הרכב|הרכבים|lineup|lineups)\b/i.test(
-        body.trim(),
+    // If the user sends a full new command, don't wrap it with pending intent.
+    const isFullScheduleCmd = /^(לוח|לוז|לו״ז|schedule)(?:\s|$)/i.test(body);
+    const isFullLineupCmd = /^(הרכב|הרכבים|lineup|lineups)(?:\s|$)/i.test(body);
+    const isOtherTopLevelCmd =
+      /^(עזרה|help|בוט|סטטוס|תוצאה|תוצאות|מחר|ליגות|מעקב|עקוב|הסר|בוקר|morning)(?:\s|$)/i.test(
+        body,
       );
-      if (!alreadyLineup) {
-        commandText = `הרכב ${body}`;
-      }
+
+    if (
+      !fromButton &&
+      pending?.intent === "schedule" &&
+      !isFullScheduleCmd &&
+      !isFullLineupCmd &&
+      !isOtherTopLevelCmd
+    ) {
+      commandText = `לוח ${body}`;
+    } else if (
+      !fromButton &&
+      pending?.intent === "lineup" &&
+      !isFullLineupCmd &&
+      !isFullScheduleCmd &&
+      !isOtherTopLevelCmd
+    ) {
+      commandText = `הרכב ${body}`;
     }
 
     log.info(
