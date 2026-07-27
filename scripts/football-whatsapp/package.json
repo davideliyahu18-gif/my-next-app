@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node index.mjs",
+    "start": "node supervise.mjs",
+    "start:once": "node index.mjs",
     "qr": "node index.mjs"
   },
   "dependencies": {

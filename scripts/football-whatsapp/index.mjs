@@ -87,7 +87,7 @@ function envConfig() {
       process.env.FOOTBALL_BOT_MORNING_TZ ?? "Asia/Jerusalem",
     morningEnabled: process.env.FOOTBALL_BOT_MORNING !== "false",
     alertsEnabled: process.env.FOOTBALL_BOT_ALERTS !== "false",
-    buttonsEnabled: process.env.FOOTBALL_BOT_BUTTONS !== "false",
+    buttonsEnabled: process.env.FOOTBALL_BOT_BUTTONS === "true",
     /** Allow the linked phone (e.g. 0523123944) to send commands — those arrive as fromMe. */
     allowFromMeCommands: process.env.FOOTBALL_BOT_ALLOW_FROM_ME !== "false",
     /** Optional allowlist. Empty = כל מי שבקבוצה. Example: 0523123944,05XXXXXXXX */
@@ -210,6 +210,10 @@ let startingSocket = false;
 let cronsStarted = false;
 let morningTask = null;
 let pollTask = null;
+let watchdogTimer = null;
+let lastConnectionOpenAt = 0;
+let lastSuccessfulSendAt = 0;
+let lastWsActivityAt = 0;
 /** @type {Map<string, { intent: "schedule" | "lineup" | "standings"; expiresAt: number }>} */
 const pendingByChat = new Map();
 /** Prevent one hung chat command from stacking forever. */
@@ -218,6 +222,9 @@ const PENDING_TTL_MS = 5 * 60 * 1000;
 const API_TIMEOUT_MS = 25_000;
 const SEND_TIMEOUT_MS = 20_000;
 const MAX_RECONNECT_ATTEMPTS = 50;
+const WATCHDOG_MS = 60_000;
+/** If no successful WA activity for this long while "connected", force reconnect. */
+const STALE_CONNECTION_MS = 12 * 60_000;
 
 async function loadJson(file, fallback) {
   if (!existsSync(file)) return fallback;
@@ -451,11 +458,14 @@ async function safeSendMessage(chatId, content) {
   if (!sock || !waConnected) {
     throw new Error("WhatsApp not connected");
   }
-  return withTimeout(
+  const result = await withTimeout(
     sock.sendMessage(chatId, content),
     SEND_TIMEOUT_MS,
     "sendMessage",
   );
+  lastSuccessfulSendAt = Date.now();
+  lastWsActivityAt = Date.now();
+  return result;
 }
 
 async function sendToGroup(text) {
@@ -819,7 +829,15 @@ async function pollAlerts() {
     let posted = 0;
     for (const alert of alerts) {
       if (!alert?.text) continue;
-      if (await sendToGroup(alert.text)) posted += 1;
+      if (!waConnected) break;
+      try {
+        if (await sendToGroup(alert.text)) posted += 1;
+      } catch (error) {
+        log.warn(
+          { error: String(error?.message || error) },
+          "Alert send failed — continuing",
+        );
+      }
     }
     if (alerts.length) {
       log.info(
@@ -884,6 +902,10 @@ async function saveQrPng(qr) {
 async function onConnected() {
   waConnected = true;
   reconnectAttempts = 0;
+  lastConnectionOpenAt = Date.now();
+  lastWsActivityAt = Date.now();
+  lastSuccessfulSendAt = Date.now();
+  clearCommandLocks();
   console.log("\n✅ מחובר לוואטסאפ.");
   console.log(`   קבוצה: "${cfg.groupName}"`);
   console.log(
@@ -897,7 +919,7 @@ async function onConnected() {
     console.log(`   מפעילים: ${cfg.operators.join(", ")}`);
   }
   console.log("   שני המספרים בקבוצה יכולים לכתוב פקודות.");
-  console.log("   חיבור יציב + reconnect אוטומטי פעיל.\n");
+  console.log("   חיבור יציב + reconnect + watchdog + supervisor.\n");
 
   if (groupPollTimer) {
     clearInterval(groupPollTimer);
@@ -947,7 +969,14 @@ async function onConnected() {
         { timezone: cfg.morningTimezone },
       );
     }
+
+    // Keep Next API warm + log site reachability every 5 minutes.
+    cron.schedule("*/5 * * * *", () => {
+      healthPingSite().catch(() => {});
+    });
   }
+
+  startWatchdog();
 }
 
 function disconnectStatusCode(lastDisconnect) {
@@ -960,12 +989,18 @@ function disconnectStatusCode(lastDisconnect) {
   );
 }
 
+function clearCommandLocks() {
+  commandInFlight.clear();
+}
+
 function scheduleReconnect(code) {
   if (reconnectTimer) return;
   if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
     console.error(
-      `❌ יותר מדי ניסיונות reconnect (${MAX_RECONNECT_ATTEMPTS}). עצרו והפעילו מחדש.`,
+      `❌ יותר מדי ניסיונות reconnect (${MAX_RECONNECT_ATTEMPTS}). supervisor will restart the process.`,
     );
+    // Exit so supervise.mjs brings us back cleanly.
+    process.exit(42);
     return;
   }
   reconnectAttempts += 1;
@@ -986,6 +1021,7 @@ async function endSocketQuietly() {
   const current = sock;
   sock = null;
   waConnected = false;
+  clearCommandLocks();
   if (!current) return;
   try {
     current.ev.removeAllListeners();
@@ -993,9 +1029,76 @@ async function endSocketQuietly() {
     /* ignore */
   }
   try {
-    await current.end(undefined);
+    await withTimeout(current.end(undefined), 5_000, "socket.end");
   } catch {
-    /* ignore */
+    try {
+      current.ws?.close?.();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function startWatchdog() {
+  if (watchdogTimer) return;
+  watchdogTimer = setInterval(async () => {
+    try {
+      const now = Date.now();
+      if (!waConnected || !sock) return;
+      const lastBeat = Math.max(
+        lastSuccessfulSendAt,
+        lastWsActivityAt,
+        lastConnectionOpenAt,
+      );
+      if (!lastBeat) return;
+      const staleFor = now - lastBeat;
+
+      // Soft probe before declaring the socket dead.
+      if (staleFor > STALE_CONNECTION_MS / 2 && groupJid) {
+        try {
+          await withTimeout(
+            sock.groupMetadata(groupJid),
+            10_000,
+            "watchdog.groupMetadata",
+          );
+          lastWsActivityAt = Date.now();
+          return;
+        } catch (error) {
+          log.warn(
+            { error: String(error?.message || error) },
+            "watchdog probe failed",
+          );
+        }
+      }
+
+      if (staleFor < STALE_CONNECTION_MS) return;
+
+      console.warn(
+        `🩺 watchdog: חיבור נראה תקוע (${Math.round(staleFor / 1000)}ש בלי פעילות) — reconnect`,
+      );
+      waConnected = false;
+      scheduleReconnect("watchdog-stale");
+    } catch (error) {
+      log.warn(
+        { error: String(error?.message || error) },
+        "watchdog tick failed",
+      );
+    }
+  }, WATCHDOG_MS);
+  if (typeof watchdogTimer.unref === "function") watchdogTimer.unref();
+}
+
+async function healthPingSite() {
+  try {
+    await apiFetch("/api/football-bot/command", {
+      method: "POST",
+      body: JSON.stringify({ text: "עזרה" }),
+    });
+  } catch (error) {
+    log.warn(
+      { error: String(error?.message || error) },
+      "Site health ping failed",
+    );
   }
 }
 
@@ -1024,6 +1127,7 @@ async function startSocket() {
 
     sock.ev.on("creds.update", saveCreds);
     sock.ev.on("messages.upsert", ({ messages, type }) => {
+      lastWsActivityAt = Date.now();
       if (type !== "notify" && type !== "append") return;
       for (const msg of messages) {
         // Never await here — a hung send must not freeze the whole bot.
@@ -1034,6 +1138,17 @@ async function startSocket() {
           );
         });
       }
+    });
+
+    // Any WA traffic counts as liveness for the watchdog.
+    sock.ev.on("messaging-history.set", () => {
+      lastWsActivityAt = Date.now();
+    });
+    sock.ev.on("presence.update", () => {
+      lastWsActivityAt = Date.now();
+    });
+    sock.ev.on("chats.update", () => {
+      lastWsActivityAt = Date.now();
     });
 
     sock.ev.on("connection.update", async (update) => {
@@ -1112,9 +1227,14 @@ async function main() {
     log.warn({ reason: String(reason) }, "unhandledRejection");
   });
   process.on("uncaughtException", (error) => {
-    log.error({ error: String(error?.message || error) }, "uncaughtException");
+    // Log but do NOT exit — WhatsApp sockets sometimes throw recoverable noise.
+    log.error(
+      { error: String(error?.message || error) },
+      "uncaughtException (kept alive)",
+    );
   });
 
+  startWatchdog();
   await startSocket();
 }
 
