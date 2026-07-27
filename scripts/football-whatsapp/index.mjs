@@ -9,7 +9,7 @@
  */
 
 import { createRequire } from "node:module";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile, readdir, rename } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,6 +23,10 @@ const ROOT = path.join(__dirname, "../..");
 const AUTH_DIR = path.join(__dirname, "auth");
 const STATE_FILE = path.join(__dirname, "bot-state.json");
 const QR_FILE = path.join(__dirname, "qr.png");
+/** Drop JSON jobs here — processed by the RUNNING bot (never open a 2nd WA session). */
+const OUTBOX_DIR = path.join(__dirname, "outbox");
+const OUTBOX_DONE_DIR = path.join(OUTBOX_DIR, "done");
+const OUTBOX_FAILED_DIR = path.join(OUTBOX_DIR, "failed");
 
 const require = createRequire(import.meta.url);
 const baileys = require("@whiskeysockets/baileys");
@@ -218,6 +222,7 @@ let cronsStarted = false;
 let morningTask = null;
 let pollTask = null;
 let watchdogTimer = null;
+let outboxTimer = null;
 let lastConnectionOpenAt = 0;
 let lastSuccessfulSendAt = 0;
 let lastWsActivityAt = 0;
@@ -486,6 +491,89 @@ async function sendToGroup(text) {
   if (!sock || !groupJid || !waConnected) return false;
   await safeSendMessage(groupJid, { text });
   return true;
+}
+
+async function ensureOutboxDirs() {
+  await mkdir(OUTBOX_DIR, { recursive: true });
+  await mkdir(OUTBOX_DONE_DIR, { recursive: true });
+  await mkdir(OUTBOX_FAILED_DIR, { recursive: true });
+}
+
+/**
+ * Process one outbox job without opening a second Baileys session.
+ * Job JSON: { text?, caption?, imageBase64?, imagePath?, mime? }
+ */
+async function processOutboxJob(filePath) {
+  const raw = await readFile(filePath, "utf8");
+  const job = JSON.parse(raw);
+  const base = path.basename(filePath);
+
+  if (!sock || !groupJid || !waConnected) {
+    throw new Error("WhatsApp not ready for outbox");
+  }
+
+  if (job.imageBase64 || job.imagePath) {
+    const image = job.imageBase64
+      ? Buffer.from(job.imageBase64, "base64")
+      : await readFile(job.imagePath);
+    await safeSendMessage(groupJid, {
+      image,
+      caption: String(job.caption || job.text || "").slice(0, 900),
+      mimetype: job.mime || "image/png",
+    });
+  } else if (job.text) {
+    await safeSendMessage(groupJid, { text: String(job.text) });
+  } else {
+    throw new Error("outbox job has no text/image");
+  }
+
+  const dest = path.join(OUTBOX_DONE_DIR, `${Date.now()}-${base}`);
+  await rename(filePath, dest);
+  log.info({ file: base }, "Outbox job sent");
+}
+
+async function drainOutbox() {
+  if (!sock || !groupJid || !waConnected) return;
+  try {
+    await ensureOutboxDirs();
+    const names = (await readdir(OUTBOX_DIR))
+      .filter((name) => name.endsWith(".json"))
+      .sort();
+    for (const name of names) {
+      const filePath = path.join(OUTBOX_DIR, name);
+      try {
+        await processOutboxJob(filePath);
+      } catch (error) {
+        log.warn(
+          { file: name, error: String(error?.message || error) },
+          "Outbox job failed",
+        );
+        try {
+          const dest = path.join(
+            OUTBOX_FAILED_DIR,
+            `${Date.now()}-${name}`,
+          );
+          await rename(filePath, dest);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  } catch (error) {
+    log.warn(
+      { error: String(error?.message || error) },
+      "Outbox drain failed",
+    );
+  }
+}
+
+function startOutboxWatcher() {
+  if (outboxTimer) return;
+  outboxTimer = setInterval(() => {
+    drainOutbox().catch(() => {});
+  }, 3_000);
+  if (typeof outboxTimer.unref === "function") outboxTimer.unref();
+  drainOutbox().catch(() => {});
 }
 
 /**
@@ -992,6 +1080,7 @@ async function onConnected() {
   }
 
   startWatchdog();
+  startOutboxWatcher();
 }
 
 function disconnectStatusCode(lastDisconnect) {

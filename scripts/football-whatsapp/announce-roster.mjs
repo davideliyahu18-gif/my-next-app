@@ -1,39 +1,56 @@
-import { createRequire } from "node:module";
-import { readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+#!/usr/bin/env node
+/**
+ * Queue Barcelona roster announce through the RUNNING bot outbox.
+ * Does NOT open a second WhatsApp session.
+ */
+import { writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import pino from "pino";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const AUTH_DIR = path.join(__dirname, "auth");
-const STATE_FILE = path.join(__dirname, "bot-state.json");
-const require = createRequire(import.meta.url);
-const baileys = require("@whiskeysockets/baileys");
-const {
-  default: makeWASocket,
-  useMultiFileAuthState,
-  fetchLatestBaileysVersion,
-} = baileys;
+const ROOT = path.join(__dirname, "../..");
+const OUTBOX_DIR = path.join(__dirname, "outbox");
 
-const state = existsSync(STATE_FILE)
-  ? JSON.parse(await readFile(STATE_FILE, "utf8"))
-  : {};
-const groupJid =
-  process.env.FOOTBALL_WHATSAPP_CHAT_ID ||
-  state.groupJid ||
-  "120363411314074126@g.us";
+async function loadEnv() {
+  for (const name of [".env.local", ".env"]) {
+    try {
+      const text = await import("node:fs/promises").then((fs) =>
+        fs.readFile(path.join(ROOT, name), "utf8"),
+      );
+      for (const line of text.split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#")) continue;
+        const idx = trimmed.indexOf("=");
+        if (idx === -1) continue;
+        const key = trimmed.slice(0, idx).trim();
+        let value = trimmed.slice(idx + 1).trim();
+        if (
+          (value.startsWith('"') && value.endsWith('"')) ||
+          (value.startsWith("'") && value.endsWith("'"))
+        ) {
+          value = value.slice(1, -1);
+        }
+        if (process.env[key] == null) process.env[key] = value;
+      }
+    } catch {
+      /* missing */
+    }
+  }
+}
 
-const site =
+await loadEnv();
+
+const site = (
   process.env.FOOTBALL_BOT_SITE_URL ||
   process.env.NEXT_PUBLIC_SITE_URL ||
-  "http://127.0.0.1:3000";
+  "http://127.0.0.1:3000"
+).replace(/\/$/, "");
 const secret =
   process.env.FOOTBALL_BOT_SECRET ||
   process.env.CRON_SECRET ||
   "dev-football-secret";
 
-const api = await fetch(`${site.replace(/\/$/, "")}/api/football-bot/command`, {
+const api = await fetch(`${site}/api/football-bot/command`, {
   method: "POST",
   headers: {
     Authorization: `Bearer ${secret}`,
@@ -44,7 +61,9 @@ const api = await fetch(`${site.replace(/\/$/, "")}/api/football-bot/command`, {
 const result = await api.json();
 const media = result.media;
 if (!media?.base64) {
-  throw new Error(`no media from roster command: ${JSON.stringify(result).slice(0, 300)}`);
+  throw new Error(
+    `no media from roster command: ${JSON.stringify(result).slice(0, 300)}`,
+  );
 }
 
 const intro = [
@@ -57,44 +76,23 @@ const intro = [
   "כתבו *סגל* / *סגל ברצלונה* לרשימה המלאה 👇",
 ].join("\n");
 
-const { state: auth, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-const { version } = await fetchLatestBaileysVersion();
-const sock = makeWASocket({
-  version,
-  auth,
-  printQRInTerminal: false,
-  logger: pino({ level: "silent" }),
-});
-sock.ev.on("creds.update", saveCreds);
+await mkdir(OUTBOX_DIR, { recursive: true });
+const stamp = Date.now();
 
-await new Promise((resolve, reject) => {
-  const timer = setTimeout(() => reject(new Error("timeout")), 45000);
-  sock.ev.on("connection.update", async (update) => {
-    if (update.qr) {
-      clearTimeout(timer);
-      reject(new Error("needs QR"));
-      return;
-    }
-    if (update.connection === "open") {
-      try {
-        await sock.sendMessage(groupJid, { text: intro });
-        await sock.sendMessage(groupJid, {
-          image: Buffer.from(media.base64, "base64"),
-          caption: media.caption || String(result.reply || "").slice(0, 900),
-          mimetype: media.mime || "image/png",
-        });
-        console.log("SENT_OK");
-        clearTimeout(timer);
-        resolve();
-      } catch (e) {
-        clearTimeout(timer);
-        reject(e);
-      }
-    }
-    if (update.connection === "close") {
-      clearTimeout(timer);
-      reject(new Error("closed"));
-    }
-  });
-});
-setTimeout(() => process.exit(0), 2000);
+await writeFile(
+  path.join(OUTBOX_DIR, `${stamp}-roster-intro.json`),
+  JSON.stringify({ text: intro, queuedAt: new Date().toISOString() }),
+  "utf8",
+);
+await writeFile(
+  path.join(OUTBOX_DIR, `${stamp + 1}-roster-image.json`),
+  JSON.stringify({
+    queuedAt: new Date().toISOString(),
+    imageBase64: media.base64,
+    mime: media.mime || "image/png",
+    caption: media.caption || String(result.reply || "").slice(0, 900),
+  }),
+  "utf8",
+);
+
+console.log("QUEUED_OK roster intro + image (bot outbox)");
