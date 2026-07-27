@@ -5,6 +5,10 @@ import {
 } from "@/lib/football/source";
 import { getEnabledFootballCompetitions } from "@/lib/football/competitions";
 import {
+  fetchMatchLineups,
+  formatMatchLineupsMessage,
+} from "@/lib/football/lineups";
+import {
   formatHelpMessage,
   formatLeagues,
   formatLiveScores,
@@ -15,7 +19,9 @@ import {
   formatKickoffHe,
 } from "./format";
 import {
+  extractLineupLeagueQuery,
   extractScheduleLeagueQuery,
+  formatLineupLeagueMenu,
   formatScheduleLeagueMenu,
   resolveLeaguePick,
 } from "./league-menu";
@@ -67,6 +73,11 @@ export function parseFootballBotCommand(raw: string): FootballBotCommand {
     return "tomorrow";
   }
 
+  const lineupQuery = extractLineupLeagueQuery(raw);
+  if (lineupQuery !== null) {
+    return lineupQuery === "" ? "lineup_menu" : "lineup";
+  }
+
   // Bare לוח → menu. לוח אנגלית / לוח 1 → schedule.
   const scheduleQuery = extractScheduleLeagueQuery(raw);
   if (scheduleQuery !== null) {
@@ -94,6 +105,48 @@ function filterByLeague(
   competitionId: string,
 ): FootballMatch[] {
   return matches.filter((match) => match.competitionId === competitionId);
+}
+
+async function replyLineupForMatches(
+  matches: FootballMatch[],
+  leagueLabel: string,
+): Promise<string> {
+  const upcoming = matches
+    .filter((match) => match.status === "SCHEDULED" || match.status === "IN_PLAY")
+    .slice(0, 1);
+
+  if (!upcoming.length) {
+    return [
+      `🧍 *הרכבים — ${leagueLabel}*`,
+      "",
+      "אין משחק קרוב בליגה הזאת כרגע.",
+      "כתבו *הרכב* לבחירה מחדש.",
+    ].join("\n");
+  }
+
+  const blocks: string[] = [];
+  for (const match of upcoming) {
+    const lineups = await fetchMatchLineups(match, true);
+    if (!lineups) {
+      blocks.push(
+        [
+          `🏟️ *${match.homeTeam}* נגד *${match.awayTeam}*`,
+          `🏆 ${match.competition}`,
+          `🕐 ${formatKickoffHe(match.utcDate.toISOString())}`,
+          "",
+          "אין מקור הרכב למשחק הזה עדיין.",
+        ].join("\n"),
+      );
+      continue;
+    }
+    blocks.push(
+      formatMatchLineupsMessage(match, lineups, {
+        title: `🧍 *הרכבים — ${leagueLabel}*`,
+      }),
+    );
+  }
+
+  return blocks.join("\n\n————————\n\n");
 }
 
 export async function runFootballBotCommand(
@@ -174,6 +227,42 @@ export async function runFootballBotCommand(
           10,
           pick.competition.nameHe,
         ),
+      };
+    }
+    case "lineup_menu":
+      return {
+        command,
+        reply: formatLineupLeagueMenu(getEnabledFootballCompetitions()),
+      };
+    case "lineup": {
+      const lineupQuery = extractLineupLeagueQuery(raw);
+      const leagueRaw =
+        lineupQuery === null || lineupQuery === "" ? raw : lineupQuery;
+      const pick = resolveLeaguePick(leagueRaw);
+
+      if (pick.kind === "none" || pick.kind === "all") {
+        if (pick.kind === "all") {
+          const board = await fetchFootballBoard(true);
+          return {
+            command,
+            reply: await replyLineupForMatches(board.upcoming, "כל הליגות"),
+          };
+        }
+        return {
+          command: "lineup_menu",
+          reply: [
+            "לא זיהיתי את הליגה 🙈",
+            "",
+            formatLineupLeagueMenu(getEnabledFootballCompetitions()),
+          ].join("\n"),
+        };
+      }
+
+      const board = await fetchFootballBoard(true);
+      const filtered = filterByLeague(board.upcoming, pick.competition.id);
+      return {
+        command,
+        reply: await replyLineupForMatches(filtered, pick.competition.nameHe),
       };
     }
     case "leagues": {

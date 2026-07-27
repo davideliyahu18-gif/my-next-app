@@ -555,7 +555,8 @@ export async function fetchFootballAlertCandidates(
   const calendar = await fetchFootballCalendar([-1, 0, 1], fresh);
   const windowed = calendar.filter((match) => {
     const kickoff = match.utcDate.getTime();
-    return kickoff >= now - 4 * 60 * 60 * 1000 && kickoff <= now + 45 * 60 * 1000;
+    // Include matches up to ~75 min ahead so 60-minute reminders fire.
+    return kickoff >= now - 4 * 60 * 60 * 1000 && kickoff <= now + 75 * 60 * 1000;
   });
 
   const enriched = await Promise.all(

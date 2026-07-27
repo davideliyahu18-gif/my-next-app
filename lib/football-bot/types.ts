@@ -5,6 +5,8 @@ export type FootballBotCommand =
   | "tomorrow"
   | "schedule"
   | "schedule_menu"
+  | "lineup"
+  | "lineup_menu"
   | "leagues"
   | "unknown";
 
@@ -13,6 +15,7 @@ export type FootballBotAlertKind =
   | "half_time"
   | "full_time"
   | "kickoff_reminder"
+  | "lineup"
   | "match_start";
 
 export interface FootballBotAlert {
@@ -38,6 +41,10 @@ export interface FootballBotMatchSnapshot {
   /** Timeline goal event ids already announced. */
   goalEventIds?: string[];
   halfTimeSent?: boolean;
+  reminder30Sent?: boolean;
+  reminder60Sent?: boolean;
+  lineupSent?: boolean;
+  /** @deprecated kept for old snapshots compatibility */
   reminderSent?: boolean;
 }
 

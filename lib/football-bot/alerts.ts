@@ -3,10 +3,15 @@ import {
   type FootballMatch,
 } from "@/lib/football/source";
 import {
+  fetchMatchLineups,
+  formatMatchLineupsMessage,
+} from "@/lib/football/lineups";
+import {
   formatFullTimeAlert,
   formatGoalAlert,
   formatHalfTimeAlert,
   formatKickoffReminder,
+  formatLineupAlert,
   formatMatchStartAlert,
 } from "./format";
 import {
@@ -20,10 +25,10 @@ import type {
   FootballBotMatchSnapshot,
 } from "./types";
 
-const REMINDER_WINDOW_MIN = Number(
-  process.env.FOOTBALL_BOT_REMINDER_MINUTES ?? "30",
-);
+const REMINDER_30_MIN = Number(process.env.FOOTBALL_BOT_REMINDER_MINUTES ?? "30");
+const REMINDER_60_MIN = Number(process.env.FOOTBALL_BOT_REMINDER_60_MINUTES ?? "60");
 const REMINDER_TOLERANCE_MIN = 4;
+const LINEUP_WINDOW_MIN = Number(process.env.FOOTBALL_BOT_LINEUP_MINUTES ?? "90");
 
 function mapStatus(
   status: FootballMatch["status"],
@@ -55,7 +60,9 @@ function toSnapshot(
     competition: match.competition,
     goalEventIds: previous?.goalEventIds ?? [],
     halfTimeSent: previous?.halfTimeSent ?? false,
-    reminderSent: previous?.reminderSent ?? false,
+    reminder30Sent: previous?.reminder30Sent ?? previous?.reminderSent ?? false,
+    reminder60Sent: previous?.reminder60Sent ?? false,
+    lineupSent: previous?.lineupSent ?? false,
   };
 }
 
@@ -68,6 +75,18 @@ async function buildAlert(
 
 function totalScore(home: number | null, away: number | null): number {
   return (home ?? 0) + (away ?? 0);
+}
+
+async function lineupTextForMatch(match: FootballMatch): Promise<string | null> {
+  const lineups = await fetchMatchLineups(match, true);
+  if (!lineups?.available) return null;
+  // Reuse formatter but strip the outer title for embedding in reminders.
+  const full = formatMatchLineupsMessage(match, lineups, { title: "🧍 *הרכבים*" });
+  return full;
+}
+
+function withinWindow(minutesLeft: number, target: number): boolean {
+  return minutesLeft <= target && minutesLeft >= target - REMINDER_TOLERANCE_MIN;
 }
 
 export async function collectFootballBotAlerts(): Promise<{
@@ -152,7 +171,6 @@ export async function collectFootballBotAlerts(): Promise<{
     }
     snapshot.goalEventIds = [...seenGoals];
 
-    // Fallback if timeline lags behind the scoreboard.
     if (!announcedFromTimeline) {
       const prevTotal = totalScore(prev.homeScore, prev.awayScore);
       const nextTotal = totalScore(snapshot.homeScore, snapshot.awayScore);
@@ -199,23 +217,59 @@ export async function collectFootballBotAlerts(): Promise<{
       if (alert) alerts.push(alert);
     }
 
-    if (!snapshot.reminderSent && snapshot.status === "upcoming") {
+    if (snapshot.status === "upcoming") {
       const minutesLeft = Math.round(
         (new Date(snapshot.kickoffAt).getTime() - now) / 60_000,
       );
+
+      // Lineups drop window — announce once when first available.
       if (
-        minutesLeft <= REMINDER_WINDOW_MIN &&
-        minutesLeft >= REMINDER_WINDOW_MIN - REMINDER_TOLERANCE_MIN
+        !snapshot.lineupSent &&
+        minutesLeft <= LINEUP_WINDOW_MIN &&
+        minutesLeft > 0
       ) {
+        const lineupBlock = await lineupTextForMatch(match);
+        if (lineupBlock) {
+          const alert = await buildAlert({
+            id: `lineup:${snapshot.id}`,
+            kind: "lineup",
+            matchId: snapshot.id,
+            text: formatLineupAlert(snapshot, lineupBlock),
+          });
+          if (alert) {
+            alerts.push(alert);
+            snapshot.lineupSent = true;
+          }
+        }
+      }
+
+      if (!snapshot.reminder60Sent && withinWindow(minutesLeft, REMINDER_60_MIN)) {
+        const lineupBlock = await lineupTextForMatch(match);
         const alert = await buildAlert({
-          id: `reminder:${snapshot.id}`,
+          id: `reminder:60:${snapshot.id}`,
           kind: "kickoff_reminder",
           matchId: snapshot.id,
-          text: formatKickoffReminder(snapshot, minutesLeft),
+          text: formatKickoffReminder(snapshot, minutesLeft, lineupBlock),
         });
         if (alert) {
           alerts.push(alert);
-          snapshot.reminderSent = true;
+          snapshot.reminder60Sent = true;
+          if (lineupBlock) snapshot.lineupSent = true;
+        }
+      }
+
+      if (!snapshot.reminder30Sent && withinWindow(minutesLeft, REMINDER_30_MIN)) {
+        const lineupBlock = await lineupTextForMatch(match);
+        const alert = await buildAlert({
+          id: `reminder:30:${snapshot.id}`,
+          kind: "kickoff_reminder",
+          matchId: snapshot.id,
+          text: formatKickoffReminder(snapshot, minutesLeft, lineupBlock),
+        });
+        if (alert) {
+          alerts.push(alert);
+          snapshot.reminder30Sent = true;
+          if (lineupBlock) snapshot.lineupSent = true;
         }
       }
     }

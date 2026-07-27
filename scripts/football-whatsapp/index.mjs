@@ -92,7 +92,7 @@ let groupPollTimer = null;
 let welcomeSent = false;
 let pollRunning = false;
 let cfg = envConfig();
-/** @type {Map<string, { intent: "schedule"; expiresAt: number }>} */
+/** @type {Map<string, { intent: "schedule" | "lineup"; expiresAt: number }>} */
 const pendingByChat = new Map();
 const PENDING_TTL_MS = 5 * 60 * 1000;
 
@@ -161,6 +161,9 @@ function looksLikeRemoteCommand(raw) {
     "פרמייר",
     "סרייה",
     "סריה",
+    "הרכב",
+    "הרכבים",
+    "lineup",
   ];
   if (keys.some((k) => t === k || t.startsWith(`${k} `) || t.includes(k))) {
     return true;
@@ -180,9 +183,9 @@ function getPending(chatId) {
   return pending;
 }
 
-function setSchedulePending(chatId) {
+function setPending(chatId, intent) {
   pendingByChat.set(chatId, {
-    intent: "schedule",
+    intent,
     expiresAt: Date.now() + PENDING_TTL_MS,
   });
 }
@@ -304,6 +307,11 @@ async function handleIncomingMessage(msg) {
       if (!alreadySchedule) {
         commandText = `לוח ${body}`;
       }
+    } else if (pending?.intent === "lineup") {
+      const alreadyLineup = /^(הרכב|הרכבים|lineup|lineups)\b/i.test(body.trim());
+      if (!alreadyLineup) {
+        commandText = `הרכב ${body}`;
+      }
     }
 
     log.info({ from: chatId, body, commandText }, "Remote command received");
@@ -312,8 +320,10 @@ async function handleIncomingMessage(msg) {
     try {
       const { reply, command } = await runRemoteCommand(commandText);
       if (command === "schedule_menu") {
-        setSchedulePending(chatId);
-      } else if (command === "schedule") {
+        setPending(chatId, "schedule");
+      } else if (command === "lineup_menu") {
+        setPending(chatId, "lineup");
+      } else if (command === "schedule" || command === "lineup") {
         clearPending(chatId);
       } else if (command && command !== "unknown") {
         clearPending(chatId);

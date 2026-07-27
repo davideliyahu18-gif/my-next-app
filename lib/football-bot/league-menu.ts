@@ -139,9 +139,17 @@ export function extractScheduleLeagueQuery(raw: string): string | null {
   return null;
 }
 
-export function isBareScheduleCommand(raw: string): boolean {
-  const query = extractScheduleLeagueQuery(raw);
-  return query === "";
+/** Extract "הרכב …" / "הרכבים …" trailing league query, if any. */
+export function extractLineupLeagueQuery(raw: string): string | null {
+  const text = normalizeLeagueQuery(raw);
+  const prefixes = ["הרכב", "הרכבים", "lineup", "lineups"];
+  for (const prefix of prefixes) {
+    if (text === prefix) return "";
+    if (text.startsWith(`${prefix} `)) {
+      return text.slice(prefix.length).trim();
+    }
+  }
+  return null;
 }
 
 export function formatScheduleLeagueMenu(
@@ -161,5 +169,24 @@ export function formatScheduleLeagueMenu(
   lines.push("0️⃣ *הכל* — כל הליגות");
   lines.push("");
   lines.push("דוגמה: *לוח 1* · *לוח אנגלית* · *לוח ספרדית*");
+  return lines.join("\n");
+}
+
+export function formatLineupLeagueMenu(
+  competitions: FootballCompetition[] = getEnabledFootballCompetitions(),
+): string {
+  const lines = [
+    "🧍 *הרכבים — איזו ליגה?*",
+    "",
+    "בחרו מספר או שם:",
+  ];
+
+  competitions.forEach((competition, index) => {
+    lines.push(`${index + 1}️⃣ *${competition.nameHe}*`);
+  });
+
+  lines.push("");
+  lines.push("דוגמה: *הרכב 1* · *הרכב אנגלית* · *הרכב ספרדית*");
+  lines.push("הרכבים נשלחים גם אוטומטית בתזכורת לפני המשחק.");
   return lines.join("\n");
 }

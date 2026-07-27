@@ -55,13 +55,15 @@ export function formatHelpMessage(): string {
     "כתבו בקבוצה:",
     "• *לוח* — תפריט בחירת ליגה",
     "• *לוח 1* / *לוח אנגלית* — לוח לליגה",
+    "• *הרכב* — תפריט הרכבים לפי ליגה",
+    "• *הרכב אנגלית* — הרכב למשחק הבא",
     "• *תוצאה* — משחקים חיים / הקרובים",
     "• *מחר* — משחקי מחר",
     "• *ליגות* — מה הבוט עוקב אחריו",
     "• *סטטוס* / *בוט* — האם הבוט חי",
     "• *עזרה* — ההודעה הזאת",
     "",
-    "התראות אוטומטיות: שער · פתיחה · מחצית · סיום · תזכורת 30 דק׳",
+    "אוטומטי: תזכורת 60׳ + 30׳ (עם הרכב) · שער · מחצית · סיום",
   ].join("\n");
 }
 
@@ -345,8 +347,9 @@ export function formatMatchStartAlert(
 export function formatKickoffReminder(
   snapshot: FootballBotMatchSnapshot,
   minutesLeft: number,
+  lineupBlock?: string | null,
 ): string {
-  return [
+  const lines = [
     `⏰ *עוד כ־${minutesLeft} דק׳ לפתיחה*`,
     "",
     scoreLine({
@@ -359,6 +362,37 @@ export function formatKickoffReminder(
     }),
     `🕐 ${formatKickoffHe(snapshot.kickoffAt)}`,
     `🏆 ${snapshot.competition}`,
+  ];
+
+  if (lineupBlock) {
+    lines.push("", lineupBlock);
+  } else {
+    lines.push("", "🧍 הרכבים: כתבו *הרכב* או נשלח כשיפורסמו");
+  }
+
+  lines.push("", FOOTBALL_BOT_SIGNATURE);
+  return lines.join("\n");
+}
+
+export function formatLineupAlert(
+  snapshot: FootballBotMatchSnapshot,
+  lineupBlock: string,
+): string {
+  return [
+    "🧍 *הרכבים פורסמו!*",
+    "",
+    scoreLine({
+      homeFlag: snapshot.homeFlag,
+      home: snapshot.home,
+      awayFlag: snapshot.awayFlag,
+      away: snapshot.away,
+      homeScore: null,
+      awayScore: null,
+    }),
+    `🕐 ${formatKickoffHe(snapshot.kickoffAt)}`,
+    `🏆 ${snapshot.competition}`,
+    "",
+    lineupBlock,
     "",
     FOOTBALL_BOT_SIGNATURE,
   ].join("\n");

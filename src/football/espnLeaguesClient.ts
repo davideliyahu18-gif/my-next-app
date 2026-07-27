@@ -82,6 +82,19 @@ export async function getEspnScoreboard(
   return espnGet(`${leagueId}/scoreboard`, params, { fresh: options?.fresh });
 }
 
+/** Match summary (rosters / lineups / boxscore). */
+export async function getEspnSummary(
+  leagueId: string,
+  eventId: string,
+  options?: { fresh?: boolean },
+): Promise<EspnJson> {
+  return espnGet(
+    `${leagueId}/summary`,
+    { event: eventId },
+    { fresh: options?.fresh ?? true },
+  );
+}
+
 /** Events list from a scoreboard payload. */
 export function espnScoreboardEvents(scoreboard: EspnJson): EspnJson[] {
   return (scoreboard.events as EspnJson[] | undefined) ?? [];
@@ -90,6 +103,7 @@ export function espnScoreboardEvents(scoreboard: EspnJson): EspnJson[] {
 export const espnLeaguesClient = {
   baseUrl: ESPN_SOCCER_BASE,
   getEspnScoreboard,
+  getEspnSummary,
   espnScoreboardEvents,
 };
 
