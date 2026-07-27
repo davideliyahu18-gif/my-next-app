@@ -1032,6 +1032,23 @@ async function main() {
   await loadState();
   if (cfg.groupJidEnv) groupJid = cfg.groupJidEnv;
 
+  // libsignal prints noisy decrypt mismatches after reconnect churn — don't drown logs.
+  const originalConsoleError = console.error.bind(console);
+  console.error = (...args) => {
+    const text = args.map((a) => String(a)).join(" ");
+    if (
+      text.includes("Session error") ||
+      text.includes("Failed to decrypt") ||
+      text.includes("Closing session") ||
+      text.includes("Closing open session") ||
+      text.includes("Bad MAC") ||
+      text.includes("MessageCounterError")
+    ) {
+      return;
+    }
+    originalConsoleError(...args);
+  };
+
   console.log("⚽ בוט כדורגל — כל הליגות (FIFA)");
   console.log(`   Site API: ${cfg.siteUrl}`);
   console.log(`   Group: ${cfg.groupName}`);
