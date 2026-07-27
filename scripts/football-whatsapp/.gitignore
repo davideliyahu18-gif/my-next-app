@@ -1,0 +1,5 @@
+node_modules/
+auth/
+bot-state.json
+qr.png
+*.lock

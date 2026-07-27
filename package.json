@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "football-bot:setup": "npm install --prefix scripts/football-whatsapp",
+    "football-bot:start": "npm run start --prefix scripts/football-whatsapp"
   },
   "dependencies": {
     "@upstash/redis": "^1.38.0",
