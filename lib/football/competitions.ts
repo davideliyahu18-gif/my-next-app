@@ -15,7 +15,7 @@ export interface FootballCompetition {
   enabled: boolean;
 }
 
-/** Default: English · Spanish · Israeli · Italian. */
+/** Default: English · Spanish · Israeli · Italian · German. */
 export const DEFAULT_FOOTBALL_COMPETITIONS: FootballCompetition[] = [
   {
     id: "eng.1",
@@ -42,6 +42,13 @@ export const DEFAULT_FOOTBALL_COMPETITIONS: FootballCompetition[] = [
     id: "ita.1",
     nameHe: "סרייה א׳ (איטלקית)",
     nameEn: "Italian Serie A",
+    provider: "espn",
+    enabled: true,
+  },
+  {
+    id: "ger.1",
+    nameHe: "בונדסליגה (גרמנית)",
+    nameEn: "German Bundesliga",
     provider: "espn",
     enabled: true,
   },

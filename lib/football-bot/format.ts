@@ -294,7 +294,7 @@ export function formatLeagues(competitions: FootballCompetition[]): string {
     lines.push(`• *${competition.nameHe}* (\`${competition.id}\` · ${provider})`);
   }
   lines.push("");
-  lines.push("אנגלית · ספרדית · ישראלית · איטלקית");
+  lines.push("אנגלית · ספרדית · ישראלית · איטלקית · גרמנית");
   return lines.join("\n");
 }
 

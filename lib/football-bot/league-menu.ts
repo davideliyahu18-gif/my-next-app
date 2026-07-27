@@ -62,6 +62,19 @@ const LEAGUE_ALIASES: { id: string; aliases: string[] }[] = [
       "ita.1",
     ],
   },
+  {
+    id: "ger.1",
+    aliases: [
+      "גרמנית",
+      "גרמניה",
+      "בונדסליגה",
+      "בונדס",
+      "bundesliga",
+      "bundes",
+      "ger",
+      "ger.1",
+    ],
+  },
 ];
 
 const ALL_ALIASES = ["0", "הכל", "כולם", "כל הליגות", "all", "everyone"];
@@ -182,7 +195,7 @@ export function formatScheduleLeagueMenu(
   lines.push("0️⃣ *הכל* — כל הליגות");
   lines.push("");
   lines.push("👆 בוואטסאפ נפתחת גם רשימת כפתורים לבחירה");
-  lines.push("או: *לוח 1* · *לוח אנגלית* · *לוח ספרדית*");
+  lines.push("או: *לוח 1* · *לוח אנגלית* · *לוח גרמנית*");
   return lines.join("\n");
 }
 

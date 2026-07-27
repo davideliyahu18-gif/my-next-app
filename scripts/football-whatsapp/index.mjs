@@ -152,8 +152,8 @@ function isOperatorNumber(digits) {
 function looksLikeOperatorCommand(raw) {
   const t = raw.trim().toLowerCase();
   if (!t || t.length > 100) return false;
-  if (/^fb:(schedule|lineup):/i.test(t)) return true;
-  if (/^[0-4]$/.test(t)) return true;
+  if (/^fb:(schedule|lineup|standings):/i.test(t)) return true;
+  if (/^[0-5]$/.test(t)) return true;
   const prefixes = [
     "עזרה",
     "help",
@@ -186,6 +186,8 @@ function looksLikeOperatorCommand(raw) {
     "ספרדית",
     "ישראלית",
     "איטלקית",
+    "גרמנית",
+    "בונדסליגה",
     "הכל",
     "פרמייר",
     "סרייה",
@@ -317,7 +319,7 @@ function commandFromInteractiveId(rawId) {
 function looksLikeRemoteCommand(raw) {
   const t = raw.trim().toLowerCase();
   if (!t) return false;
-  if (/^fb:(schedule|lineup):/i.test(t)) return true;
+  if (/^fb:(schedule|lineup|standings):/i.test(t)) return true;
   const keys = [
     "עזרה",
     "help",
@@ -338,6 +340,8 @@ function looksLikeRemoteCommand(raw) {
     "ספרדית",
     "ישראלית",
     "איטלקית",
+    "גרמנית",
+    "בונדסליגה",
     "הכל",
     "פרמייר",
     "סרייה",
@@ -362,8 +366,8 @@ function looksLikeRemoteCommand(raw) {
   if (keys.some((k) => t === k || t.startsWith(`${k} `) || t.includes(k))) {
     return true;
   }
-  // Menu picks: 0-4
-  if (/^[0-4]$/.test(t.trim())) return true;
+  // Menu picks: 0-5 (all + 5 leagues)
+  if (/^[0-5]$/.test(t.trim())) return true;
   return false;
 }
 
