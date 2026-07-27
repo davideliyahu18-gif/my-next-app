@@ -1000,6 +1000,22 @@ async function saveQrPng(qr) {
   } catch (error) {
     log.warn({ error }, "Failed to write qr.png");
   }
+
+  const qrLink = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(qr)}`;
+  try {
+    const artifacts = "/opt/cursor/artifacts";
+    await mkdir(artifacts, { recursive: true });
+    await writeFile(path.join(artifacts, "football-bot-qr-url.txt"), `${qrLink}\n`, "utf8");
+    try {
+      const png = await readFile(QR_FILE);
+      await writeFile(path.join(artifacts, "football-bot-qr.png"), png);
+    } catch {
+      /* optional */
+    }
+  } catch (error) {
+    log.warn({ error: String(error?.message || error) }, "Failed to write QR artifacts");
+  }
+  return qrLink;
 }
 
 async function onConnected() {
@@ -1261,8 +1277,7 @@ async function startSocket() {
       if (qr) {
         console.log("\n📷 סרקו את הברקוד עם WhatsApp → מכשירים מקושרים:\n");
         qrcodeTerminal.generate(qr, { small: true });
-        await saveQrPng(qr);
-        const qrLink = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(qr)}`;
+        const qrLink = await saveQrPng(qr);
         console.log(`\nאו פתחו במובייל: ${qrLink}\n`);
       }
 
