@@ -88,7 +88,106 @@ function envConfig() {
     morningEnabled: process.env.FOOTBALL_BOT_MORNING !== "false",
     alertsEnabled: process.env.FOOTBALL_BOT_ALERTS !== "false",
     buttonsEnabled: process.env.FOOTBALL_BOT_BUTTONS !== "false",
+    /** Allow the linked phone (e.g. 0523123944) to send commands — those arrive as fromMe. */
+    allowFromMeCommands: process.env.FOOTBALL_BOT_ALLOW_FROM_ME !== "false",
+    /** Optional allowlist. Empty = כל מי שבקבוצה. Example: 0523123944,05XXXXXXXX */
+    operators: parseOperatorNumbers(
+      process.env.FOOTBALL_BOT_OPERATORS || "0523123944",
+    ),
+    /** If true, only numbers in FOOTBALL_BOT_OPERATORS may run commands. */
+    operatorsOnly: process.env.FOOTBALL_BOT_OPERATORS_ONLY === "true",
   };
+}
+
+/** Normalize Israeli / intl phone strings to digits (972…). */
+function normalizePhoneDigits(raw) {
+  let digits = String(raw || "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.startsWith("972")) return digits;
+  if (digits.startsWith("0") && digits.length >= 9) {
+    return `972${digits.slice(1)}`;
+  }
+  if (digits.length === 9 && digits.startsWith("5")) {
+    return `972${digits}`;
+  }
+  return digits;
+}
+
+function parseOperatorNumbers(raw) {
+  return String(raw || "")
+    .split(/[,;\s]+/)
+    .map((part) => normalizePhoneDigits(part))
+    .filter(Boolean);
+}
+
+function linkedAccountDigits() {
+  const id = sock?.user?.id || "";
+  // 972523123944:9@s.whatsapp.net → 972523123944
+  const user = id.split(":")[0] || id.split("@")[0] || "";
+  return normalizePhoneDigits(user);
+}
+
+function senderDigitsFromMessage(msg) {
+  const participant = msg.key?.participant || msg.key?.participantPn || "";
+  const remote = msg.key?.remoteJid || "";
+  const raw = participant || (remote.endsWith("@s.whatsapp.net") ? remote : "");
+  const user = String(raw).split(":")[0].split("@")[0];
+  // LID participants won't normalize to phone — return as-is digits for lid match attempts
+  return normalizePhoneDigits(user) || user.replace(/\D/g, "");
+}
+
+function isOperatorNumber(digits) {
+  if (!digits) return false;
+  const ops = cfg.operators || [];
+  if (!ops.length) return true;
+  return ops.some(
+    (op) => digits === op || digits.endsWith(op) || op.endsWith(digits),
+  );
+}
+
+/**
+ * Strict command shape for fromMe (linked phone) — avoids loops on bot replies
+ * that merely mention words like "לוח" inside longer text.
+ */
+function looksLikeOperatorCommand(raw) {
+  const t = raw.trim().toLowerCase();
+  if (!t || t.length > 100) return false;
+  if (/^fb:(schedule|lineup):/i.test(t)) return true;
+  if (/^[0-4]$/.test(t)) return true;
+  const prefixes = [
+    "עזרה",
+    "help",
+    "בוט",
+    "סטטוס",
+    "תוצאה",
+    "תוצאות",
+    "מחר",
+    "לוח",
+    "לוז",
+    "לו״ז",
+    "ליגות",
+    "ליגה",
+    "הרכב",
+    "הרכבים",
+    "lineup",
+    "עקוב",
+    "מעקב",
+    "הסר",
+    "follow",
+    "watch",
+    "בוקר",
+    "morning",
+    "אנגלית",
+    "ספרדית",
+    "ישראלית",
+    "איטלקית",
+    "הכל",
+    "פרמייר",
+    "סרייה",
+    "סריה",
+    "ברצלונה",
+  ];
+  return prefixes.some((k) => t === k || t.startsWith(`${k} `));
 }
 
 const log = pino({ level: process.env.LOG_LEVEL ?? "info" });
@@ -447,7 +546,6 @@ async function resolveGroupByName() {
 
 async function handleIncomingMessage(msg) {
   try {
-    if (msg.key.fromMe) return;
     const chatId = msg.key.remoteJid;
     if (!chatId || !chatId.endsWith("@g.us")) return;
 
@@ -455,6 +553,21 @@ async function handleIncomingMessage(msg) {
     const fromButton = commandFromInteractiveId(interactiveId);
     const body = (fromButton || extractText(msg)).trim();
     if (!body) return;
+
+    const fromMe = Boolean(msg.key.fromMe);
+    if (fromMe) {
+      // Linked phone (0523123944) messages arrive as fromMe — allow short commands only.
+      if (!cfg.allowFromMeCommands) return;
+      if (!fromButton && !looksLikeOperatorCommand(body)) return;
+      const linked = linkedAccountDigits();
+      if (cfg.operators?.length && linked && !isOperatorNumber(linked)) return;
+    } else if (cfg.operatorsOnly && cfg.operators?.length) {
+      const sender = senderDigitsFromMessage(msg);
+      if (!isOperatorNumber(sender)) {
+        log.info({ sender }, "Ignored command from non-operator");
+        return;
+      }
+    }
 
     const pending = getPending(chatId);
     const treatAsCommand =
@@ -486,7 +599,13 @@ async function handleIncomingMessage(msg) {
     }
 
     log.info(
-      { from: chatId, body, commandText, interactiveId: interactiveId || null },
+      {
+        from: chatId,
+        body,
+        commandText,
+        fromMe,
+        interactiveId: interactiveId || null,
+      },
       "Remote command received",
     );
     await sock.sendMessage(chatId, { text: "⏳ רגע, בודק…" });
@@ -577,6 +696,9 @@ async function welcomeGroup() {
       "",
       "שלט רחוק: *לוח* · *הרכב* · *מעקב* · *בוקר* · *עזרה*",
       "ב־*לוח* / *הרכב* נפתחת רשימת כפתורים לבחירת ליגה.",
+      "",
+      "שני המספרים בקבוצה יכולים לכתוב פקודות ✓",
+      "כולל *0523123944*",
     ].join("\n"),
   );
 }
@@ -601,6 +723,13 @@ async function onConnected() {
     `   בוקר 08:00 (${cfg.morningTimezone}): ${cfg.morningEnabled ? "on" : "off"}`,
   );
   console.log(`   כפתורי ליגה: ${cfg.buttonsEnabled ? "on" : "off"}`);
+  console.log(
+    `   פקודות fromMe (מקושר): ${cfg.allowFromMeCommands ? "on" : "off"}`,
+  );
+  if (cfg.operators?.length) {
+    console.log(`   מפעילים: ${cfg.operators.join(", ")}`);
+  }
+  console.log("   שני המספרים בקבוצה יכולים לכתוב פקודות.");
   console.log("   הוסיפו את המספר המקושר לקבוצה — ואז הבוט ישלח הודעת חיבור.\n");
 
   groupPollTimer = setInterval(async () => {

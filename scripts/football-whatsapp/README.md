@@ -107,6 +107,16 @@ ESPN scoreboard — `src/football/espnLeaguesClient.ts`
 
 כפתורי ליגה: `FOOTBALL_BOT_BUTTONS=true` (ברירת מחדל). הגדירו `false` כדי לחזור לתפריט טקסט בלבד.
 
+## מי יכול לכתוב פקודות
+
+שני המספרים בקבוצה יכולים לכתוב — כולל המספר המקושר **0523123944**.
+
+```bash
+FOOTBALL_BOT_OPERATORS=0523123944
+FOOTBALL_BOT_ALLOW_FROM_ME=true
+# FOOTBALL_BOT_OPERATORS_ONLY=true   # רק המספרים ברשימה
+```
+
 ## חיבור מחדש
 
 ```bash
