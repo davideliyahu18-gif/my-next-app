@@ -10,6 +10,7 @@ export type FootballBotCommand =
   | "watch"
   | "unwatch"
   | "watchlist"
+  | "morning"
   | "leagues"
   | "unknown";
 

@@ -80,6 +80,10 @@ function envConfig() {
       process.env.FOOTBALL_WHATSAPP_GROUP_NAME ||
       "דוד | עדכוני כדורגל",
     pollCron: process.env.FOOTBALL_BOT_POLL_CRON ?? "*/1 * * * *",
+    morningCron: process.env.FOOTBALL_BOT_MORNING_CRON ?? "0 8 * * *",
+    morningTimezone:
+      process.env.FOOTBALL_BOT_MORNING_TZ ?? "Asia/Jerusalem",
+    morningEnabled: process.env.FOOTBALL_BOT_MORNING !== "false",
     alertsEnabled: process.env.FOOTBALL_BOT_ALERTS !== "false",
   };
 }
@@ -170,6 +174,8 @@ function looksLikeRemoteCommand(raw) {
     "follow",
     "watch",
     "ברצלונה",
+    "בוקר",
+    "morning",
   ];
   if (keys.some((k) => t === k || t.startsWith(`${k} `) || t.includes(k))) {
     return true;
@@ -373,6 +379,20 @@ async function pollAlerts() {
   }
 }
 
+async function sendMorningStatus() {
+  if (!cfg.morningEnabled) return;
+  if (!sock || !groupJid) return;
+  try {
+    const { reply } = await runRemoteCommand("בוקר");
+    if (reply) {
+      await sendToGroup(reply);
+      log.info("Sent morning football status to WhatsApp group");
+    }
+  } catch (error) {
+    log.warn({ error: String(error.message || error) }, "Morning status failed");
+  }
+}
+
 async function welcomeGroup() {
   if (welcomeSent || !groupJid) return;
   welcomeSent = true;
@@ -381,8 +401,10 @@ async function welcomeGroup() {
     [
       "✅ *בוט כדורגל מחובר!*",
       "",
-      "התראות מכל הליגות הפעילות (FIFA).",
-      "שלט רחוק: *תוצאה* · *מחר* · *לוח* · *ליגות* · *עזרה*",
+      "התראות ליגות + מעקב קבוצות.",
+      "כל יום ב־08:00 — סטטוס בוקר עם משחקים קרובים ⚽️🔥",
+      "",
+      "שלט רחוק: *לוח* · *הרכב* · *מעקב* · *בוקר* · *עזרה*",
     ].join("\n"),
   );
 }
@@ -403,6 +425,9 @@ async function saveQrPng(qr) {
 async function onConnected() {
   console.log("\n✅ מחובר לוואטסאפ.");
   console.log(`   קבוצה: "${cfg.groupName}"`);
+  console.log(
+    `   בוקר 08:00 (${cfg.morningTimezone}): ${cfg.morningEnabled ? "on" : "off"}`,
+  );
   console.log("   הוסיפו את המספר המקושר לקבוצה — ואז הבוט ישלח הודעת חיבור.\n");
 
   groupPollTimer = setInterval(async () => {
@@ -418,6 +443,16 @@ async function onConnected() {
   cron.schedule(cfg.pollCron, () => {
     pollAlerts().catch(() => {});
   });
+
+  if (cfg.morningEnabled) {
+    cron.schedule(
+      cfg.morningCron,
+      () => {
+        sendMorningStatus().catch(() => {});
+      },
+      { timezone: cfg.morningTimezone },
+    );
+  }
 }
 
 async function startSocket() {

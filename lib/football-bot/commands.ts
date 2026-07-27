@@ -12,6 +12,7 @@ import {
   formatHelpMessage,
   formatLeagues,
   formatLiveScores,
+  formatMorningStatus,
   formatScoreLineForMatch,
   formatStatusMessage,
   formatTomorrowMatches,
@@ -88,6 +89,16 @@ export function parseFootballBotCommand(raw: string): FootballBotCommand {
     text === "קבוצות במעקב"
   ) {
     return "watchlist";
+  }
+
+  if (
+    text === "בוקר" ||
+    text === "בוקר טוב" ||
+    text === "סטטוס בוקר" ||
+    text === "morning" ||
+    text === "daily"
+  ) {
+    return "morning";
   }
 
   const unfollowQuery = extractUnfollowQuery(raw);
@@ -341,6 +352,40 @@ export async function runFootballBotCommand(
     case "watchlist": {
       const teams = await loadWatchlist();
       return { command, reply: formatWatchlistMessage(teams) };
+    }
+    case "morning": {
+      const board = await fetchFootballBoard(true);
+      const watchlist = await loadWatchlist();
+      const jerusalem = "Asia/Jerusalem";
+      const todayKey = new Date().toLocaleDateString("en-CA", {
+        timeZone: jerusalem,
+      });
+      const now = Date.now();
+
+      const upcomingToday = board.upcoming.filter((match) => {
+        const day = match.utcDate.toLocaleDateString("en-CA", {
+          timeZone: jerusalem,
+        });
+        return day === todayKey;
+      });
+
+      const upcomingSoon = board.upcoming
+        .filter((match) => {
+          const kickoff = match.utcDate.getTime();
+          return kickoff >= now && kickoff <= now + 72 * 60 * 60 * 1000;
+        })
+        .slice(0, 8);
+
+      return {
+        command,
+        reply: formatMorningStatus({
+          leagueNames: board.competitions.map((c) => c.nameHe),
+          upcomingToday,
+          upcomingSoon,
+          watchedTeams: watchlist.map((t) => t.nameHe),
+          liveCount: board.live.length,
+        }),
+      };
     }
     case "leagues": {
       return {

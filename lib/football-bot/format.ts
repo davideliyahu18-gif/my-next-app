@@ -58,13 +58,14 @@ export function formatHelpMessage(): string {
     "• *עקוב ברצלונה* — מעקב קבוצה",
     "• *מעקב* — קבוצות במעקב",
     "• *הסר ברצלונה* — ביטול מעקב",
+    "• *בוקר* — סטטוס יומי (גם אוטומטי ב־08:00)",
     "• *תוצאה* — משחקים חיים / הקרובים",
     "• *מחר* — משחקי מחר",
     "• *ליגות* — מה הבוט עוקב אחריו",
     "• *סטטוס* / *בוט* — האם הבוט חי",
     "• *עזרה* — ההודעה הזאת",
     "",
-    "אוטומטי לקבוצות במעקב: תזכורת 60׳/30׳ + הרכב · שער · מחצית · סיום",
+    "אוטומטי: סטטוס בוקר 08:00 · תזכורת 60׳/30׳ + הרכב · שער · מחצית · סיום",
   ].join("\n");
 }
 
@@ -90,6 +91,66 @@ export function formatStatusMessage(options: {
   ]
     .filter((line) => line != null)
     .join("\n");
+}
+
+export function formatMorningStatus(options: {
+  leagueNames: string[];
+  upcomingToday: FootballMatch[];
+  upcomingSoon: FootballMatch[];
+  watchedTeams: string[];
+  liveCount: number;
+}): string {
+  const lines = [
+    "☀️ *בוקר טוב · סטטוס בוט ליגות* ⚽️🔥",
+    "",
+    "✅ הבוט חי ומחכה למשחקים של הליגות שמתחילים בקרוב",
+    "",
+    `🏆 ליגות: *${options.leagueNames.join(" · ") || "—"}*`,
+  ];
+
+  if (options.watchedTeams.length) {
+    lines.push(`⭐ במעקב: *${options.watchedTeams.join(" · ")}*`);
+  }
+
+  lines.push("");
+
+  if (options.liveCount > 0) {
+    lines.push(`🔴 כבר חיים עכשיו: *${options.liveCount}* משחקים`);
+    lines.push("");
+  }
+
+  const today = options.upcomingToday.slice(0, 8);
+  if (today.length) {
+    lines.push("📅 *משחקים היום*");
+    for (const match of today) {
+      const view = toView(match);
+      lines.push(scoreLine(view));
+      lines.push(`   ${formatKickoffHe(view.kickoffAt)} · ${match.competition}`);
+    }
+    lines.push("");
+  }
+
+  const soon = options.upcomingSoon
+    .filter((match) => !today.some((t) => t.id === match.id))
+    .slice(0, 6);
+  if (soon.length) {
+    lines.push("⏭ *מתחילים בקרוב*");
+    for (const match of soon) {
+      const view = toView(match);
+      lines.push(scoreLine(view));
+      lines.push(`   ${formatKickoffHe(view.kickoffAt)} · ${match.competition}`);
+    }
+    lines.push("");
+  }
+
+  if (!today.length && !soon.length && options.liveCount === 0) {
+    lines.push("📭 אין משחקים קרובים בלוח כרגע — ממשיך לחכות ⚽️");
+    lines.push("");
+  }
+
+  lines.push("כתבו *לוח* · *הרכב* · *מעקב* · *עזרה*");
+  lines.push("", FOOTBALL_BOT_SIGNATURE);
+  return lines.join("\n");
 }
 
 function toView(match: FootballMatch) {
