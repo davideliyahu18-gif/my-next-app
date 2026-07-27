@@ -407,11 +407,10 @@ async function sendToGroup(text) {
 
 /**
  * Send WhatsApp native-flow single-select (league buttons).
- * Falls back to plain text if interactive send fails.
+ * Best-effort only — caller should already send the text menu.
  */
-async function sendLeagueInteractive(chatId, interactive, fallbackText) {
+async function sendLeagueInteractive(chatId, interactive) {
   if (!sock || !interactive || !cfg.buttonsEnabled) {
-    await sock.sendMessage(chatId, { text: fallbackText });
     return false;
   }
 
@@ -423,10 +422,7 @@ async function sendLeagueInteractive(chatId, interactive, fallbackText) {
       id: String(option.id || ""),
     }));
 
-    if (!rows.length) {
-      await sock.sendMessage(chatId, { text: fallbackText });
-      return false;
-    }
+    if (!rows.length) return false;
 
     const nativeFlowMessage =
       proto.Message.InteractiveMessage.NativeFlowMessage.create({
@@ -470,7 +466,7 @@ async function sendLeagueInteractive(chatId, interactive, fallbackText) {
     };
 
     const generated = generateWAMessageFromContent(chatId, content, {});
-    await sock.relayMessage(chatId, generated.message, {
+    const relayPromise = sock.relayMessage(chatId, generated.message, {
       messageId: generated.key.id,
       additionalNodes: [
         {
@@ -492,14 +488,21 @@ async function sendLeagueInteractive(chatId, interactive, fallbackText) {
       ],
     });
 
+    // Don't let broken interactive rendering block the user on "בודק…".
+    await Promise.race([
+      relayPromise,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("interactive relay timeout")), 8_000),
+      ),
+    ]);
+
     log.info({ chatId, options: rows.length }, "Sent interactive league menu");
     return true;
   } catch (error) {
     log.warn(
       { error: String(error?.message || error) },
-      "Interactive league menu failed — falling back to text",
+      "Interactive league menu skipped",
     );
-    await sock.sendMessage(chatId, { text: fallbackText });
     return false;
   }
 }
@@ -620,7 +623,15 @@ async function handleIncomingMessage(msg) {
       },
       "Remote command received",
     );
-    await sock.sendMessage(chatId, { text: "⏳ רגע, בודק…" });
+
+    // Ack only for slower commands — menus answer instantly with text.
+    const isLikelyMenu =
+      /^(לוח|לוז|לו״ז|schedule|הרכב|הרכבים|lineup|lineups)$/i.test(
+        commandText.trim(),
+      );
+    if (!isLikelyMenu) {
+      await sock.sendMessage(chatId, { text: "⏳ רגע, בודק…" });
+    }
 
     try {
       const { reply, command, interactive } =
@@ -635,13 +646,15 @@ async function handleIncomingMessage(msg) {
         clearPending(chatId);
       }
 
+      // Always send plain text first so the chat never looks "stuck".
+      await sock.sendMessage(chatId, { text: reply });
+
       if (
         interactive?.kind === "league_select" &&
         (command === "schedule_menu" || command === "lineup_menu")
       ) {
-        await sendLeagueInteractive(chatId, interactive, reply);
-      } else {
-        await sock.sendMessage(chatId, { text: reply });
+        // Optional buttons — never block on them.
+        sendLeagueInteractive(chatId, interactive).catch(() => {});
       }
     } catch (error) {
       log.warn({ error }, "Command API failed");
