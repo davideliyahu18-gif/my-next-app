@@ -31,6 +31,8 @@ const {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
+  generateWAMessageFromContent,
+  proto,
 } = baileys;
 
 async function loadEnvFile() {
@@ -85,6 +87,7 @@ function envConfig() {
       process.env.FOOTBALL_BOT_MORNING_TZ ?? "Asia/Jerusalem",
     morningEnabled: process.env.FOOTBALL_BOT_MORNING !== "false",
     alertsEnabled: process.env.FOOTBALL_BOT_ALERTS !== "false",
+    buttonsEnabled: process.env.FOOTBALL_BOT_BUTTONS !== "false",
   };
 }
 
@@ -138,9 +141,59 @@ function extractText(msg) {
   return "";
 }
 
+/** Pull selected id from buttons / list / native-flow replies. */
+function extractInteractiveId(msg) {
+  const m = msg.message;
+  if (!m) return "";
+
+  const buttonsId = m.buttonsResponseMessage?.selectedButtonId;
+  if (buttonsId) return String(buttonsId);
+
+  const templateId = m.templateButtonReplyMessage?.selectedId;
+  if (templateId) return String(templateId);
+
+  const listId =
+    m.listResponseMessage?.singleSelectReply?.selectedRowId ||
+    m.listResponseMessage?.title;
+  if (listId) return String(listId);
+
+  const paramsJson =
+    m.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+  if (paramsJson) {
+    try {
+      const params = JSON.parse(paramsJson);
+      const id =
+        params.id ||
+        params.selectedId ||
+        params.row_id ||
+        params.rowId ||
+        "";
+      if (id) return String(id);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return "";
+}
+
+/** Map fb:schedule:eng.1 / fb:lineup:all → Hebrew command text. */
+function commandFromInteractiveId(rawId) {
+  const id = String(rawId || "").trim();
+  const match = /^fb:(schedule|lineup):(.+)$/i.exec(id);
+  if (!match) return null;
+  const intent = match[1].toLowerCase();
+  const pick = match[2].trim();
+  if (!pick) return null;
+  const prefix = intent === "lineup" ? "הרכב" : "לוח";
+  const arg = pick.toLowerCase() === "all" ? "הכל" : pick;
+  return `${prefix} ${arg}`;
+}
+
 function looksLikeRemoteCommand(raw) {
   const t = raw.trim().toLowerCase();
   if (!t) return false;
+  if (/^fb:(schedule|lineup):/i.test(t)) return true;
   const keys = [
     "עזרה",
     "help",
@@ -243,6 +296,7 @@ async function runRemoteCommand(text) {
   return {
     reply: result.reply || "אין תשובה מהשרת.",
     command: result.command || "",
+    interactive: result.interactive || null,
   };
 }
 
@@ -250,6 +304,105 @@ async function sendToGroup(text) {
   if (!sock || !groupJid) return false;
   await sock.sendMessage(groupJid, { text });
   return true;
+}
+
+/**
+ * Send WhatsApp native-flow single-select (league buttons).
+ * Falls back to plain text if interactive send fails.
+ */
+async function sendLeagueInteractive(chatId, interactive, fallbackText) {
+  if (!sock || !interactive || !cfg.buttonsEnabled) {
+    await sock.sendMessage(chatId, { text: fallbackText });
+    return false;
+  }
+
+  try {
+    const rows = (interactive.options || []).map((option) => ({
+      header: option.header || "",
+      title: String(option.title || "").slice(0, 24),
+      description: String(option.description || "").slice(0, 72),
+      id: String(option.id || ""),
+    }));
+
+    if (!rows.length) {
+      await sock.sendMessage(chatId, { text: fallbackText });
+      return false;
+    }
+
+    const nativeFlowMessage =
+      proto.Message.InteractiveMessage.NativeFlowMessage.create({
+        buttons: [
+          {
+            name: "single_select",
+            buttonParamsJson: JSON.stringify({
+              title: interactive.buttonText || "בחרו ליגה",
+              sections: [
+                {
+                  title: interactive.sectionTitle || "ליגות",
+                  rows,
+                },
+              ],
+            }),
+          },
+        ],
+      });
+
+    const interactiveMessage = proto.Message.InteractiveMessage.create({
+      body: proto.Message.InteractiveMessage.Body.create({
+        text: interactive.body || "בחרו ליגה 👇",
+      }),
+      footer: proto.Message.InteractiveMessage.Footer.create({
+        text: interactive.footer || "דוד – עדכוני כדורגל ⚽",
+      }),
+      header: proto.Message.InteractiveMessage.Header.create({
+        title: interactive.title || "ליגות",
+        subtitle: "",
+        hasMediaAttachment: false,
+      }),
+      nativeFlowMessage,
+    });
+
+    const content = {
+      messageContextInfo: {
+        deviceListMetadata: {},
+        deviceListMetadataVersion: 2,
+      },
+      interactiveMessage,
+    };
+
+    const generated = generateWAMessageFromContent(chatId, content, {});
+    await sock.relayMessage(chatId, generated.message, {
+      messageId: generated.key.id,
+      additionalNodes: [
+        {
+          tag: "biz",
+          attrs: {},
+          content: [
+            {
+              tag: "interactive",
+              attrs: { type: "native_flow", v: "1" },
+              content: [
+                {
+                  tag: "native_flow",
+                  attrs: { name: "mixed", v: "9" },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    log.info({ chatId, options: rows.length }, "Sent interactive league menu");
+    return true;
+  } catch (error) {
+    log.warn(
+      { error: String(error?.message || error) },
+      "Interactive league menu failed — falling back to text",
+    );
+    await sock.sendMessage(chatId, { text: fallbackText });
+    return false;
+  }
 }
 
 function subjectMatches(subject, wanted) {
@@ -298,12 +451,16 @@ async function handleIncomingMessage(msg) {
     const chatId = msg.key.remoteJid;
     if (!chatId || !chatId.endsWith("@g.us")) return;
 
-    const body = extractText(msg).trim();
+    const interactiveId = extractInteractiveId(msg);
+    const fromButton = commandFromInteractiveId(interactiveId);
+    const body = (fromButton || extractText(msg)).trim();
     if (!body) return;
 
     const pending = getPending(chatId);
     const treatAsCommand =
-      looksLikeRemoteCommand(body) || Boolean(pending);
+      Boolean(fromButton) ||
+      looksLikeRemoteCommand(body) ||
+      Boolean(pending);
     if (!treatAsCommand) return;
 
     if (groupJid && !sameChatId(chatId, groupJid)) return;
@@ -314,23 +471,29 @@ async function handleIncomingMessage(msg) {
     }
 
     let commandText = body;
-    if (pending?.intent === "schedule") {
+    if (!fromButton && pending?.intent === "schedule") {
       const alreadySchedule = /^(לוח|לוז|לו״ז|schedule)\b/i.test(body.trim());
       if (!alreadySchedule) {
         commandText = `לוח ${body}`;
       }
-    } else if (pending?.intent === "lineup") {
-      const alreadyLineup = /^(הרכב|הרכבים|lineup|lineups)\b/i.test(body.trim());
+    } else if (!fromButton && pending?.intent === "lineup") {
+      const alreadyLineup = /^(הרכב|הרכבים|lineup|lineups)\b/i.test(
+        body.trim(),
+      );
       if (!alreadyLineup) {
         commandText = `הרכב ${body}`;
       }
     }
 
-    log.info({ from: chatId, body, commandText }, "Remote command received");
+    log.info(
+      { from: chatId, body, commandText, interactiveId: interactiveId || null },
+      "Remote command received",
+    );
     await sock.sendMessage(chatId, { text: "⏳ רגע, בודק…" });
 
     try {
-      const { reply, command } = await runRemoteCommand(commandText);
+      const { reply, command, interactive } =
+        await runRemoteCommand(commandText);
       if (command === "schedule_menu") {
         setPending(chatId, "schedule");
       } else if (command === "lineup_menu") {
@@ -340,7 +503,15 @@ async function handleIncomingMessage(msg) {
       } else if (command && command !== "unknown") {
         clearPending(chatId);
       }
-      await sock.sendMessage(chatId, { text: reply });
+
+      if (
+        interactive?.kind === "league_select" &&
+        (command === "schedule_menu" || command === "lineup_menu")
+      ) {
+        await sendLeagueInteractive(chatId, interactive, reply);
+      } else {
+        await sock.sendMessage(chatId, { text: reply });
+      }
     } catch (error) {
       log.warn({ error }, "Command API failed");
       await sock.sendMessage(chatId, {
@@ -405,6 +576,7 @@ async function welcomeGroup() {
       "כל יום ב־08:00 — סטטוס בוקר עם משחקים קרובים ⚽️🔥",
       "",
       "שלט רחוק: *לוח* · *הרכב* · *מעקב* · *בוקר* · *עזרה*",
+      "ב־*לוח* / *הרכב* נפתחת רשימת כפתורים לבחירת ליגה.",
     ].join("\n"),
   );
 }
@@ -428,6 +600,7 @@ async function onConnected() {
   console.log(
     `   בוקר 08:00 (${cfg.morningTimezone}): ${cfg.morningEnabled ? "on" : "off"}`,
   );
+  console.log(`   כפתורי ליגה: ${cfg.buttonsEnabled ? "on" : "off"}`);
   console.log("   הוסיפו את המספר המקושר לקבוצה — ואז הבוט ישלח הודעת חיבור.\n");
 
   groupPollTimer = setInterval(async () => {

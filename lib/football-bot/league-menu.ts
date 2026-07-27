@@ -168,7 +168,8 @@ export function formatScheduleLeagueMenu(
   lines.push("");
   lines.push("0️⃣ *הכל* — כל הליגות");
   lines.push("");
-  lines.push("דוגמה: *לוח 1* · *לוח אנגלית* · *לוח ספרדית*");
+  lines.push("👆 בוואטסאפ נפתחת גם רשימת כפתורים לבחירה");
+  lines.push("או: *לוח 1* · *לוח אנגלית* · *לוח ספרדית*");
   return lines.join("\n");
 }
 
@@ -186,7 +187,8 @@ export function formatLineupLeagueMenu(
   });
 
   lines.push("");
-  lines.push("דוגמה: *הרכב 1* · *הרכב אנגלית* · *הרכב ספרדית*");
+  lines.push("👆 בוואטסאפ נפתחת גם רשימת כפתורים לבחירה");
+  lines.push("או: *הרכב 1* · *הרכב אנגלית* · *הרכב ספרדית*");
   lines.push("הרכבים נשלחים גם אוטומטית בתזכורת לפני המשחק.");
   return lines.join("\n");
 }

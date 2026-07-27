@@ -14,6 +14,28 @@ export type FootballBotCommand =
   | "leagues"
   | "unknown";
 
+export type FootballBotInteractive = {
+  kind: "league_select";
+  intent: "schedule" | "lineup";
+  title: string;
+  body: string;
+  footer: string;
+  buttonText: string;
+  sectionTitle: string;
+  options: Array<{
+    id: string;
+    title: string;
+    description?: string;
+    header?: string;
+  }>;
+};
+
+export type FootballBotCommandResult = {
+  command: FootballBotCommand;
+  reply: string;
+  interactive?: FootballBotInteractive;
+};
+
 export type FootballBotAlertKind =
   | "goal"
   | "half_time"

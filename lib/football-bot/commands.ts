@@ -20,6 +20,10 @@ import {
   formatKickoffHe,
 } from "./format";
 import {
+  buildLineupLeagueSelect,
+  buildScheduleLeagueSelect,
+} from "./interactive";
+import {
   extractLineupLeagueQuery,
   extractScheduleLeagueQuery,
   formatLineupLeagueMenu,
@@ -34,7 +38,7 @@ import {
   loadWatchlist,
   removeWatchedTeam,
 } from "./watchlist";
-import type { FootballBotCommand } from "./types";
+import type { FootballBotCommand, FootballBotCommandResult } from "./types";
 
 function normalize(text: string): string {
   return text
@@ -175,7 +179,7 @@ async function replyLineupForMatches(
 
 export async function runFootballBotCommand(
   raw: string,
-): Promise<{ command: FootballBotCommand; reply: string }> {
+): Promise<FootballBotCommandResult> {
   const command = parseFootballBotCommand(raw);
 
   switch (command) {
@@ -223,6 +227,7 @@ export async function runFootballBotCommand(
       return {
         command,
         reply: formatScheduleLeagueMenu(getEnabledFootballCompetitions()),
+        interactive: buildScheduleLeagueSelect(),
       };
     case "schedule": {
       const scheduleQuery = extractScheduleLeagueQuery(raw);
@@ -240,6 +245,7 @@ export async function runFootballBotCommand(
             "",
             formatScheduleLeagueMenu(getEnabledFootballCompetitions()),
           ].join("\n"),
+          interactive: buildScheduleLeagueSelect(),
         };
       }
 
@@ -265,6 +271,7 @@ export async function runFootballBotCommand(
       return {
         command,
         reply: formatLineupLeagueMenu(getEnabledFootballCompetitions()),
+        interactive: buildLineupLeagueSelect(),
       };
     case "lineup": {
       const lineupQuery = extractLineupLeagueQuery(raw);
@@ -280,6 +287,7 @@ export async function runFootballBotCommand(
             "",
             formatLineupLeagueMenu(getEnabledFootballCompetitions()),
           ].join("\n"),
+          interactive: buildLineupLeagueSelect(),
         };
       }
 
