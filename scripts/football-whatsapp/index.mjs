@@ -201,8 +201,12 @@ function subjectMatches(subject, wanted) {
   const s = subject.toLowerCase();
   const w = wanted.toLowerCase().trim();
   if (!w) return false;
+  if (s === w) return true;
   if (s.includes(w) || w.includes(s)) return true;
-  if (w.includes("כדורגל") && s.includes("כדורגל")) return true;
+  if (w.includes("ליגות") && s.includes("ליגות")) return true;
+  if (w.includes("כדורגל") && s.includes("כדורגל") && s.includes("ליגות")) {
+    return true;
+  }
   if (w.includes("football") && s.includes("football")) return true;
   return false;
 }
