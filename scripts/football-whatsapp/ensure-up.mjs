@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Ensure the football WhatsApp bot is running.
- * - If healthy → do nothing (never kill a live session).
+ * - If healthy OR reconnecting → do nothing (never kill / never double-start).
  * - If supervisor already up → leave it alone.
  * - If down → start under supervisor in the background.
  *
@@ -16,7 +16,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HEARTBEAT_FILE = path.join(__dirname, "heartbeat.json");
 const LOCK_FILE = path.join(__dirname, "bot.lock");
 const SUPERVISE = path.join(__dirname, "supervise.mjs");
-const FRESH_MS = 90_000;
+const FRESH_MS = 120_000;
 
 function readJson(file) {
   try {
@@ -31,55 +31,87 @@ function pidAlive(pid) {
   return existsSync(`/proc/${pid}`);
 }
 
-function botHealthy() {
-  const hb = readJson(HEARTBEAT_FILE);
-  if (!hb?.ts) return false;
-  if (Date.now() - Number(hb.ts) > FRESH_MS) return false;
-
-  if (existsSync(LOCK_FILE)) {
-    try {
-      const lockPid = Number(
-        String(readFileSync(LOCK_FILE, "utf8")).trim().split("\n")[0],
-      );
-      if (lockPid && pidAlive(lockPid) && hb.waConnected) return true;
-      if (lockPid && pidAlive(lockPid) && hb.bootstrapping) return true;
-    } catch {
-      /* ignore */
-    }
+function processArgs() {
+  try {
+    return execSync("ps -eo args=", { encoding: "utf8" }).split("\n");
+  } catch {
+    return [];
   }
+}
 
-  if (hb.bootstrapping) return true;
-  if (hb.waConnected && (!hb.pid || pidAlive(hb.pid))) return true;
-  return false;
+function indexProcessRunning() {
+  return processArgs().some(
+    (line) =>
+      line.includes("football-whatsapp/index.mjs") &&
+      !line.includes("ensure-up"),
+  );
 }
 
 function supervisingRunning() {
-  try {
-    const out = execSync("ps -eo args=", { encoding: "utf8" });
-    return out
-      .split("\n")
-      .some((line) => line.includes("football-whatsapp/supervise.mjs"));
-  } catch {
-    return false;
-  }
+  return processArgs().some(
+    (line) =>
+      line.includes("football-whatsapp/supervise.mjs") ||
+      line.includes("football-bot:start"),
+  );
 }
 
-if (botHealthy()) {
+function lockPidAlive() {
+  if (!existsSync(LOCK_FILE)) return null;
+  try {
+    const lockPid = Number(
+      String(readFileSync(LOCK_FILE, "utf8")).trim().split("\n")[0],
+    );
+    if (lockPid && pidAlive(lockPid)) return lockPid;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+/**
+ * Healthy = live process that owns the bot, even mid-reconnect.
+ * Starting a second instance during reconnect causes 428 and kills the first.
+ */
+function botHealthy() {
+  const liveLock = lockPidAlive();
+  if (liveLock) {
+    return { ok: true, reason: `lock-pid=${liveLock}` };
+  }
+
+  if (indexProcessRunning()) {
+    return { ok: true, reason: "index-process-alive" };
+  }
+
+  if (supervisingRunning()) {
+    return { ok: true, reason: "supervisor-alive" };
+  }
+
+  const hb = readJson(HEARTBEAT_FILE);
+  if (!hb?.ts) return { ok: false, reason: "no-heartbeat" };
+  if (Date.now() - Number(hb.ts) > FRESH_MS) {
+    return { ok: false, reason: "stale-heartbeat" };
+  }
+  if (hb.bootstrapping) return { ok: true, reason: "bootstrapping" };
+  if (hb.waConnected && (!hb.pid || pidAlive(hb.pid))) {
+    return { ok: true, reason: "heartbeat-connected" };
+  }
+  return { ok: false, reason: "not-connected" };
+}
+
+const health = botHealthy();
+if (health.ok) {
   const hb = readJson(HEARTBEAT_FILE);
   console.log(
-    `ALREADY_UP waConnected=${hb?.waConnected} pid=${hb?.pid ?? "?"} age=${Math.round((Date.now() - hb.ts) / 1000)}s`,
+    `ALREADY_UP reason=${health.reason} waConnected=${hb?.waConnected ?? "?"} pid=${hb?.pid ?? liveLockDisplay()} age=${hb?.ts ? Math.round((Date.now() - hb.ts) / 1000) : "?"}s`,
   );
   process.exit(0);
 }
 
-if (supervisingRunning()) {
-  console.log(
-    "SUPERVISOR_RUNNING — waiting for child heal (not starting duplicate)",
-  );
-  process.exit(0);
+function liveLockDisplay() {
+  return lockPidAlive() ?? "?";
 }
 
-console.log("BOT_DOWN — starting supervisor…");
+console.log(`BOT_DOWN (${health.reason}) — starting supervisor…`);
 const child = spawn(process.execPath, [SUPERVISE], {
   cwd: __dirname,
   detached: true,
