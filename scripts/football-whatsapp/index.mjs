@@ -255,14 +255,21 @@ const API_TIMEOUT_MS = 25_000;
 const SEND_TIMEOUT_MS = 20_000;
 const COMMAND_LOCK_TTL_MS = 20_000;
 const MAX_RECONNECT_ATTEMPTS = 80;
-const WATCHDOG_MS = 30_000;
-/** Idle without traffic before considering a soft probe / reconnect. */
-const STALE_CONNECTION_MS = 10 * 60_000;
+const WATCHDOG_MS = 45_000;
+/** Idle without traffic before soft probe (not hard reconnect). */
+const STALE_CONNECTION_MS = 12 * 60_000;
+/** Minimum gap between reconnect attempts — prevents 428 fight loops. */
+const MIN_RECONNECT_GAP_MS = 8_000;
+/** Only notify the group if we were down at least this long. */
+const RECOVER_NOTIFY_AFTER_MS = 60_000;
 const HEARTBEAT_FILE = path.join(__dirname, "heartbeat.json");
-const HEARTBEAT_EVERY_MS = 10_000;
+const HEARTBEAT_EVERY_MS = 15_000;
 let heartbeatTimer = null;
 let selfHealTimer = null;
+let keepAliveTimer = null;
 let lastReconnectAt = 0;
+let disconnectStartedAt = 0;
+let keepAliveFailStreak = 0;
 
 async function loadJson(file, fallback) {
   if (!existsSync(file)) return fallback;
@@ -535,7 +542,7 @@ async function safeSendMessage(chatId, content) {
       );
     if (fatalSend) {
       waConnected = false;
-      scheduleReconnect("send-fail", { immediate: true });
+      scheduleReconnect("send-fail", { immediate: false });
     }
     throw error;
   }
@@ -1055,7 +1062,7 @@ async function sendMorningStatus() {
   } catch (error) {
     log.warn({ error: String(error.message || error) }, "Morning status failed");
     markHealthFailure("morning-failed");
-    scheduleReconnect("morning-failed", { immediate: true });
+    scheduleReconnect("morning-failed", { immediate: false });
   }
 }
 
@@ -1085,7 +1092,7 @@ async function runHourlyHealthCheck(opts = {}) {
     if (!checks.waConnected) {
       markHealthFailure("hourly-wa-offline");
       console.warn(`🩺 בדיקה שעתית ${label}: וואטסאפ לא מחובר — reconnect מיידי`);
-      scheduleReconnect("hourly-wa-offline", { immediate: true });
+      scheduleReconnect("hourly-wa-offline", { immediate: false });
       await writeHeartbeat({ hourly: "fail", reason: "wa-offline" });
       return { ok: false, reason: "wa-offline", checks };
     }
@@ -1113,13 +1120,13 @@ async function runHourlyHealthCheck(opts = {}) {
           `🩺 בדיקה שעתית ${label}: בדיקת קבוצה נכשלה — reconnect מיידי`,
         );
         waConnected = false;
-        scheduleReconnect("hourly-group-fail", { immediate: true });
+        scheduleReconnect("hourly-group-fail", { immediate: false });
         await writeHeartbeat({ hourly: "fail", reason: "group" });
         return { ok: false, reason: "group", checks };
       }
     } else {
       markHealthFailure("hourly-no-group");
-      scheduleReconnect("hourly-no-group", { immediate: true });
+      scheduleReconnect("hourly-no-group", { immediate: false });
       return { ok: false, reason: "no-group", checks };
     }
 
@@ -1175,9 +1182,9 @@ async function runHourlyHealthCheck(opts = {}) {
 }
 
 function markHealthFailure(reason) {
+  if (!disconnectStartedAt) disconnectStartedAt = Date.now();
   lastHealthFailureAt = Date.now();
   lastHealthFailureReason = String(reason || "unknown");
-  pendingRecoverNotify = Boolean(cfg.notifyOnRecover);
   writeHeartbeat({
     fail: true,
     reason: lastHealthFailureReason,
@@ -1186,24 +1193,40 @@ function markHealthFailure(reason) {
 }
 
 async function notifyRecoveredIfNeeded() {
-  if (!pendingRecoverNotify || !cfg.notifyOnRecover) return;
+  if (!cfg.notifyOnRecover) {
+    pendingRecoverNotify = false;
+    disconnectStartedAt = 0;
+    return;
+  }
   if (!sock || !groupJid || !waConnected) return;
+
+  const downFor = disconnectStartedAt
+    ? Date.now() - disconnectStartedAt
+    : 0;
+  // Don't spam the group for short blips (most 428 recoveries are <30s).
+  if (!pendingRecoverNotify || downFor < RECOVER_NOTIFY_AFTER_MS) {
+    pendingRecoverNotify = false;
+    disconnectStartedAt = 0;
+    return;
+  }
+
   pendingRecoverNotify = false;
   const reason = lastHealthFailureReason || "disconnect";
+  const downSec = Math.round(downFor / 1000);
+  disconnectStartedAt = 0;
   try {
     await sendToGroup(
       [
         "✅ *הבוט חזר לפעילות*",
         "",
-        `תוקן אוטומטית אחרי: \`${reason}\``,
-        "אפשר לכתוב בקבוצה משני המספרים ✓",
+        `היה נפל כ־${downSec}ש · תוקן אוטומטית`,
+        "אפשר לכתוב משני המספרים ✓",
         "",
-        "פקודות: *סטטוס* · *סגל* · *בוקר* · *עזרה*",
+        "פקודות: *בדיקה* · *סגל* · *בוקר* · *עזרה*",
       ].join("\n"),
     );
-    log.info({ reason }, "Sent recovery notice to group");
+    log.info({ reason, downSec }, "Sent recovery notice to group");
   } catch (error) {
-    // If notify fails, try again on next successful connect.
     pendingRecoverNotify = true;
     log.warn(
       { error: String(error?.message || error) },
@@ -1221,16 +1244,14 @@ async function welcomeGroup() {
       "✅ *בוט כדורגל מחובר!*",
       "",
       "התראות ליגות + מעקב קבוצות.",
-      "כל יום ב־08:00 — *בדיקת תקינות* לליגות (לוודא שהבוט עובד) ⚽️🔥",
-      "כל שעה — בדיקת חיבור שקטה; אם נפל חוזר מיד ומעדכן בקבוצה.",
+      "כל יום ב־08:00 — *בדיקת תקינות* לליגות ⚽️🔥",
+      "אם החיבור נופל — הבוט חוזר לבד (בלי שתצטרכו לבקש).",
       "",
-      "שלט רחוק: *לוח* · *טבלה* · *סגל* · *הרכב* · *מעקב* · *בוקר* · *עזרה*",
-      "ב־*לוח* / *טבלה* / *הרכב* נפתחת רשימת בחירת ליגה.",
-      "*סגל* — רשימת שחקני ברצלונה עדכנית (במעקב).",
-      "*בוקר* — בדיקת תקינות ידנית (כמו ב־08:00).",
+      "שלט רחוק: *בדיקה* · *לוח* · *טבלה* · *סגל* · *מעקב* · *בוקר* · *עזרה*",
+      "*בדיקה* / *חי* / *פינג* — לוודא שהבוט חי (מומלץ)",
+      "*סגל* — רשימת שחקני ברצלונה עדכנית",
       "",
       "שני המספרים בקבוצה יכולים לכתוב פקודות ✓",
-      "כולל המספר המקושר *0523123944*",
     ].join("\n"),
   );
 }
@@ -1288,7 +1309,7 @@ async function onConnected() {
   } else {
     console.log("   שני המספרים בקבוצה יכולים לכתוב פקודות ✓");
   }
-  console.log("   חיבור יציב + reconnect מיידי + watchdog + בדיקה שעתית + supervisor.\n");
+  console.log("   חיבור יציב + keep-alive + reconnect חכם + supervisor.\n");
 
   // If we recovered from a drop — tell the group right away.
   notifyRecoveredIfNeeded().catch(() => {});
@@ -1371,6 +1392,8 @@ async function onConnected() {
   startOutboxWatcher();
   startHeartbeat();
   startSelfHeal();
+  startKeepAlive();
+  keepAliveFailStreak = 0;
   await writeHeartbeat({ connected: true });
 }
 
@@ -1401,48 +1424,72 @@ function expireStaleCommandLocks() {
 }
 
 /**
- * Fast auto-reconnect. Never waits "a whole day" — caps at a few seconds.
+ * Auto-reconnect with anti-loop protection.
+ * Fast reconnects (400ms) were causing WhatsApp 428 "connection replaced"
+ * fights — the bot kicked itself repeatedly.
  * @param {unknown} code
  * @param {{ immediate?: boolean }} [opts]
  */
 function scheduleReconnect(code, opts = {}) {
+  if (startingSocket) {
+    log.warn({ code }, "Reconnect skipped — socket start already in progress");
+    return;
+  }
   if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
     console.error(
       `❌ יותר מדי ניסיונות reconnect (${MAX_RECONNECT_ATTEMPTS}). supervisor will restart the process.`,
     );
-    // Exit so supervise.mjs brings us back cleanly.
     process.exit(42);
     return;
   }
 
-  // Any reconnect due to failure should notify once we're back.
+  if (!disconnectStartedAt) disconnectStartedAt = Date.now();
+  lastHealthFailureReason = String(code ?? "disconnect");
+  lastHealthFailureAt = Date.now();
+  // Mark for possible notify — actual send only if downtime was long.
   if (code !== "boot" && cfg.notifyOnRecover) {
     pendingRecoverNotify = true;
-    lastHealthFailureReason = String(code ?? "disconnect");
-    lastHealthFailureAt = Date.now();
   }
 
-  // Coalesce bursts: if a timer is already pending, keep the sooner one.
-  if (reconnectTimer && !opts.immediate) return;
-  if (reconnectTimer && opts.immediate) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
+  // Already waiting to reconnect — don't stack / shorten into a fight loop.
+  if (reconnectTimer) {
+    log.warn({ code }, "Reconnect already scheduled");
+    return;
   }
 
   reconnectAttempts += 1;
-  // 0.4s → ~0.8 → 1.6 → 3.2 → max 6s (never multi-minute / day waits)
-  const delay = opts.immediate
-    ? 400
-    : Math.min(6_000, 400 * 2 ** Math.min(reconnectAttempts - 1, 4));
+  const codeNum = Number(code);
+  // 428/440 = connection replaced — MUST wait so the old session dies first.
+  const replacedLike =
+    codeNum === 428 ||
+    codeNum === 440 ||
+    code === DisconnectReason.connectionReplaced ||
+    String(code).includes("428") ||
+    String(code).includes("replaced");
+
+  let delay;
+  if (replacedLike) {
+    delay = Math.min(20_000, 6_000 + reconnectAttempts * 2_000);
+  } else if (opts.immediate) {
+    delay = Math.max(2_000, MIN_RECONNECT_GAP_MS - (Date.now() - lastReconnectAt));
+  } else {
+    delay = Math.min(15_000, 2_000 * 2 ** Math.min(reconnectAttempts - 1, 3));
+  }
+  // Enforce minimum gap between attempts.
+  const sinceLast = Date.now() - lastReconnectAt;
+  if (lastReconnectAt && sinceLast < MIN_RECONNECT_GAP_MS) {
+    delay = Math.max(delay, MIN_RECONNECT_GAP_MS - sinceLast);
+  }
+
   console.log(
     `🔄 מתחבר מחדש בעוד ${Math.round(delay / 1000)}ש (ניסיון ${reconnectAttempts}, code=${code})…`,
   );
-  lastReconnectAt = Date.now();
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
+    lastReconnectAt = Date.now();
     startSocket().catch((error) => {
       console.error("reconnect failed", error);
-      scheduleReconnect(code, { immediate: true });
+      scheduleReconnect(code, { immediate: false });
     });
   }, delay);
 }
@@ -1487,34 +1534,11 @@ function startSelfHeal() {
       // If we think we're offline and nothing is reconnecting — kick it.
       if (!waConnected && !startingSocket && !reconnectTimer) {
         console.warn("🩺 self-heal: offline without pending reconnect — forcing");
-        scheduleReconnect("self-heal-offline", { immediate: true });
+        scheduleReconnect("self-heal-offline", { immediate: false });
         return;
       }
-      if (!waConnected || !sock || !groupJid) return;
-      const lastBeat = Math.max(
-        lastSuccessfulSendAt,
-        lastWsActivityAt,
-        lastConnectionOpenAt,
-      );
-      if (!lastBeat || Date.now() - lastBeat <= STALE_CONNECTION_MS) return;
-
-      // Soft probe first — idle nights must NOT force reconnect every few minutes.
-      try {
-        await withTimeout(
-          sock.groupMetadata(groupJid),
-          8_000,
-          "self-heal.groupMetadata",
-        );
-        lastWsActivityAt = Date.now();
-        await writeHeartbeat({ probe: "self-heal-ok" });
-        return;
-      } catch (error) {
-        console.warn(
-          `🩺 self-heal: probe failed (${String(error?.message || error)}) — reconnect`,
-        );
-        waConnected = false;
-        scheduleReconnect("self-heal-probe-fail", { immediate: true });
-      }
+      // Connected path is handled by keep-alive (3 consecutive fails).
+      // Do NOT reconnect here on idle — that caused constant 428 loops.
     } catch (error) {
       log.warn(
         { error: String(error?.message || error) },
@@ -1545,6 +1569,49 @@ async function endSocketQuietly() {
       /* ignore */
     }
   }
+  // Give WhatsApp time to drop the old multi-device session before we
+  // open a new one — otherwise we get endless 428 replaced loops.
+  await new Promise((resolve) => setTimeout(resolve, 2_500));
+}
+
+function startKeepAlive() {
+  if (keepAliveTimer) return;
+  keepAliveTimer = setInterval(async () => {
+    try {
+      if (!waConnected || !sock || !groupJid || startingSocket) return;
+      try {
+        await withTimeout(
+          sock.groupMetadata(groupJid),
+          12_000,
+          "keepalive.groupMetadata",
+        );
+        keepAliveFailStreak = 0;
+        lastWsActivityAt = Date.now();
+        await writeHeartbeat({ keepAlive: "ok" });
+      } catch (error) {
+        keepAliveFailStreak += 1;
+        log.warn(
+          {
+            error: String(error?.message || error),
+            streak: keepAliveFailStreak,
+          },
+          "keep-alive probe failed",
+        );
+        // Need 3 consecutive failures before reconnect (avoids flaky probes).
+        if (keepAliveFailStreak >= 3) {
+          keepAliveFailStreak = 0;
+          waConnected = false;
+          scheduleReconnect("keepalive-fail", { immediate: false });
+        }
+      }
+    } catch (error) {
+      log.warn(
+        { error: String(error?.message || error) },
+        "keep-alive tick failed",
+      );
+    }
+  }, 3 * 60_000);
+  if (typeof keepAliveTimer.unref === "function") keepAliveTimer.unref();
 }
 
 function startWatchdog() {
@@ -1570,15 +1637,22 @@ function startWatchdog() {
             "watchdog.groupMetadata",
           );
           lastWsActivityAt = Date.now();
+          keepAliveFailStreak = 0;
           await writeHeartbeat({ probe: "ok" });
           return;
         } catch (error) {
+          keepAliveFailStreak += 1;
           log.warn(
-            { error: String(error?.message || error) },
-            "watchdog probe failed — reconnecting now",
+            {
+              error: String(error?.message || error),
+              streak: keepAliveFailStreak,
+            },
+            "watchdog probe failed",
           );
+          if (keepAliveFailStreak < 3) return;
+          keepAliveFailStreak = 0;
           waConnected = false;
-          scheduleReconnect("watchdog-probe-fail", { immediate: true });
+          scheduleReconnect("watchdog-probe-fail", { immediate: false });
           return;
         }
       }
@@ -1586,10 +1660,24 @@ function startWatchdog() {
       if (staleFor < STALE_CONNECTION_MS) return;
 
       console.warn(
-        `🩺 watchdog: חיבור נראה תקוע (${Math.round(staleFor / 1000)}ש בלי פעילות) — reconnect מיידי`,
+        `🩺 watchdog: חיבור נראה תקוע (${Math.round(staleFor / 1000)}ש בלי פעילות) — בדיקה נוספת`,
       );
+      // One more probe before reconnect — don't kill a quiet-but-healthy socket.
+      try {
+        if (groupJid) {
+          await withTimeout(
+            sock.groupMetadata(groupJid),
+            8_000,
+            "watchdog.staleProbe",
+          );
+          lastWsActivityAt = Date.now();
+          return;
+        }
+      } catch {
+        /* fall through */
+      }
       waConnected = false;
-      scheduleReconnect("watchdog-stale", { immediate: true });
+      scheduleReconnect("watchdog-stale", { immediate: false });
     } catch (error) {
       log.warn(
         { error: String(error?.message || error) },
@@ -1628,13 +1716,15 @@ async function startSocket() {
       auth: state,
       printQRInTerminal: false,
       logger: pino({ level: "silent" }),
+      browser: ["DavidFootballBot", "Chrome", "126.0.0"],
       markOnlineOnConnect: false,
       syncFullHistory: false,
       emitOwnEvents: true,
-      connectTimeoutMs: 60_000,
-      defaultQueryTimeoutMs: 60_000,
-      keepAliveIntervalMs: 15_000,
-      retryRequestDelayMs: 500,
+      connectTimeoutMs: 45_000,
+      defaultQueryTimeoutMs: 45_000,
+      keepAliveIntervalMs: 25_000,
+      retryRequestDelayMs: 750,
+      getMessage: async () => undefined,
     });
 
     sock.ev.on("creds.update", saveCreds);
@@ -1694,21 +1784,17 @@ async function startSocket() {
           return;
         }
 
-        // 408/428/440/500/515/connectionReplaced — always try to come back fast.
-        const immediate =
-          code === 515 ||
-          code === 408 ||
+        // Never "immediate" on 428/440 — that creates a replace fight loop.
+        const replacedLike =
           code === 428 ||
-          code === 503 ||
-          code === DisconnectReason.connectionReplaced ||
-          code === DisconnectReason.restartRequired ||
-          code === DisconnectReason.timedOut;
-        if (code === DisconnectReason.connectionReplaced || code === 440) {
+          code === 440 ||
+          code === DisconnectReason.connectionReplaced;
+        if (replacedLike) {
           console.log(
-            "החיבור הוחלף/נפל — מתחברים מחדש אוטומטית תוך שנייה…",
+            "החיבור הוחלף/נסגר — מחכים שהסשן הישן ייסגר ואז מתחברים מחדש…",
           );
         }
-        scheduleReconnect(code, { immediate });
+        scheduleReconnect(code, { immediate: false });
       }
     });
   } finally {
