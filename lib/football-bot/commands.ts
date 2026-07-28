@@ -13,6 +13,7 @@ import {
   formatLeagues,
   formatLiveScores,
   formatMorningStatus,
+  formatPingMessage,
   formatScoreLineForMatch,
   formatStatusMessage,
   formatTomorrowMatches,
@@ -77,11 +78,23 @@ export function parseFootballBotCommand(raw: string): FootballBotCommand {
   }
 
   if (
+    text === "בדיקה" ||
+    text === "פינג" ||
+    text === "ping" ||
+    text === "ok" ||
+    text === "okay" ||
+    text === "חי" ||
+    text === "היי" ||
+    text === "הבוט חי" ||
+    text === "בוט חי"
+  ) {
+    return "ping";
+  }
+
+  if (
     text === "בוט" ||
     text === "סטטוס" ||
-    text === "status" ||
-    text.includes("בוט חי") ||
-    text.includes("הבוט חי")
+    text === "status"
   ) {
     return "status";
   }
@@ -89,7 +102,6 @@ export function parseFootballBotCommand(raw: string): FootballBotCommand {
   if (
     text === "תוצאה" ||
     text === "תוצאות" ||
-    text === "חי" ||
     text === "לייב" ||
     text === "live" ||
     text.startsWith("תוצאה ")
@@ -210,42 +222,36 @@ export async function runFootballBotCommand(
   switch (command) {
     case "help":
       return { command, reply: formatHelpMessage() };
+    case "ping":
+      // Instant local reply — zero ESPN / Redis. Use this instead of סטטוס.
+      return { command, reply: formatPingMessage() };
     case "status": {
-      // Keep סטטוס ultra-light so WhatsApp never hangs / double-sends.
-      // Do NOT force a fresh multi-league ESPN scrape here.
+      // Also keep this light: no ESPN scrape (was causing hangs on WhatsApp).
       const competitions = getEnabledFootballCompetitions();
-      const watchlist = await loadWatchlist();
-      let liveCount = 0;
-      let nextLabel: string | null = null;
+      let watchNames: string[] = [];
       try {
-        const board = await Promise.race([
-          fetchFootballBoard(false),
-          new Promise<null>((resolve) => {
-            setTimeout(() => resolve(null), 2500);
-          }),
+        const watchlist = await Promise.race([
+          loadWatchlist(),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 800)),
         ]);
-        if (board) {
-          liveCount = board.live.length;
-          const next = board.upcoming[0];
-          if (next) {
-            nextLabel = `${formatScoreLineForMatch(next)} · ${formatKickoffHe(next.utcDate.toISOString())}`;
-          }
-        }
+        if (watchlist) watchNames = watchlist.map((t) => t.nameHe);
       } catch {
-        /* status must still answer even if ESPN is slow */
+        /* ignore */
       }
       return {
         command,
         reply: [
           formatStatusMessage({
-            liveCount,
-            nextLabel,
+            liveCount: 0,
+            nextLabel: null,
             leagueCount: competitions.length,
             alertsEnabled: process.env.FOOTBALL_BOT_ALERTS !== "false",
           }),
-          watchlist.length
-            ? `\n⭐ במעקב: ${watchlist.map((t) => t.nameHe).join(" · ")}`
+          watchNames.length
+            ? `\n⭐ במעקב: ${watchNames.join(" · ")}`
             : "",
+          "",
+          "💡 לבדיקה מהירה בלי תקיעות כתבו *בדיקה*",
         ]
           .filter(Boolean)
           .join(""),

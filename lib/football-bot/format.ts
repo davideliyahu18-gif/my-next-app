@@ -64,10 +64,31 @@ export function formatHelpMessage(): string {
     "• *תוצאה* — משחקים חיים / הקרובים",
     "• *מחר* — משחקי מחר",
     "• *ליגות* — מה הבוט עוקב אחריו",
-    "• *סטטוס* / *בוט* — האם הבוט חי",
+    "• *בדיקה* / *חי* / *פינג* — בדיקה מהירה שהבוט חי (מומלץ)",
+    "• *סטטוס* / *בוט* — האם הבוט מחובר",
     "• *עזרה* — ההודעה הזאת",
     "",
     "אוטומטי: *בדיקת תקינות 08:00* · תזכורת 60׳/30׳ + הרכב · שער · מחצית · סיום",
+  ].join("\n");
+}
+
+export function formatPingMessage(): string {
+  const now = new Date().toLocaleString("he-IL", {
+    weekday: "short",
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZone: JERUSALEM,
+  });
+  return [
+    "✅ *חי*",
+    "",
+    "הבוט עובד ומגיב מיד.",
+    `🕐 ${now}`,
+    "",
+    "פקודות: *בוקר* · *סגל* · *לוח* · *עזרה*",
   ].join("\n");
 }
 
@@ -89,7 +110,7 @@ export function formatStatusMessage(options: {
       ? "🔔 התראות אוטומטיות: *פועל*"
       : "🔔 התראות אוטומטיות: *כבוי*",
     "",
-    "כתבו *עזרה* לרשימת פקודות.",
+    "כתבו *בדיקה* לבדיקה מהירה · *עזרה* לרשימה",
   ]
     .filter((line) => line != null)
     .join("\n");

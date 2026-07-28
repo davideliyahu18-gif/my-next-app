@@ -1,6 +1,7 @@
 export type FootballBotCommand =
   | "help"
   | "status"
+  | "ping"
   | "score"
   | "tomorrow"
   | "schedule"

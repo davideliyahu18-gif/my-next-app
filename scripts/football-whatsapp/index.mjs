@@ -168,6 +168,12 @@ function looksLikeOperatorCommand(raw) {
     "help",
     "בוט",
     "סטטוס",
+    "בדיקה",
+    "פינג",
+    "ping",
+    "ok",
+    "חי",
+    "היי",
     "תוצאה",
     "תוצאות",
     "מחר",
@@ -355,6 +361,12 @@ function looksLikeRemoteCommand(raw) {
     "help",
     "בוט",
     "סטטוס",
+    "בדיקה",
+    "פינג",
+    "ping",
+    "ok",
+    "חי",
+    "היי",
     "תוצאה",
     "תוצאות",
     "מחר",
@@ -798,7 +810,9 @@ async function handleIncomingMessage(msg) {
     const chatLock = `chat:${chatId}`;
     expireStaleCommandLocks();
     const isLightCommand =
-      /^(סטטוס|בוט|status|עזרה|help|פקודות)$/i.test(body.trim());
+      /^(סטטוס|בוט|status|עזרה|help|פקודות|בדיקה|פינג|ping|ok|okay|חי|היי)$/i.test(
+        body.trim(),
+      );
     if (commandInFlight.has(chatLock) && !isLightCommand) {
       const started = commandLockStartedAt.get(chatLock) || 0;
       const heldFor = Date.now() - started;
@@ -838,7 +852,7 @@ async function handleIncomingMessage(msg) {
     const isFullStandingsCmd =
       /^(טבלה|טבלת|דירוג|standings|table)(?:\s|$)/i.test(body);
     const isOtherTopLevelCmd =
-      /^(עזרה|help|בוט|סטטוס|תוצאה|תוצאות|מחר|ליגות|מעקב|עקוב|הסר|בוקר|morning|סגל|שחקנים|roster|squad)(?:\s|$)/i.test(
+      /^(עזרה|help|בוט|סטטוס|תוצאה|תוצאות|מחר|ליגות|מעקב|עקוב|הסר|בוקר|morning|סגל|שחקנים|roster|squad|בדיקה|פינג|ping|ok|חי|היי)(?:\s|$)/i.test(
         body,
       );
 
@@ -885,7 +899,7 @@ async function handleIncomingMessage(msg) {
     // Ack only for slower commands — never for סטטוס/עזרה (that double-send
     // was causing missed replies and reconnect pressure on Baileys).
     const isLightOrMenu =
-      /^(לוח|לוז|לו״ז|schedule|הרכב|הרכבים|lineup|lineups|טבלה|טבלת|דירוג|standings|table|סגל|שחקנים|roster|squad|סטטוס|בוט|status|עזרה|help|פקודות|מעקב|ליגות|מחר)$/i.test(
+      /^(לוח|לוז|לו״ז|schedule|הרכב|הרכבים|lineup|lineups|טבלה|טבלת|דירוג|standings|table|סגל|שחקנים|roster|squad|סטטוס|בוט|status|עזרה|help|פקודות|מעקב|ליגות|מחר|בדיקה|פינג|ping|ok|okay|חי|היי)$/i.test(
         commandText.trim(),
       );
     if (!isLightOrMenu) {
