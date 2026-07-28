@@ -355,8 +355,13 @@ function commandFromInteractiveId(rawId) {
 function looksLikeRemoteCommand(raw) {
   const t = raw.trim().toLowerCase();
   if (!t) return false;
+  // Ignore our own bot replies (echo / fromMe loops).
+  if (t.startsWith("✅") || t.includes("דוד – עדכוני כדורגל")) return false;
   if (/^fb:(schedule|lineup|standings):/i.test(t)) return true;
-  const keys = [
+
+  // Short tokens: exact match OR "token …" only — NEVER includes()
+  // (e.g. "חי" must not match inside other sentences / bot replies).
+  const exactOrPrefix = [
     "עזרה",
     "help",
     "בוט",
@@ -365,6 +370,7 @@ function looksLikeRemoteCommand(raw) {
     "פינג",
     "ping",
     "ok",
+    "okay",
     "חי",
     "היי",
     "תוצאה",
@@ -375,19 +381,9 @@ function looksLikeRemoteCommand(raw) {
     "לו״ז",
     "ליגות",
     "ליגה",
-    "חי",
     "לייב",
+    "live",
     "פקודות",
-    "אנגלית",
-    "ספרדית",
-    "ישראלית",
-    "איטלקית",
-    "גרמנית",
-    "בונדסליגה",
-    "הכל",
-    "פרמייר",
-    "סרייה",
-    "סריה",
     "הרכב",
     "הרכבים",
     "lineup",
@@ -409,8 +405,18 @@ function looksLikeRemoteCommand(raw) {
     "ברצלונה",
     "בוקר",
     "morning",
+    "אנגלית",
+    "ספרדית",
+    "ישראלית",
+    "איטלקית",
+    "גרמנית",
+    "בונדסליגה",
+    "הכל",
+    "פרמייר",
+    "סרייה",
+    "סריה",
   ];
-  if (keys.some((k) => t === k || t.startsWith(`${k} `) || t.includes(k))) {
+  if (exactOrPrefix.some((k) => t === k || t.startsWith(`${k} `))) {
     return true;
   }
   // Menu picks: 0-5 (all + 5 leagues)
@@ -775,6 +781,10 @@ async function handleIncomingMessage(msg) {
     if (!body) return;
 
     const fromMe = Boolean(msg.key.fromMe);
+    // Never treat our own bot replies as commands (prevents חי loops).
+    if (fromMe && (body.startsWith("✅") || body.includes("דוד – עדכוני כדורגל"))) {
+      return;
+    }
     if (fromMe) {
       // Linked phone messages arrive as fromMe — allow short commands only.
       if (!cfg.allowFromMeCommands) return;
