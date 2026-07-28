@@ -211,18 +211,36 @@ export async function runFootballBotCommand(
     case "help":
       return { command, reply: formatHelpMessage() };
     case "status": {
-      const board = await fetchFootballBoard(true);
-      const next = board.upcoming[0];
+      // Keep סטטוס ultra-light so WhatsApp never hangs / double-sends.
+      // Do NOT force a fresh multi-league ESPN scrape here.
+      const competitions = getEnabledFootballCompetitions();
       const watchlist = await loadWatchlist();
+      let liveCount = 0;
+      let nextLabel: string | null = null;
+      try {
+        const board = await Promise.race([
+          fetchFootballBoard(false),
+          new Promise<null>((resolve) => {
+            setTimeout(() => resolve(null), 2500);
+          }),
+        ]);
+        if (board) {
+          liveCount = board.live.length;
+          const next = board.upcoming[0];
+          if (next) {
+            nextLabel = `${formatScoreLineForMatch(next)} · ${formatKickoffHe(next.utcDate.toISOString())}`;
+          }
+        }
+      } catch {
+        /* status must still answer even if ESPN is slow */
+      }
       return {
         command,
         reply: [
           formatStatusMessage({
-            liveCount: board.live.length,
-            nextLabel: next
-              ? `${formatScoreLineForMatch(next)} · ${formatKickoffHe(next.utcDate.toISOString())}`
-              : null,
-            leagueCount: board.competitions.length,
+            liveCount,
+            nextLabel,
+            leagueCount: competitions.length,
             alertsEnabled: process.env.FOOTBALL_BOT_ALERTS !== "false",
           }),
           watchlist.length

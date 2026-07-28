@@ -507,13 +507,18 @@ async function safeSendMessage(chatId, content) {
     lastWsActivityAt = Date.now();
     return result;
   } catch (error) {
-    // Send failures usually mean the socket is half-dead — heal immediately.
-    log.warn(
-      { error: String(error?.message || error), chatId },
-      "sendMessage failed — scheduling fast reconnect",
-    );
-    waConnected = false;
-    scheduleReconnect("send-fail", { immediate: true });
+    const msg = String(error?.message || error);
+    log.warn({ error: msg, chatId }, "sendMessage failed");
+    // Don't reconnect on every transient send blip from a light command —
+    // only when the socket looks truly dead.
+    const fatalSend =
+      /not connected|Connection Closed|Timed Out|closed|ECONN|socket/i.test(
+        msg,
+      );
+    if (fatalSend) {
+      waConnected = false;
+      scheduleReconnect("send-fail", { immediate: true });
+    }
     throw error;
   }
 }
@@ -877,12 +882,13 @@ async function handleIncomingMessage(msg) {
       "Remote command received",
     );
 
-    // Ack only for slower commands — menus answer instantly with text.
-    const isLikelyMenu =
-      /^(לוח|לוז|לו״ז|schedule|הרכב|הרכבים|lineup|lineups|טבלה|טבלת|דירוג|standings|table|סגל|שחקנים|roster|squad)$/i.test(
+    // Ack only for slower commands — never for סטטוס/עזרה (that double-send
+    // was causing missed replies and reconnect pressure on Baileys).
+    const isLightOrMenu =
+      /^(לוח|לוז|לו״ז|schedule|הרכב|הרכבים|lineup|lineups|טבלה|טבלת|דירוג|standings|table|סגל|שחקנים|roster|squad|סטטוס|בוט|status|עזרה|help|פקודות|מעקב|ליגות|מחר)$/i.test(
         commandText.trim(),
       );
-    if (!isLikelyMenu) {
+    if (!isLightOrMenu) {
       try {
         await safeSendMessage(chatId, { text: "⏳ רגע, בודק…" });
       } catch (error) {
