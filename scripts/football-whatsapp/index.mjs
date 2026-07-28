@@ -90,15 +90,20 @@ function envConfig() {
     morningTimezone:
       process.env.FOOTBALL_BOT_MORNING_TZ ?? "Asia/Jerusalem",
     morningEnabled: process.env.FOOTBALL_BOT_MORNING !== "false",
+    /** Hourly deep health check (WA probe + site API). Default: every hour. */
+    hourlyCron: process.env.FOOTBALL_BOT_HOURLY_CRON ?? "0 * * * *",
+    hourlyEnabled: process.env.FOOTBALL_BOT_HOURLY !== "false",
+    /** Notify the group after auto-recovery from a drop. */
+    notifyOnRecover: process.env.FOOTBALL_BOT_NOTIFY_RECOVER !== "false",
     alertsEnabled: process.env.FOOTBALL_BOT_ALERTS !== "false",
     buttonsEnabled: process.env.FOOTBALL_BOT_BUTTONS === "true",
     /** Allow the linked phone (e.g. 0523123944) to send commands — those arrive as fromMe. */
     allowFromMeCommands: process.env.FOOTBALL_BOT_ALLOW_FROM_ME !== "false",
     /** Optional allowlist. Empty = כל מי שבקבוצה. Example: 0523123944,05XXXXXXXX */
     operators: parseOperatorNumbers(
-      process.env.FOOTBALL_BOT_OPERATORS || "0523123944",
+      process.env.FOOTBALL_BOT_OPERATORS || "",
     ),
-    /** If true, only numbers in FOOTBALL_BOT_OPERATORS may run commands. */
+    /** If true, only numbers in FOOTBALL_BOT_OPERATORS may run commands. Default: false = שני המספרים בקבוצה. */
     operatorsOnly: process.env.FOOTBALL_BOT_OPERATORS_ONLY === "true",
   };
 }
@@ -221,11 +226,18 @@ let startingSocket = false;
 let cronsStarted = false;
 let morningTask = null;
 let pollTask = null;
+let hourlyTask = null;
 let watchdogTimer = null;
 let outboxTimer = null;
 let lastConnectionOpenAt = 0;
 let lastSuccessfulSendAt = 0;
 let lastWsActivityAt = 0;
+/** After a detected failure, announce recovery once we're back. */
+let pendingRecoverNotify = false;
+let lastHealthFailureAt = 0;
+let lastHealthFailureReason = "";
+let lastHourlyCheckAt = 0;
+let healthCheckRunning = false;
 /** @type {Map<string, { intent: "schedule" | "lineup" | "standings"; expiresAt: number }>} */
 const pendingByChat = new Map();
 /** Prevent one hung chat command from stacking forever. */
@@ -747,11 +759,14 @@ async function handleIncomingMessage(msg) {
 
     const fromMe = Boolean(msg.key.fromMe);
     if (fromMe) {
-      // Linked phone (0523123944) messages arrive as fromMe — allow short commands only.
+      // Linked phone messages arrive as fromMe — allow short commands only.
       if (!cfg.allowFromMeCommands) return;
       if (!fromButton && !looksLikeOperatorCommand(body)) return;
-      const linked = linkedAccountDigits();
-      if (cfg.operators?.length && linked && !isOperatorNumber(linked)) return;
+      // Only enforce operator allowlist when operatorsOnly=true.
+      if (cfg.operatorsOnly && cfg.operators?.length) {
+        const linked = linkedAccountDigits();
+        if (linked && !isOperatorNumber(linked)) return;
+      }
     } else if (cfg.operatorsOnly && cfg.operators?.length) {
       const sender = senderDigitsFromMessage(msg);
       if (!isOperatorNumber(sender)) {
@@ -991,6 +1006,161 @@ async function sendMorningStatus() {
     }
   } catch (error) {
     log.warn({ error: String(error.message || error) }, "Morning status failed");
+    markHealthFailure("morning-failed");
+    scheduleReconnect("morning-failed", { immediate: true });
+  }
+}
+
+/**
+ * Deep hourly check: WhatsApp socket + group probe + site API.
+ * On any failure → immediate reconnect (and later notify the group).
+ */
+async function runHourlyHealthCheck(opts = {}) {
+  if (healthCheckRunning) return { ok: false, reason: "busy" };
+  healthCheckRunning = true;
+  const silent = Boolean(opts.silent);
+  const label = new Date().toLocaleString("he-IL", {
+    timeZone: cfg.morningTimezone || "Asia/Jerusalem",
+    hour: "2-digit",
+    minute: "2-digit",
+    day: "2-digit",
+    month: "2-digit",
+  });
+
+  try {
+    const checks = {
+      waConnected: Boolean(waConnected && sock),
+      groupOk: false,
+      siteOk: false,
+    };
+
+    if (!checks.waConnected) {
+      markHealthFailure("hourly-wa-offline");
+      console.warn(`🩺 בדיקה שעתית ${label}: וואטסאפ לא מחובר — reconnect מיידי`);
+      scheduleReconnect("hourly-wa-offline", { immediate: true });
+      await writeHeartbeat({ hourly: "fail", reason: "wa-offline" });
+      return { ok: false, reason: "wa-offline", checks };
+    }
+
+    if (!groupJid) {
+      try {
+        await resolveGroupByName();
+      } catch {
+        /* ignore */
+      }
+    }
+
+    if (groupJid && sock) {
+      try {
+        await withTimeout(
+          sock.groupMetadata(groupJid),
+          10_000,
+          "hourly.groupMetadata",
+        );
+        checks.groupOk = true;
+        lastWsActivityAt = Date.now();
+      } catch (error) {
+        markHealthFailure(`hourly-group:${error?.message || error}`);
+        console.warn(
+          `🩺 בדיקה שעתית ${label}: בדיקת קבוצה נכשלה — reconnect מיידי`,
+        );
+        waConnected = false;
+        scheduleReconnect("hourly-group-fail", { immediate: true });
+        await writeHeartbeat({ hourly: "fail", reason: "group" });
+        return { ok: false, reason: "group", checks };
+      }
+    } else {
+      markHealthFailure("hourly-no-group");
+      scheduleReconnect("hourly-no-group", { immediate: true });
+      return { ok: false, reason: "no-group", checks };
+    }
+
+    try {
+      const result = await withTimeout(
+        apiFetch("/api/football-bot/command", {
+          method: "POST",
+          body: JSON.stringify({ text: "סטטוס" }),
+        }),
+        API_TIMEOUT_MS,
+        "hourly.site",
+      );
+      checks.siteOk = Boolean(result?.reply || result?.command === "status");
+      if (!checks.siteOk) throw new Error("empty status reply");
+    } catch (error) {
+      markHealthFailure(`hourly-site:${error?.message || error}`);
+      console.warn(
+        `🩺 בדיקה שעתית ${label}: API נכשל — ${String(error?.message || error)}`,
+      );
+      // Site down: keep WA up, but record failure; retry site on next tick.
+      await writeHeartbeat({ hourly: "fail", reason: "site" });
+      if (!silent) {
+        try {
+          await sendToGroup(
+            [
+              "⚠️ *בדיקה שעתית*",
+              "",
+              "וואטסאפ מחובר, אבל מקור הנתונים לא ענה.",
+              "ממשיך לנסות אוטומטית…",
+              "",
+              "אפשר עדיין לכתוב פקודות משני המספרים בקבוצה.",
+            ].join("\n"),
+          );
+        } catch {
+          /* ignore */
+        }
+      }
+      return { ok: false, reason: "site", checks };
+    }
+
+    lastHourlyCheckAt = Date.now();
+    await writeHeartbeat({
+      hourly: "ok",
+      lastHourlyCheckAt,
+      checks,
+    });
+    log.info({ label, checks }, "Hourly health check OK");
+    console.log(`🩺 בדיקה שעתית ${label}: ✅ תקין (WA + קבוצה + API)`);
+    return { ok: true, checks };
+  } finally {
+    healthCheckRunning = false;
+  }
+}
+
+function markHealthFailure(reason) {
+  lastHealthFailureAt = Date.now();
+  lastHealthFailureReason = String(reason || "unknown");
+  pendingRecoverNotify = Boolean(cfg.notifyOnRecover);
+  writeHeartbeat({
+    fail: true,
+    reason: lastHealthFailureReason,
+    at: lastHealthFailureAt,
+  }).catch(() => {});
+}
+
+async function notifyRecoveredIfNeeded() {
+  if (!pendingRecoverNotify || !cfg.notifyOnRecover) return;
+  if (!sock || !groupJid || !waConnected) return;
+  pendingRecoverNotify = false;
+  const reason = lastHealthFailureReason || "disconnect";
+  try {
+    await sendToGroup(
+      [
+        "✅ *הבוט חזר לפעילות*",
+        "",
+        `תוקן אוטומטית אחרי: \`${reason}\``,
+        "אפשר לכתוב בקבוצה משני המספרים ✓",
+        "",
+        "פקודות: *סטטוס* · *סגל* · *בוקר* · *עזרה*",
+      ].join("\n"),
+    );
+    log.info({ reason }, "Sent recovery notice to group");
+  } catch (error) {
+    // If notify fails, try again on next successful connect.
+    pendingRecoverNotify = true;
+    log.warn(
+      { error: String(error?.message || error) },
+      "Recovery notice failed",
+    );
   }
 }
 
@@ -1004,6 +1174,7 @@ async function welcomeGroup() {
       "",
       "התראות ליגות + מעקב קבוצות.",
       "כל יום ב־08:00 — *בדיקת תקינות* לליגות (לוודא שהבוט עובד) ⚽️🔥",
+      "כל שעה — בדיקת חיבור שקטה; אם נפל חוזר מיד ומעדכן בקבוצה.",
       "",
       "שלט רחוק: *לוח* · *טבלה* · *סגל* · *הרכב* · *מעקב* · *בוקר* · *עזרה*",
       "ב־*לוח* / *טבלה* / *הרכב* נפתחת רשימת בחירת ליגה.",
@@ -1011,7 +1182,7 @@ async function welcomeGroup() {
       "*בוקר* — בדיקת תקינות ידנית (כמו ב־08:00).",
       "",
       "שני המספרים בקבוצה יכולים לכתוב פקודות ✓",
-      "כולל *0523123944*",
+      "כולל המספר המקושר *0523123944*",
     ].join("\n"),
   );
 }
@@ -1057,15 +1228,22 @@ async function onConnected() {
   console.log(
     `   בוקר 08:00 (${cfg.morningTimezone}): ${cfg.morningEnabled ? "on" : "off"}`,
   );
+  console.log(
+    `   בדיקה שעתית (${cfg.hourlyCron}): ${cfg.hourlyEnabled ? "on" : "off"}`,
+  );
   console.log(`   כפתורי ליגה: ${cfg.buttonsEnabled ? "on" : "off"}`);
   console.log(
     `   פקודות fromMe (מקושר): ${cfg.allowFromMeCommands ? "on" : "off"}`,
   );
-  if (cfg.operators?.length) {
-    console.log(`   מפעילים: ${cfg.operators.join(", ")}`);
+  if (cfg.operatorsOnly && cfg.operators?.length) {
+    console.log(`   מפעילים (חסום לאחרים): ${cfg.operators.join(", ")}`);
+  } else {
+    console.log("   שני המספרים בקבוצה יכולים לכתוב פקודות ✓");
   }
-  console.log("   שני המספרים בקבוצה יכולים לכתוב פקודות.");
-  console.log("   חיבור יציב + reconnect + watchdog + supervisor.\n");
+  console.log("   חיבור יציב + reconnect מיידי + watchdog + בדיקה שעתית + supervisor.\n");
+
+  // If we recovered from a drop — tell the group right away.
+  notifyRecoveredIfNeeded().catch(() => {});
 
   if (groupPollTimer) {
     clearInterval(groupPollTimer);
@@ -1120,6 +1298,25 @@ async function onConnected() {
     cron.schedule("*/5 * * * *", () => {
       healthPingSite().catch(() => {});
     });
+
+    if (cfg.hourlyEnabled) {
+      hourlyTask = cron.schedule(
+        cfg.hourlyCron,
+        () => {
+          runHourlyHealthCheck({ silent: true }).catch((error) => {
+            log.warn(
+              { error: String(error?.message || error) },
+              "Hourly health cron error",
+            );
+          });
+        },
+        { timezone: cfg.morningTimezone },
+      );
+      // First check ~30s after boot (don't wait for top of hour).
+      setTimeout(() => {
+        runHourlyHealthCheck({ silent: true }).catch(() => {});
+      }, 30_000);
+    }
   }
 
   startWatchdog();
@@ -1168,6 +1365,13 @@ function scheduleReconnect(code, opts = {}) {
     // Exit so supervise.mjs brings us back cleanly.
     process.exit(42);
     return;
+  }
+
+  // Any reconnect due to failure should notify once we're back.
+  if (code !== "boot" && cfg.notifyOnRecover) {
+    pendingRecoverNotify = true;
+    lastHealthFailureReason = String(code ?? "disconnect");
+    lastHealthFailureAt = Date.now();
   }
 
   // Coalesce bursts: if a timer is already pending, keep the sooner one.
@@ -1418,6 +1622,7 @@ async function startSocket() {
         const loggedOut = code === DisconnectReason.loggedOut;
         log.warn({ code }, "WhatsApp connection closed");
         console.log(`⚠️ חיבור וואטסאפ נסגר (code=${code}).`);
+        markHealthFailure(`close:${code}`);
 
         if (loggedOut) {
           console.log(
@@ -1428,7 +1633,6 @@ async function startSocket() {
         }
 
         // 408/428/440/500/515/connectionReplaced — always try to come back fast.
-        // Waiting forever (or refusing reconnect) is worse than a quick retry.
         const immediate =
           code === 515 ||
           code === 408 ||
