@@ -10,7 +10,14 @@
 
 import { createRequire } from "node:module";
 import { mkdir, readFile, writeFile, readdir, rename } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import {
+  existsSync,
+  openSync,
+  writeSync,
+  closeSync,
+  unlinkSync,
+  readFileSync,
+} from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import cron from "node-cron";
@@ -22,6 +29,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "../..");
 const AUTH_DIR = path.join(__dirname, "auth");
 const STATE_FILE = path.join(__dirname, "bot-state.json");
+const LOCK_FILE = path.join(__dirname, "bot.lock");
 const QR_FILE = path.join(__dirname, "qr.png");
 /** Drop JSON jobs here — processed by the RUNNING bot (never open a 2nd WA session). */
 const OUTBOX_DIR = path.join(__dirname, "outbox");
@@ -94,7 +102,7 @@ function envConfig() {
     hourlyCron: process.env.FOOTBALL_BOT_HOURLY_CRON ?? "0 * * * *",
     hourlyEnabled: process.env.FOOTBALL_BOT_HOURLY !== "false",
     /** Notify the group after auto-recovery from a drop. */
-    notifyOnRecover: process.env.FOOTBALL_BOT_NOTIFY_RECOVER !== "false",
+    notifyOnRecover: process.env.FOOTBALL_BOT_NOTIFY_RECOVER === "true",
     alertsEnabled: process.env.FOOTBALL_BOT_ALERTS !== "false",
     buttonsEnabled: process.env.FOOTBALL_BOT_BUTTONS === "true",
     /** Allow the linked phone (e.g. 0523123944) to send commands — those arrive as fromMe. */
@@ -259,9 +267,11 @@ const WATCHDOG_MS = 45_000;
 /** Idle without traffic before soft probe (not hard reconnect). */
 const STALE_CONNECTION_MS = 12 * 60_000;
 /** Minimum gap between reconnect attempts — prevents 428 fight loops. */
-const MIN_RECONNECT_GAP_MS = 8_000;
+const MIN_RECONNECT_GAP_MS = 12_000;
+/** Extra wait after connection-replaced (428/440) before opening a new socket. */
+const REPLACED_RECONNECT_BASE_MS = 12_000;
 /** Only notify the group if we were down at least this long. */
-const RECOVER_NOTIFY_AFTER_MS = 60_000;
+const RECOVER_NOTIFY_AFTER_MS = 120_000;
 const HEARTBEAT_FILE = path.join(__dirname, "heartbeat.json");
 const HEARTBEAT_EVERY_MS = 15_000;
 let heartbeatTimer = null;
@@ -270,6 +280,9 @@ let keepAliveTimer = null;
 let lastReconnectAt = 0;
 let disconnectStartedAt = 0;
 let keepAliveFailStreak = 0;
+let lastCloseCode = null;
+let lockFd = null;
+let shuttingDown = false;
 
 async function loadJson(file, fallback) {
   if (!existsSync(file)) return fallback;
@@ -293,6 +306,54 @@ async function saveState() {
     "utf8",
   );
 }
+
+
+function acquireInstanceLock() {
+  try {
+    lockFd = openSync(LOCK_FILE, "wx");
+    writeSync(lockFd, `${process.pid}\n${new Date().toISOString()}\n`);
+  } catch (error) {
+    if (error?.code === "EEXIST") {
+      let other = "";
+      try {
+        other = readFileSync(LOCK_FILE, "utf8").trim().split("\n")[0];
+      } catch {
+        /* ignore */
+      }
+      // Stale lock: previous process died without cleanup.
+      if (other && !existsSync(`/proc/${other}`)) {
+        try {
+          unlinkSync(LOCK_FILE);
+        } catch {
+          /* ignore */
+        }
+        lockFd = openSync(LOCK_FILE, "wx");
+        writeSync(lockFd, `${process.pid}\n${new Date().toISOString()}\n`);
+        return;
+      }
+      console.error(
+        `❌ הבוט כבר רץ${other ? ` (pid ${other})` : ""}. לא פותחים סשן שני (זה גורם ל־428).`,
+      );
+      process.exit(1);
+    }
+    throw error;
+  }
+}
+
+function releaseInstanceLock() {
+  try {
+    if (lockFd != null) closeSync(lockFd);
+  } catch {
+    /* ignore */
+  }
+  lockFd = null;
+  try {
+    unlinkSync(LOCK_FILE);
+  } catch {
+    /* ignore */
+  }
+}
+
 
 function sameChatId(a, b) {
   if (!a || !b) return false;
@@ -1431,6 +1492,7 @@ function expireStaleCommandLocks() {
  * @param {{ immediate?: boolean }} [opts]
  */
 function scheduleReconnect(code, opts = {}) {
+  if (shuttingDown) return;
   if (startingSocket) {
     log.warn({ code }, "Reconnect skipped — socket start already in progress");
     return;
@@ -1467,13 +1529,16 @@ function scheduleReconnect(code, opts = {}) {
     String(code).includes("428") ||
     String(code).includes("replaced");
 
+  if (shuttingDown) return;
+
   let delay;
   if (replacedLike) {
-    delay = Math.min(20_000, 6_000 + reconnectAttempts * 2_000);
+    // WhatsApp needs time to drop the replaced multi-device session.
+    delay = Math.min(45_000, REPLACED_RECONNECT_BASE_MS + reconnectAttempts * 4_000);
   } else if (opts.immediate) {
-    delay = Math.max(2_000, MIN_RECONNECT_GAP_MS - (Date.now() - lastReconnectAt));
+    delay = Math.max(3_000, MIN_RECONNECT_GAP_MS - (Date.now() - lastReconnectAt));
   } else {
-    delay = Math.min(15_000, 2_000 * 2 ** Math.min(reconnectAttempts - 1, 3));
+    delay = Math.min(20_000, 3_000 * 2 ** Math.min(reconnectAttempts - 1, 3));
   }
   // Enforce minimum gap between attempts.
   const sinceLast = Date.now() - lastReconnectAt;
@@ -1571,7 +1636,12 @@ async function endSocketQuietly() {
   }
   // Give WhatsApp time to drop the old multi-device session before we
   // open a new one — otherwise we get endless 428 replaced loops.
-  await new Promise((resolve) => setTimeout(resolve, 2_500));
+  const replaced =
+    lastCloseCode === 428 ||
+    lastCloseCode === 440 ||
+    lastCloseCode === DisconnectReason.connectionReplaced;
+  const pause = replaced ? 8_000 : 3_000;
+  await new Promise((resolve) => setTimeout(resolve, pause));
 }
 
 function startKeepAlive() {
@@ -1703,6 +1773,7 @@ async function healthPingSite() {
 }
 
 async function startSocket() {
+  if (shuttingDown) return;
   if (startingSocket) return;
   startingSocket = true;
   try {
@@ -1771,6 +1842,7 @@ async function startSocket() {
         waConnected = false;
         clearCommandLocks();
         const code = disconnectStatusCode(lastDisconnect);
+        lastCloseCode = code;
         const loggedOut = code === DisconnectReason.loggedOut;
         log.warn({ code }, "WhatsApp connection closed");
         console.log(`⚠️ חיבור וואטסאפ נסגר (code=${code}).`);
@@ -1807,6 +1879,29 @@ async function main() {
   cfg = envConfig();
   await loadState();
   if (cfg.groupJidEnv) groupJid = cfg.groupJidEnv;
+  acquireInstanceLock();
+
+  const shutdown = (signal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`🛑 ${signal} — closing quietly (supervisor will restart if needed)`);
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    releaseInstanceLock();
+    // Exit quickly; do NOT open a replacement socket here (that causes 428).
+    process.exit(0);
+  };
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("exit", () => {
+    try {
+      releaseInstanceLock();
+    } catch {
+      /* ignore */
+    }
+  });
 
   // libsignal prints noisy decrypt mismatches after reconnect churn — don't drown logs.
   const originalConsoleError = console.error.bind(console);

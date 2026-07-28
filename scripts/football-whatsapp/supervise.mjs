@@ -1,26 +1,28 @@
 #!/usr/bin/env node
 /**
  * Auto-restart supervisor for the WhatsApp football bot.
- * Restarts quickly on crash, and also if the child stops heartbeating
- * (hung / half-dead without exiting).
+ * Restarts on crash / stale heartbeat. After any exit, waits before
+ * respawning so WhatsApp can drop the previous multi-device session
+ * (avoids 428 "connection replaced" fight loops).
  */
 import { spawn } from "node:child_process";
-import { readFile, unlink } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { readFile, unlink, writeFile } from "node:fs/promises";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ENTRY = path.join(__dirname, "index.mjs");
 const HEARTBEAT_FILE = path.join(__dirname, "heartbeat.json");
-const MIN_UPTIME_MS = 12_000;
-const BASE_DELAY_MS = 1_000;
-const MAX_DELAY_MS = 15_000;
+const LOCK_FILE = path.join(__dirname, "bot.lock");
+const MIN_UPTIME_MS = 20_000;
+const BASE_DELAY_MS = 5_000;
+const MAX_DELAY_MS = 30_000;
 /** If heartbeat is older than this, kill and restart the child. */
-const HEARTBEAT_STALE_MS = 90_000;
-const HEARTBEAT_CHECK_MS = 20_000;
+const HEARTBEAT_STALE_MS = 120_000;
+const HEARTBEAT_CHECK_MS = 25_000;
 /** Grace period after spawn before enforcing heartbeat. */
-const HEARTBEAT_GRACE_MS = 45_000;
+const HEARTBEAT_GRACE_MS = 90_000;
 
 let delay = BASE_DELAY_MS;
 let child = null;
@@ -42,6 +44,22 @@ function clearHealthTimer() {
   if (healthTimer) {
     clearInterval(healthTimer);
     healthTimer = null;
+  }
+}
+
+function clearStaleLock() {
+  if (!existsSync(LOCK_FILE)) return;
+  try {
+    const raw = readFileSync(LOCK_FILE, "utf8");
+    const pid = Number(String(raw).trim().split("\n")[0]);
+    if (pid && existsSync(`/proc/${pid}`)) return;
+    unlinkSync(LOCK_FILE);
+  } catch {
+    try {
+      unlinkSync(LOCK_FILE);
+    } catch {
+      /* ignore */
+    }
   }
 }
 
@@ -71,7 +89,7 @@ function startHealthWatcher() {
           /* ignore */
         }
       }
-    }, 5_000);
+    }, 8_000);
   }, HEARTBEAT_CHECK_MS);
   if (typeof healthTimer.unref === "function") healthTimer.unref();
 }
@@ -79,11 +97,24 @@ function startHealthWatcher() {
 function start() {
   startedAt = Date.now();
   console.log(`\n🛡️  supervisor: starting bot (${new Date().toISOString()})`);
+  clearStaleLock();
   try {
     if (existsSync(HEARTBEAT_FILE)) unlink(HEARTBEAT_FILE).catch(() => {});
   } catch {
     /* ignore */
   }
+  // Placeholder heartbeat so we don't false-kill during WA connect.
+  writeFile(
+    HEARTBEAT_FILE,
+    JSON.stringify({
+      at: new Date().toISOString(),
+      ts: Date.now(),
+      pid: null,
+      waConnected: false,
+      bootstrapping: true,
+    }),
+    "utf8",
+  ).catch(() => {});
 
   child = spawn(process.execPath, [ENTRY], {
     cwd: __dirname,
@@ -105,10 +136,13 @@ function start() {
     if (uptime > MIN_UPTIME_MS) delay = BASE_DELAY_MS;
     else delay = Math.min(MAX_DELAY_MS, Math.max(BASE_DELAY_MS, delay * 2));
 
+    // Always wait so WhatsApp releases the multi-device session.
+    const restartIn = Math.max(delay, signal === "SIGTERM" ? 8_000 : 5_000);
+
     console.error(
-      `🛡️  supervisor: bot exited code=${code} signal=${signal} uptime=${Math.round(uptime / 1000)}s — restart in ${Math.round(delay / 1000)}s`,
+      `🛡️  supervisor: bot exited code=${code} signal=${signal} uptime=${Math.round(uptime / 1000)}s — restart in ${Math.round(restartIn / 1000)}s`,
     );
-    setTimeout(start, delay);
+    setTimeout(start, restartIn);
   });
 }
 

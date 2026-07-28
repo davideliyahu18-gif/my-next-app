@@ -5,6 +5,7 @@
   "scripts": {
     "start": "node supervise.mjs",
     "start:once": "node index.mjs",
+    "ensure": "node ensure-up.mjs",
     "qr": "node index.mjs"
   },
   "dependencies": {

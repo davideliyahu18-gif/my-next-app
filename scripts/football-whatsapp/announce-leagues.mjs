@@ -1,21 +1,13 @@
-import { createRequire } from "node:module";
-import { readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+#!/usr/bin/env node
+/**
+ * Queue a leagues announce through the RUNNING bot outbox.
+ * NEVER opens a second Baileys session (that causes 428 and kills the bot).
+ */
+import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import pino from "pino";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const AUTH_DIR = path.join(__dirname, "auth");
-const STATE_FILE = path.join(__dirname, "bot-state.json");
-
-const require = createRequire(import.meta.url);
-const baileys = require("@whiskeysockets/baileys");
-const {
-  default: makeWASocket,
-  useMultiFileAuthState,
-  fetchLatestBaileysVersion,
-} = baileys;
 
 const message = [
   "🏆 *הליגות מסודרות!*",
@@ -25,6 +17,7 @@ const message = [
   "• 🇪🇸 *לה ליגה* (ספרדית)",
   "• 🇮🇱 *ליגת העל* (ישראלית)",
   "• 🇮🇹 *סרייה א׳* (איטלקית)",
+  "• 🇩🇪 *בונדסליגה* (גרמנית)",
   "",
   "כתבו בקבוצה:",
   "*ליגות* · *לוח* · *תוצאה* · *מחר* · *עזרה*",
@@ -32,45 +25,9 @@ const message = [
   "התראות שער / פתיחה / מחצית / סיום — אוטומטי ✅",
 ].join("\n");
 
-const state = existsSync(STATE_FILE)
-  ? JSON.parse(await readFile(STATE_FILE, "utf8"))
-  : {};
-const groupJid = process.env.FOOTBALL_WHATSAPP_CHAT_ID || state.groupJid;
-if (!groupJid) throw new Error("no group jid");
-
-const { state: auth, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-const { version } = await fetchLatestBaileysVersion();
-const sock = makeWASocket({
-  version,
-  auth,
-  printQRInTerminal: false,
-  logger: pino({ level: "silent" }),
-});
-sock.ev.on("creds.update", saveCreds);
-
-await new Promise((resolve, reject) => {
-  const timer = setTimeout(() => reject(new Error("timeout")), 45000);
-  sock.ev.on("connection.update", async (update) => {
-    if (update.qr) {
-      clearTimeout(timer);
-      reject(new Error("needs QR"));
-      return;
-    }
-    if (update.connection === "open") {
-      try {
-        await sock.sendMessage(groupJid, { text: message });
-        console.log("SENT_OK", groupJid);
-        clearTimeout(timer);
-        resolve();
-      } catch (e) {
-        clearTimeout(timer);
-        reject(e);
-      }
-    }
-    if (update.connection === "close") {
-      clearTimeout(timer);
-      reject(new Error("closed"));
-    }
-  });
-});
-setTimeout(() => process.exit(0), 1500);
+const r = spawnSync(
+  process.execPath,
+  [path.join(__dirname, "queue-outbox.mjs"), "--text", message],
+  { stdio: "inherit" },
+);
+process.exit(r.status ?? 1);
