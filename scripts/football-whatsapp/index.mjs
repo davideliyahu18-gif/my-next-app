@@ -247,11 +247,11 @@ const commandLockStartedAt = new Map();
 const PENDING_TTL_MS = 5 * 60 * 1000;
 const API_TIMEOUT_MS = 25_000;
 const SEND_TIMEOUT_MS = 20_000;
-const COMMAND_LOCK_TTL_MS = 45_000;
+const COMMAND_LOCK_TTL_MS = 20_000;
 const MAX_RECONNECT_ATTEMPTS = 80;
-const WATCHDOG_MS = 20_000;
-/** If no successful WA activity for this long while "connected", force reconnect. */
-const STALE_CONNECTION_MS = 2.5 * 60_000;
+const WATCHDOG_MS = 30_000;
+/** Idle without traffic before considering a soft probe / reconnect. */
+const STALE_CONNECTION_MS = 10 * 60_000;
 const HEARTBEAT_FILE = path.join(__dirname, "heartbeat.json");
 const HEARTBEAT_EVERY_MS = 10_000;
 let heartbeatTimer = null;
@@ -789,19 +789,37 @@ async function handleIncomingMessage(msg) {
       await saveState();
     }
 
-    // One command at a time per chat — drop pile-ups instead of hanging forever.
+    // One command at a time per chat — but never block סטטוס/עזרה/בוט.
     const chatLock = `chat:${chatId}`;
     expireStaleCommandLocks();
-    if (commandInFlight.has(chatLock)) {
-      log.warn({ chatId, body }, "Skipping command — previous still in flight");
-      try {
-        await safeSendMessage(chatId, {
-          text: "⏳ עוד רגע — מסיים את הבקשה הקודמת…",
-        });
-      } catch {
-        /* ignore */
+    const isLightCommand =
+      /^(סטטוס|בוט|status|עזרה|help|פקודות)$/i.test(body.trim());
+    if (commandInFlight.has(chatLock) && !isLightCommand) {
+      const started = commandLockStartedAt.get(chatLock) || 0;
+      const heldFor = Date.now() - started;
+      log.warn(
+        { chatId, body, heldFor },
+        "Skipping command — previous still in flight",
+      );
+      // If the previous command is already old, free the lock and continue.
+      if (heldFor > 8_000) {
+        commandInFlight.delete(chatLock);
+        commandLockStartedAt.delete(chatLock);
+      } else {
+        try {
+          await safeSendMessage(chatId, {
+            text: "⏳ עוד רגע — מסיים את הבקשה הקודמת…",
+          });
+        } catch {
+          /* ignore */
+        }
+        return;
       }
-      return;
+    }
+    if (isLightCommand) {
+      // Don't let a hung heavy command block health checks.
+      commandInFlight.delete(chatLock);
+      commandLockStartedAt.delete(chatLock);
     }
     commandInFlight.add(chatLock);
     commandInFlight.add(lockKey);
@@ -1448,10 +1466,24 @@ function startSelfHeal() {
         lastWsActivityAt,
         lastConnectionOpenAt,
       );
-      if (lastBeat && Date.now() - lastBeat > STALE_CONNECTION_MS) {
-        console.warn("🩺 self-heal: stale socket — forcing reconnect");
+      if (!lastBeat || Date.now() - lastBeat <= STALE_CONNECTION_MS) return;
+
+      // Soft probe first — idle nights must NOT force reconnect every few minutes.
+      try {
+        await withTimeout(
+          sock.groupMetadata(groupJid),
+          8_000,
+          "self-heal.groupMetadata",
+        );
+        lastWsActivityAt = Date.now();
+        await writeHeartbeat({ probe: "self-heal-ok" });
+        return;
+      } catch (error) {
+        console.warn(
+          `🩺 self-heal: probe failed (${String(error?.message || error)}) — reconnect`,
+        );
         waConnected = false;
-        scheduleReconnect("self-heal-stale", { immediate: true });
+        scheduleReconnect("self-heal-probe-fail", { immediate: true });
       }
     } catch (error) {
       log.warn(
@@ -1459,7 +1491,7 @@ function startSelfHeal() {
         "self-heal tick failed",
       );
     }
-  }, 15_000);
+  }, 30_000);
   if (typeof selfHealTimer.unref === "function") selfHealTimer.unref();
 }
 
