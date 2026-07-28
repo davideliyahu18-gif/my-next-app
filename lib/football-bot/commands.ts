@@ -535,11 +535,13 @@ export async function runFootballBotCommand(
     case "morning": {
       const board = await fetchFootballBoard(true);
       const watchlist = await loadWatchlist();
+      const competitions = getEnabledFootballCompetitions();
       const jerusalem = "Asia/Jerusalem";
       const todayKey = new Date().toLocaleDateString("en-CA", {
         timeZone: jerusalem,
       });
       const now = Date.now();
+      const soonUntil = now + 72 * 60 * 60 * 1000;
 
       const upcomingToday = board.upcoming.filter((match) => {
         const day = match.utcDate.toLocaleDateString("en-CA", {
@@ -551,18 +553,55 @@ export async function runFootballBotCommand(
       const upcomingSoon = board.upcoming
         .filter((match) => {
           const kickoff = match.utcDate.getTime();
-          return kickoff >= now && kickoff <= now + 72 * 60 * 60 * 1000;
+          return kickoff >= now && kickoff <= soonUntil;
         })
         .slice(0, 8);
+
+      const leagueHealth = competitions.map((competition) => {
+        const todayCount = upcomingToday.filter(
+          (match) => match.competitionId === competition.id,
+        ).length;
+        const soonCount = board.upcoming.filter((match) => {
+          if (match.competitionId !== competition.id) return false;
+          const kickoff = match.utcDate.getTime();
+          return kickoff >= now && kickoff <= soonUntil;
+        }).length;
+        const liveCount = board.live.filter(
+          (match) => match.competitionId === competition.id,
+        ).length;
+        // League is "ok" if it appears in the board competitions list
+        // (data source responded) — empty schedule is still healthy.
+        const ok = board.competitions.some((c) => c.id === competition.id);
+        return {
+          nameHe: competition.nameHe,
+          ok,
+          todayCount,
+          soonCount,
+          liveCount,
+        };
+      });
+
+      const checkedAtLabel = new Date().toLocaleString("he-IL", {
+        weekday: "long",
+        day: "2-digit",
+        month: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: jerusalem,
+      });
 
       return {
         command,
         reply: formatMorningStatus({
-          leagueNames: board.competitions.map((c) => c.nameHe),
+          leagueNames: competitions.map((c) => c.nameHe),
           upcomingToday,
           upcomingSoon,
           watchedTeams: watchlist.map((t) => t.nameHe),
           liveCount: board.live.length,
+          leagueHealth,
+          checkedAtLabel,
+          alertsEnabled: process.env.FOOTBALL_BOT_ALERTS !== "false",
+          dataOk: board.competitions.length > 0,
         }),
       };
     }

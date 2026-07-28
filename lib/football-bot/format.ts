@@ -60,14 +60,14 @@ export function formatHelpMessage(): string {
     "• *עקוב ברצלונה* — מעקב קבוצה",
     "• *מעקב* — קבוצות במעקב",
     "• *הסר ברצלונה* — ביטול מעקב",
-    "• *בוקר* — סטטוס יומי (גם אוטומטי ב־08:00)",
+    "• *בוקר* — בדיקת תקינות יומית (גם אוטומטי ב־08:00)",
     "• *תוצאה* — משחקים חיים / הקרובים",
     "• *מחר* — משחקי מחר",
     "• *ליגות* — מה הבוט עוקב אחריו",
     "• *סטטוס* / *בוט* — האם הבוט חי",
     "• *עזרה* — ההודעה הזאת",
     "",
-    "אוטומטי: סטטוס בוקר 08:00 · תזכורת 60׳/30׳ + הרכב · שער · מחצית · סיום",
+    "אוטומטי: *בדיקת תקינות 08:00* · תזכורת 60׳/30׳ + הרכב · שער · מחצית · סיום",
   ].join("\n");
 }
 
@@ -101,23 +101,75 @@ export function formatMorningStatus(options: {
   upcomingSoon: FootballMatch[];
   watchedTeams: string[];
   liveCount: number;
+  /** Per-league health rows for the 08:00 check. */
+  leagueHealth?: Array<{
+    nameHe: string;
+    ok: boolean;
+    todayCount: number;
+    soonCount: number;
+    liveCount: number;
+  }>;
+  checkedAtLabel?: string;
+  alertsEnabled?: boolean;
+  dataOk?: boolean;
 }): string {
+  const checkedAt =
+    options.checkedAtLabel ||
+    new Date().toLocaleString("he-IL", {
+      weekday: "long",
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: JERUSALEM,
+    });
+
+  const leaguesOk =
+    !options.leagueHealth?.length ||
+    options.leagueHealth.every((row) => row.ok);
+  const systemsOk = options.dataOk !== false && leaguesOk;
+  const statusIcon = systemsOk ? "✅" : "⚠️";
+  const statusText = systemsOk
+    ? "הבוט פעיל ותקין"
+    : "הבוט פעיל — יש ליגה שדורשת בדיקה";
+
   const lines = [
-    "☀️ *בוקר טוב · סטטוס בוט ליגות* ⚽️🔥",
+    "☀️ *בדיקת תקינות · בוקר 08:00*",
+    `🗓️ ${checkedAt}`,
+    "──────────────",
+    `${statusIcon} *${statusText}*`,
     "",
-    "✅ הבוט חי ומחכה למשחקים של הליגות שמתחילים בקרוב",
-    "",
-    `🏆 ליגות: *${options.leagueNames.join(" · ") || "—"}*`,
+    "🏆 *ליגות במעקב*",
   ];
 
+  if (options.leagueHealth?.length) {
+    for (const league of options.leagueHealth) {
+      const icon = league.ok ? "✅" : "❌";
+      const bits: string[] = [];
+      if (league.liveCount > 0) bits.push(`${league.liveCount} חי`);
+      if (league.todayCount > 0) bits.push(`${league.todayCount} היום`);
+      else if (league.soonCount > 0) bits.push(`${league.soonCount} בקרוב`);
+      else bits.push("תקין · אין משחק קרוב");
+      lines.push(`${icon} *${league.nameHe}* — ${bits.join(" · ")}`);
+    }
+  } else {
+    lines.push(
+      `✅ ${options.leagueNames.join(" · ") || "—"}`,
+    );
+  }
+
+  lines.push("");
+
   if (options.watchedTeams.length) {
-    lines.push(`⭐ במעקב: *${options.watchedTeams.join(" · ")}*`);
+    lines.push(`⭐ *במעקב:* ${options.watchedTeams.join(" · ")}`);
+  } else {
+    lines.push("⭐ *במעקב:* אין קבוצות (כתבו *עקוב ברצלונה*)");
   }
 
   lines.push("");
 
   if (options.liveCount > 0) {
-    lines.push(`🔴 כבר חיים עכשיו: *${options.liveCount}* משחקים`);
+    lines.push(`🔴 *חי עכשיו:* ${options.liveCount} משחקים`);
     lines.push("");
   }
 
@@ -126,8 +178,8 @@ export function formatMorningStatus(options: {
     lines.push("📅 *משחקים היום*");
     for (const match of today) {
       const view = toView(match);
-      lines.push(scoreLine(view));
-      lines.push(`   ${formatKickoffHe(view.kickoffAt)} · ${match.competition}`);
+      lines.push(`• ${scoreLine(view)}`);
+      lines.push(`  🕐 ${formatKickoffHe(view.kickoffAt)} · ${match.competition}`);
     }
     lines.push("");
   }
@@ -136,21 +188,29 @@ export function formatMorningStatus(options: {
     .filter((match) => !today.some((t) => t.id === match.id))
     .slice(0, 6);
   if (soon.length) {
-    lines.push("⏭ *מתחילים בקרוב*");
+    lines.push("⏭ *מתחילים בקרוב (72ש)*");
     for (const match of soon) {
       const view = toView(match);
-      lines.push(scoreLine(view));
-      lines.push(`   ${formatKickoffHe(view.kickoffAt)} · ${match.competition}`);
+      lines.push(`• ${scoreLine(view)}`);
+      lines.push(`  🕐 ${formatKickoffHe(view.kickoffAt)} · ${match.competition}`);
     }
     lines.push("");
   }
 
   if (!today.length && !soon.length && options.liveCount === 0) {
-    lines.push("📭 אין משחקים קרובים בלוח כרגע — ממשיך לחכות ⚽️");
+    lines.push("📭 אין משחקים קרובים בלוח — ממשיך במעקב ⚽️");
     lines.push("");
   }
 
-  lines.push("כתבו *לוח* · *הרכב* · *מעקב* · *עזרה*");
+  const alertsOn = options.alertsEnabled !== false;
+  lines.push("🔧 *מערכות*");
+  lines.push(
+    `${options.dataOk === false ? "❌" : "✅"} מקור נתונים (ESPN/FIFA)`,
+  );
+  lines.push(`${alertsOn ? "✅" : "⚠️"} התראות אוטומטיות`);
+  lines.push(`${systemsOk ? "✅" : "⚠️"} חיבור בוט לקבוצה`);
+  lines.push("");
+  lines.push("כתבו *סטטוס* · *סגל* · *לוח* · *עזרה*");
   lines.push("", FOOTBALL_BOT_SIGNATURE);
   return lines.join("\n");
 }
