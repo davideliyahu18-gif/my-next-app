@@ -125,10 +125,13 @@ export default function HamalSiteMenu({
     : "—";
 
   return (
-    <section className="rounded-3xl border border-white bg-white p-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
+    <section
+      id="hamal-menu"
+      className="rounded-3xl border-2 border-blue-500 bg-white p-3 shadow-[0_8px_24px_rgba(15,23,42,0.08)]"
+    >
       <div className="mb-3 flex items-center justify-between gap-2 px-1">
         <div>
-          <h2 className="text-sm font-black text-slate-900">תפריט חמ״ל</h2>
+          <h2 className="text-base font-black text-blue-700">תפריט חמ״ל</h2>
           <p className="text-[11px] text-slate-500">
             {prefs.muted
               ? "התראות מושתקות"

@@ -295,8 +295,7 @@ export default function RocketTrackingMap() {
 
   return (
     <div dir="rtl" className="min-h-screen bg-[#eef1f5] text-slate-900">
-      {/* Dash header */}
-      <header className="bg-[#2f6fed] text-white shadow-sm">
+      <header className="sticky top-0 z-40 bg-[#2f6fed] text-white shadow-sm">
         <div className="mx-auto flex max-w-lg items-center justify-between px-4 py-3">
           <Link href="/" className="text-xs font-medium text-white/80">
             ← בית
@@ -313,6 +312,23 @@ export default function RocketTrackingMap() {
       </header>
 
       <main className="mx-auto flex max-w-lg flex-col gap-3 px-3 py-3 pb-10">
+        <HamalSiteMenu
+          activeAreas={displayAreas}
+          relatedCount={stats?.related ?? launchFeed.length}
+          trackCount={stats?.tracks ?? tracks.length}
+          updatedAt={updatedAt}
+          focusAreaId={focusAreaId}
+          onFocusArea={setFocusAreaId}
+          onScrollToMap={() => {
+            mapSectionRef.current?.scrollIntoView({
+              behavior: "smooth",
+              block: "start",
+            });
+          }}
+          autoAlerts={autoAlerts}
+          onAutoAlertsChange={setAutoAlerts}
+        />
+
         {/* Monitoring strip — every message is tracked */}
         <section className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 shadow-sm">
           <div className="flex items-center justify-between gap-2">
@@ -330,23 +346,6 @@ export default function RocketTrackingMap() {
             {newIds.size > 0 ? ` · +${newIds.size} חדשות` : ""}
           </p>
         </section>
-
-        <HamalSiteMenu
-          activeAreas={displayAreas}
-          relatedCount={stats?.related ?? launchFeed.length}
-          trackCount={stats?.tracks ?? tracks.length}
-          updatedAt={updatedAt}
-          focusAreaId={focusAreaId}
-          onFocusArea={setFocusAreaId}
-          onScrollToMap={() => {
-            mapSectionRef.current?.scrollIntoView({
-              behavior: "smooth",
-              block: "start",
-            });
-          }}
-          autoAlerts={autoAlerts}
-          onAutoAlertsChange={setAutoAlerts}
-        />
 
         {/* Live Tracking */}
         <section
