@@ -150,21 +150,97 @@ function linkedAccountDigits() {
   return normalizePhoneDigits(user);
 }
 
+function jidToDigits(jid) {
+  if (!jid) return "";
+  const user = String(jid).split(":")[0].split("@")[0];
+  const phone = normalizePhoneDigits(user);
+  if (phone && phone.length >= 9 && phone.length <= 15) return phone;
+  return "";
+}
+
 function senderDigitsFromMessage(msg) {
-  const participant = msg.key?.participant || msg.key?.participantPn || "";
-  const remote = msg.key?.remoteJid || "";
-  const raw = participant || (remote.endsWith("@s.whatsapp.net") ? remote : "");
-  const user = String(raw).split(":")[0].split("@")[0];
-  // LID participants won't normalize to phone — return as-is digits for lid match attempts
-  return normalizePhoneDigits(user) || user.replace(/\D/g, "");
+  const key = msg.key || {};
+  // Prefer real phone JIDs — WhatsApp groups often send participant as @lid.
+  const candidates = [
+    key.participantPn,
+    key.participantAlt,
+    key.participant,
+    msg.participant,
+    key.remoteJidAlt,
+  ];
+  for (const raw of candidates) {
+    const digits = jidToDigits(raw);
+    if (digits) return digits;
+    const id = String(raw || "").split(":")[0].split("@")[0];
+    if (id && lidToPhone.has(id)) return lidToPhone.get(id);
+  }
+  const participant = String(key.participant || "").split(":")[0].split("@")[0];
+  if (participant && lidToPhone.has(participant)) return lidToPhone.get(participant);
+  return participant.replace(/\D/g, "") || "";
+}
+
+async function refreshLidPhoneMap() {
+  if (!sock || !groupJid) return;
+  try {
+    const meta = await withTimeout(
+      sock.groupMetadata(groupJid),
+      10_000,
+      "lidMap.groupMetadata",
+    );
+    for (const p of meta?.participants || []) {
+      const id = String(p.id || p.jid || "").split(":")[0].split("@")[0];
+      const phoneJid =
+        p.phoneNumber ||
+        p.jid ||
+        (String(p.id || "").includes("@s.whatsapp.net") ? p.id : "");
+      const phone = jidToDigits(phoneJid) || jidToDigits(p.id);
+      // Only store when we have a real phone, keyed by lid/user id.
+      if (id && phone && phone.startsWith("972")) {
+        lidToPhone.set(id, phone);
+      }
+      if (phone) lidToPhone.set(phone, phone);
+    }
+    log.info({ mapped: lidToPhone.size }, "Refreshed group LID→phone map");
+  } catch (error) {
+    log.warn(
+      { error: String(error?.message || error) },
+      "LID→phone map refresh failed",
+    );
+  }
+}
+
+async function resolveSenderDigits(msg) {
+  let sender = senderDigitsFromMessage(msg);
+  if (sender && isOperatorNumber(sender)) return sender;
+  // If we only have a LID / unknown id, refresh map once and retry.
+  const key = msg.key || {};
+  const lid = String(key.participant || "")
+    .split(":")[0]
+    .split("@")[0];
+  if (lid && !jidToDigits(key.participantPn || key.participantAlt || "")) {
+    if (!lidToPhone.size) await refreshLidPhoneMap();
+    if (lidToPhone.has(lid)) return lidToPhone.get(lid);
+    // One more refresh in case membership changed.
+    await refreshLidPhoneMap();
+    if (lidToPhone.has(lid)) return lidToPhone.get(lid);
+  }
+  return sender;
 }
 
 function isOperatorNumber(digits) {
   if (!digits) return false;
   const ops = cfg.operators || [];
   if (!ops.length) return true;
+  // Also accept mapped value
+  const mapped = lidToPhone.get(digits) || digits;
   return ops.some(
-    (op) => digits === op || digits.endsWith(op) || op.endsWith(digits),
+    (op) =>
+      mapped === op ||
+      digits === op ||
+      mapped.endsWith(op) ||
+      digits.endsWith(op) ||
+      op.endsWith(mapped) ||
+      op.endsWith(digits),
   );
 }
 
@@ -264,6 +340,8 @@ const pendingByChat = new Map();
 const commandInFlight = new Set();
 /** @type {Map<string, number>} */
 const commandLockStartedAt = new Map();
+/** @type {Map<string, string>} LID/user-id → phone digits */
+const lidToPhone = new Map();
 const PENDING_TTL_MS = 5 * 60 * 1000;
 const API_TIMEOUT_MS = 25_000;
 const SEND_TIMEOUT_MS = 20_000;
@@ -907,17 +985,6 @@ async function handleIncomingMessage(msg) {
       // Linked phone messages arrive as fromMe — allow short commands only.
       if (!cfg.allowFromMeCommands) return;
       if (!fromButton && !looksLikeOperatorCommand(body)) return;
-      // Only enforce operator allowlist when operatorsOnly=true.
-      if (cfg.operatorsOnly && cfg.operators?.length) {
-        const linked = linkedAccountDigits();
-        if (linked && !isOperatorNumber(linked)) return;
-      }
-    } else if (cfg.operatorsOnly && cfg.operators?.length) {
-      const sender = senderDigitsFromMessage(msg);
-      if (!isOperatorNumber(sender)) {
-        log.info({ sender }, "Ignored command from non-operator");
-        return;
-      }
     }
 
     const pending = getPending(chatId);
@@ -928,6 +995,47 @@ async function handleIncomingMessage(msg) {
     if (!treatAsCommand) return;
 
     if (groupJid && !sameChatId(chatId, groupJid)) return;
+
+    // Operator allowlist — only after we know it's a command (and resolve @lid→phone).
+    if (cfg.operatorsOnly && cfg.operators?.length) {
+      if (fromMe) {
+        const linked = linkedAccountDigits();
+        if (linked && !isOperatorNumber(linked)) {
+          log.info({ linked }, "Ignored fromMe command — linked phone not operator");
+          return;
+        }
+      } else {
+        const sender = await resolveSenderDigits(msg);
+        if (!isOperatorNumber(sender)) {
+          log.warn(
+            {
+              sender,
+              participant: msg.key?.participant || null,
+              participantPn: msg.key?.participantPn || null,
+              participantAlt: msg.key?.participantAlt || null,
+              body: body.slice(0, 40),
+            },
+            "Ignored command from non-operator",
+          );
+          try {
+            await safeSendMessage(
+              chatId,
+              {
+                text: [
+                  "⚠️ הפקודה הגיעה, אבל המספר לא זוהה כמורשה.",
+                  "מורשה: *0523123944*",
+                  "כתבו שוב *בדיקה* מהטלפון הזה.",
+                ].join("\n"),
+              },
+              { allowReconnect: false },
+            );
+          } catch {
+            /* ignore */
+          }
+          return;
+        }
+      }
+    }
 
     if (!groupJid) {
       groupJid = chatId;
@@ -1541,6 +1649,7 @@ async function onConnected() {
   startKeepAlive();
   keepAliveFailStreak = 0;
   await writeHeartbeat({ connected: true });
+  refreshLidPhoneMap().catch(() => {});
 }
 
 function disconnectStatusCode(lastDisconnect) {
