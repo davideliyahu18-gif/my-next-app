@@ -131,15 +131,24 @@ function diagnose() {
     issues.push(`heartbeat-stale:${Math.round(hbAge / 1000)}s`);
   }
   if (hb && hb.waConnected === false && procs.index && hbAge < HEARTBEAT_MAX_AGE_MS) {
-    // Mid-reconnect — not an error yet, just note.
-    return {
-      ok: true,
-      reconnecting: true,
-      issues: [],
-      hb,
-      procs,
-      lockPid,
-    };
+    const lastOk = Math.max(
+      Number(hb.lastSuccessfulSendAt || 0),
+      Number(hb.lastWsActivityAt || 0),
+      Number(hb.lastConnectionOpenAt || 0),
+    );
+    const offlineFor = lastOk ? Date.now() - lastOk : hbAge;
+    if (offlineFor < 120_000) {
+      return {
+        ok: true,
+        reconnecting: true,
+        issues: [],
+        hb,
+        procs,
+        lockPid,
+        offlineFor,
+      };
+    }
+    issues.push(`stuck-offline:${Math.round(offlineFor / 1000)}s`);
   }
   if (hb?.fail && hbAge < 120_000) {
     issues.push(`recent-fail:${hb.reason || "unknown"}`);
