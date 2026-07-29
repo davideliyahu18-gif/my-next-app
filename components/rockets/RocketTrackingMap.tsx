@@ -17,6 +17,7 @@ import type {
   RocketTrack,
 } from "@/lib/rockets/types";
 import { useSearchParams } from "next/navigation";
+import HamalSiteMenu from "@/components/rockets/HamalSiteMenu";
 
 const GeoMap = dynamic(() => import("@/components/rockets/GeoMap"), {
   ssr: false,
@@ -155,6 +156,7 @@ export default function RocketTrackingMap() {
   const lastTs = useRef<number | null>(null);
   const selectedTrackIdRef = useRef<string | null>(null);
   const seenIdsRef = useRef<Set<string>>(new Set());
+  const mapSectionRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     selectedTrackIdRef.current = selectedTrackId;
@@ -329,8 +331,29 @@ export default function RocketTrackingMap() {
           </p>
         </section>
 
+        <HamalSiteMenu
+          activeAreas={displayAreas}
+          relatedCount={stats?.related ?? launchFeed.length}
+          trackCount={stats?.tracks ?? tracks.length}
+          updatedAt={updatedAt}
+          focusAreaId={focusAreaId}
+          onFocusArea={setFocusAreaId}
+          onScrollToMap={() => {
+            mapSectionRef.current?.scrollIntoView({
+              behavior: "smooth",
+              block: "start",
+            });
+          }}
+          autoAlerts={autoAlerts}
+          onAutoAlertsChange={setAutoAlerts}
+        />
+
         {/* Live Tracking */}
-        <section className="overflow-hidden rounded-3xl border border-white bg-white shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
+        <section
+          ref={mapSectionRef}
+          id="hamal-map"
+          className="overflow-hidden rounded-3xl border border-white bg-white shadow-[0_8px_24px_rgba(15,23,42,0.06)]"
+        >
           <div className="flex items-center justify-between px-4 pb-2 pt-3">
             <div className="flex items-center gap-2">
               <h2 className="text-sm font-bold text-slate-800">מפה חיה</h2>
