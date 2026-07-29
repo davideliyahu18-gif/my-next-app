@@ -334,6 +334,9 @@ let lastHealthFailureAt = 0;
 let lastHealthFailureReason = "";
 let lastHourlyCheckAt = 0;
 let healthCheckRunning = false;
+let pendingHourlyAnnounce = null; // { label, checks, hourKey }
+let lastHourlyAnnounceKey = "";
+let hourlyGuardTimer = null;
 /** @type {Map<string, { intent: "schedule" | "lineup" | "standings"; expiresAt: number }>} */
 const pendingByChat = new Map();
 /** Prevent one hung chat command from stacking forever. */
@@ -1306,6 +1309,70 @@ async function sendMorningStatus() {
   }
 }
 
+
+function jerusalemNowParts() {
+  const fmt = new Intl.DateTimeFormat("en-GB", {
+    timeZone: cfg.morningTimezone || "Asia/Jerusalem",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  const parts = Object.fromEntries(
+    fmt.formatToParts(new Date()).map((p) => [p.type, p.value]),
+  );
+  return {
+    year: parts.year,
+    month: parts.month,
+    day: parts.day,
+    hour: parts.hour,
+    minute: parts.minute,
+    second: parts.second,
+    hourKey: `${parts.year}-${parts.month}-${parts.day}T${parts.hour}`,
+  };
+}
+
+async function announceHourlyToGroup(label, checks, opts = {}) {
+  const text = formatHourlyOk(label, checks);
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    if (!waConnected || !sock || !groupJid) {
+      pendingHourlyAnnounce = { label, checks, hourKey: opts.hourKey || "" };
+      log.warn({ attempt }, "Hourly announce deferred — WA not ready");
+      return false;
+    }
+    try {
+      const ok = await sendToGroup(text);
+      if (ok) {
+        lastHourlyAnnounceKey = opts.hourKey || lastHourlyAnnounceKey;
+        pendingHourlyAnnounce = null;
+        log.info({ label, attempt }, "Hourly OK announced to group");
+        console.log(`📣 נשלחה בדיקת תקינות לקבוצה (${label})`);
+        return true;
+      }
+    } catch (error) {
+      log.warn(
+        { error: String(error?.message || error), attempt },
+        "Hourly OK announce failed",
+      );
+    }
+    await new Promise((r) => setTimeout(r, 1500 * attempt));
+  }
+  pendingHourlyAnnounce = { label, checks, hourKey: opts.hourKey || "" };
+  return false;
+}
+
+async function flushPendingHourlyAnnounce() {
+  if (!pendingHourlyAnnounce) return;
+  const pending = pendingHourlyAnnounce;
+  if (!waConnected || !sock || !groupJid) return;
+  await announceHourlyToGroup(pending.label, pending.checks, {
+    hourKey: pending.hourKey,
+  });
+}
+
 /**
  * Deep hourly check: WhatsApp socket + group probe + site API.
  * On any failure → immediate reconnect (and later notify the group).
@@ -1417,16 +1484,10 @@ async function runHourlyHealthCheck(opts = {}) {
     });
     log.info({ label, checks }, "Hourly health check OK");
     console.log(`🩺 בדיקה שעתית ${label}: ✅ תקין (WA + קבוצה + API)`);
-    // Always post to the group on the round-hour check so you can see it's alive.
+    // Always post to the group on round-hour (or forced) checks.
     if (!silent) {
-      try {
-        await sendToGroup(formatHourlyOk(label, checks));
-      } catch (error) {
-        log.warn(
-          { error: String(error?.message || error) },
-          "Hourly OK announce failed",
-        );
-      }
+      const parts = jerusalemNowParts();
+      await announceHourlyToGroup(label, checks, { hourKey: parts.hourKey });
     }
     return { ok: true, checks };
   } finally {
@@ -1625,7 +1686,6 @@ async function onConnected() {
       hourlyTask = cron.schedule(
         cfg.hourlyCron,
         () => {
-          // Round-hour: announce to the group (visible proof the bot is healthy).
           runHourlyHealthCheck({ silent: false }).catch((error) => {
             log.warn(
               { error: String(error?.message || error) },
@@ -1635,10 +1695,11 @@ async function onConnected() {
         },
         { timezone: cfg.morningTimezone },
       );
-      // First visible check ~45s after boot so you see the fix immediately.
+      // Quiet boot probe (no group spam). Round-hour announce is separate.
       setTimeout(() => {
-        runHourlyHealthCheck({ silent: false }).catch(() => {});
+        runHourlyHealthCheck({ silent: true }).catch(() => {});
       }, 45_000);
+      startHourlyRoundGuard();
     }
   }
 
@@ -1650,6 +1711,38 @@ async function onConnected() {
   keepAliveFailStreak = 0;
   await writeHeartbeat({ connected: true });
   refreshLidPhoneMap().catch(() => {});
+  flushPendingHourlyAnnounce().catch(() => {});
+}
+
+/** Backup to cron: every 20s, if Jerusalem minute is 00 and we have not
+ *  announced this hour yet — run a visible hourly check. Survives cron misses. */
+function startHourlyRoundGuard() {
+  if (hourlyGuardTimer) return;
+  hourlyGuardTimer = setInterval(() => {
+    try {
+      if (!cfg.hourlyEnabled) return;
+      const parts = jerusalemNowParts();
+      const minute = Number(parts.minute);
+      const second = Number(parts.second);
+      if (minute !== 0) return;
+      if (second > 50) return;
+      if (lastHourlyAnnounceKey === parts.hourKey) return;
+      if (healthCheckRunning) return;
+      console.log(`⏰ guard: שעה עגולה ${parts.hourKey} — שולח בדיקת תקינות`);
+      runHourlyHealthCheck({ silent: false }).catch((error) => {
+        log.warn(
+          { error: String(error?.message || error) },
+          "Hourly guard check failed",
+        );
+      });
+    } catch (error) {
+      log.warn(
+        { error: String(error?.message || error) },
+        "Hourly guard tick failed",
+      );
+    }
+  }, 20_000);
+  if (typeof hourlyGuardTimer.unref === "function") hourlyGuardTimer.unref();
 }
 
 function disconnectStatusCode(lastDisconnect) {
