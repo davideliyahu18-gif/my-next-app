@@ -6,6 +6,7 @@
     "start": "node supervise.mjs",
     "start:once": "node index.mjs",
     "ensure": "node ensure-up.mjs",
+    "watch": "node watchdog-loop.mjs",
     "qr": "node index.mjs"
   },
   "dependencies": {

@@ -6,3 +6,5 @@ outbox/
 heartbeat.json
 auth.bak/
 *.lock
+errors.log
+watchdog-state.json

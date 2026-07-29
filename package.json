@@ -9,7 +9,8 @@
     "lint": "eslint",
     "football-bot:setup": "npm install --prefix scripts/football-whatsapp",
     "football-bot:start": "npm run start --prefix scripts/football-whatsapp",
-    "football-bot:ensure": "node scripts/football-whatsapp/ensure-up.mjs"
+    "football-bot:ensure": "node scripts/football-whatsapp/ensure-up.mjs",
+    "football-bot:watch": "node scripts/football-whatsapp/watchdog-loop.mjs"
   },
   "dependencies": {
     "@upstash/redis": "^1.38.0",

@@ -273,6 +273,7 @@ const REPLACED_RECONNECT_BASE_MS = 12_000;
 /** Only notify the group if we were down at least this long. */
 const RECOVER_NOTIFY_AFTER_MS = 120_000;
 const HEARTBEAT_FILE = path.join(__dirname, "heartbeat.json");
+const ERROR_LOG = path.join(__dirname, "errors.log");
 const HEARTBEAT_EVERY_MS = 15_000;
 let heartbeatTimer = null;
 let selfHealTimer = null;
@@ -1637,6 +1638,19 @@ function scheduleReconnect(code, opts = {}) {
   }, delay);
 }
 
+
+function appendErrorLog(kind, detail = {}) {
+  const row = JSON.stringify({
+    at: new Date().toISOString(),
+    kind,
+    pid: process.pid,
+    waConnected,
+    reconnectAttempts,
+    ...detail,
+  });
+  writeFile(ERROR_LOG, `${row}\n`, { flag: "a" }).catch(() => {});
+}
+
 async function writeHeartbeat(extra = {}) {
   try {
     await writeFile(
@@ -1669,24 +1683,61 @@ function startHeartbeat() {
   if (typeof heartbeatTimer.unref === "function") heartbeatTimer.unref();
 }
 
+let selfHealTicks = 0;
 function startSelfHeal() {
   if (selfHealTimer) return;
   selfHealTimer = setInterval(async () => {
     try {
       expireStaleCommandLocks();
+      selfHealTicks += 1;
       // If we think we're offline and nothing is reconnecting — kick it.
       if (!waConnected && !startingSocket && !reconnectTimer) {
         console.warn("🩺 self-heal: offline without pending reconnect — forcing");
+        appendErrorLog("self-heal-offline");
         scheduleReconnect("self-heal-offline", { immediate: false });
         return;
       }
-      // Connected path is handled by keep-alive (3 consecutive fails).
-      // Do NOT reconnect here on idle — that caused constant 428 loops.
+      // Every ~5 minutes: hunt site/API errors (never reconnect on site fail).
+      if (
+        selfHealTicks % 10 === 0 &&
+        waConnected &&
+        sock &&
+        groupJid &&
+        !startingSocket
+      ) {
+        try {
+          await withTimeout(
+            apiFetch("/api/football-bot/command", {
+              method: "POST",
+              body: JSON.stringify({ text: "בדיקה" }),
+            }),
+            10_000,
+            "selfheal.site",
+          );
+          await writeHeartbeat({ selfHeal: "ok", errorHunt: "clean" });
+        } catch (error) {
+          appendErrorLog("self-heal-site-fail", {
+            error: String(error?.message || error),
+          });
+          log.warn(
+            { error: String(error?.message || error) },
+            "self-heal site probe failed (WA kept up)",
+          );
+          await writeHeartbeat({
+            selfHeal: "site-fail",
+            errorHunt: String(error?.message || error).slice(0, 120),
+          });
+        }
+      }
+      // Connected reconnect is keep-alive only (3 fails). No idle reconnect.
     } catch (error) {
       log.warn(
         { error: String(error?.message || error) },
         "self-heal tick failed",
       );
+      appendErrorLog("self-heal-tick-fail", {
+        error: String(error?.message || error),
+      });
     }
   }, 30_000);
   if (typeof selfHealTimer.unref === "function") selfHealTimer.unref();
@@ -1925,6 +1976,7 @@ async function startSocket() {
         log.warn({ code }, "WhatsApp connection closed");
         console.log(`⚠️ חיבור וואטסאפ נסגר (code=${code}).`);
         markHealthFailure(`close:${code}`);
+        appendErrorLog("connection-close", { code });
 
         if (loggedOut) {
           console.log(
