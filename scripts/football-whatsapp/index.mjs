@@ -513,6 +513,47 @@ function clearPending(chatId) {
   pendingByChat.delete(chatId);
 }
 
+
+function formatLocalPing() {
+  const now = new Date().toLocaleString("he-IL", {
+    weekday: "short",
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZone: cfg.morningTimezone || "Asia/Jerusalem",
+  });
+  return [
+    "✅ *הבוט פעיל*",
+    "",
+    "מגיב תקין — אפשר להמשיך.",
+    `🕐 ${now}`,
+    "",
+    "כתבו *בדיקה* שוב · *בוקר* · *סגל* · *עזרה*",
+  ].join("\n");
+}
+
+function formatHourlyOk(label, checks) {
+  return [
+    "🩺 *בדיקת תקינות שעתית*",
+    "",
+    `🕐 ${label}`,
+    "",
+    `וואטסאפ: ${checks.waConnected ? "✅ מחובר" : "❌"}`,
+    `קבוצה: ${checks.groupOk ? "✅ תקין" : "❌"}`,
+    `API: ${checks.siteOk ? "✅ תקין" : "❌"}`,
+    "",
+    "הבוט חי ויציב — אפשר לכתוב *בדיקה* / *חי* / *סטטוס* בכל רגע.",
+  ].join("\n");
+}
+
+function isPingLikeCommand(text) {
+  return /^(בדיקה|פינג|ping|ok|okay|חי|היי|סטטוס|בוט|status)$/i.test(
+    String(text || "").trim(),
+  );
+}
+
 async function withTimeout(promise, ms, label) {
   let timer;
   try {
@@ -579,10 +620,11 @@ async function runRemoteCommand(text) {
   };
 }
 
-async function safeSendMessage(chatId, content) {
+async function safeSendMessage(chatId, content, opts = {}) {
   if (!sock || !waConnected) {
     throw new Error("WhatsApp not connected");
   }
+  const allowReconnect = opts.allowReconnect !== false;
   try {
     const result = await withTimeout(
       sock.sendMessage(chatId, content),
@@ -595,9 +637,10 @@ async function safeSendMessage(chatId, content) {
   } catch (error) {
     const msg = String(error?.message || error);
     log.warn({ error: msg, chatId }, "sendMessage failed");
-    // Don't reconnect on every transient send blip from a light command —
-    // only when the socket looks truly dead.
+    // Light commands (בדיקה/חי/סטטוס) must NEVER trigger reconnect —
+    // that was replacing the session (428) and making the bot look "dead".
     const fatalSend =
+      allowReconnect &&
       /not connected|Connection Closed|Timed Out|closed|ECONN|socket/i.test(
         msg,
       );
@@ -992,6 +1035,27 @@ async function handleIncomingMessage(msg) {
     }
 
     try {
+      // בדיקה / חי / סטטוס — תשובה מקומית מיידית, בלי API ובלי reconnect.
+      if (isPingLikeCommand(commandText)) {
+        const localReply = /^(סטטוס|בוט|status)$/i.test(commandText.trim())
+          ? [
+              "✅ *סטטוס בוט*",
+              "",
+              "וואטסאפ: מחובר ✓",
+              "מגיב לפקודות ✓",
+              "",
+              "💡 לבדיקה מהירה: *בדיקה* / *חי*",
+            ].join("\n")
+          : formatLocalPing();
+        await safeSendMessage(
+          chatId,
+          { text: localReply },
+          { allowReconnect: false },
+        );
+        log.info({ command: "ping-local", chatId }, "Command reply sent");
+        return;
+      }
+
       const { reply, command, interactive, media } = await withTimeout(
         runRemoteCommand(commandText),
         API_TIMEOUT_MS,
@@ -1195,13 +1259,15 @@ async function runHourlyHealthCheck(opts = {}) {
       const result = await withTimeout(
         apiFetch("/api/football-bot/command", {
           method: "POST",
-          body: JSON.stringify({ text: "סטטוס" }),
+          body: JSON.stringify({ text: "בדיקה" }),
         }),
-        API_TIMEOUT_MS,
+        12_000,
         "hourly.site",
       );
-      checks.siteOk = Boolean(result?.reply || result?.command === "status");
-      if (!checks.siteOk) throw new Error("empty status reply");
+      checks.siteOk = Boolean(
+        result?.reply || result?.command === "ping" || result?.command === "status",
+      );
+      if (!checks.siteOk) throw new Error("empty ping reply");
     } catch (error) {
       markHealthFailure(`hourly-site:${error?.message || error}`);
       console.warn(
@@ -1236,6 +1302,17 @@ async function runHourlyHealthCheck(opts = {}) {
     });
     log.info({ label, checks }, "Hourly health check OK");
     console.log(`🩺 בדיקה שעתית ${label}: ✅ תקין (WA + קבוצה + API)`);
+    // Always post to the group on the round-hour check so you can see it's alive.
+    if (!silent) {
+      try {
+        await sendToGroup(formatHourlyOk(label, checks));
+      } catch (error) {
+        log.warn(
+          { error: String(error?.message || error) },
+          "Hourly OK announce failed",
+        );
+      }
+    }
     return { ok: true, checks };
   } finally {
     healthCheckRunning = false;
@@ -1433,7 +1510,8 @@ async function onConnected() {
       hourlyTask = cron.schedule(
         cfg.hourlyCron,
         () => {
-          runHourlyHealthCheck({ silent: true }).catch((error) => {
+          // Round-hour: announce to the group (visible proof the bot is healthy).
+          runHourlyHealthCheck({ silent: false }).catch((error) => {
             log.warn(
               { error: String(error?.message || error) },
               "Hourly health cron error",
@@ -1442,10 +1520,10 @@ async function onConnected() {
         },
         { timezone: cfg.morningTimezone },
       );
-      // First check ~30s after boot (don't wait for top of hour).
+      // First visible check ~45s after boot so you see the fix immediately.
       setTimeout(() => {
-        runHourlyHealthCheck({ silent: true }).catch(() => {});
-      }, 30_000);
+        runHourlyHealthCheck({ silent: false }).catch(() => {});
+      }, 45_000);
     }
   }
 
