@@ -582,12 +582,12 @@ export default function RocketTrackingMap() {
                 </p>
                 <p className="mt-0.5 text-[11px] text-slate-600">
                   {telegramConfigured
-                    ? "מחובר — שיגור לפי אזור + זמן למרחב מוגן + קישור מפה"
+                    ? "מחובר — תפריט בוט + אזור + זמן למרחב מוגן + מפה"
                     : "עדיין לא מחובר — צריך בוט + צ׳אט"}
                 </p>
                 <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
-                  1) פתח BotFather → /newbot · 2) הוסף את הבוט לקבוצה/ערוץ ·
-                  3) שלח לי TOKEN + chat_id
+                  1) BotFather → /newbot · 2) הוסף לקבוצה · 3) הגדר TOKEN +
+                  chat_id · 4) POST /api/rockets/telegram-setup · 5) /start בבוט
                 </p>
               </div>
               <a

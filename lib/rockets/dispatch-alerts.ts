@@ -1,11 +1,17 @@
 import { areaMapUrl } from "@/lib/rockets/alert-areas";
 import { filterUnsent, markAlertSent } from "@/lib/rockets/alert-dedupe";
+import {
+  listSubscribers,
+  subscriberWantsArea,
+} from "@/lib/rockets/bot-subscribers";
 import { isLaunchRelated, messagesToTracks } from "@/lib/rockets/parse-alert";
 import { getRocketsSnapshot } from "@/lib/rockets/snapshot";
+import { isTelegramBotConfigured } from "@/lib/rockets/telegram-api";
 import {
   formatLaunchTelegramMessage,
   isTelegramNotifyConfigured,
   sendTelegramAlert,
+  sendTelegramAlertToChat,
 } from "@/lib/rockets/telegram-notify";
 
 export type NotifyDispatchResult = {
@@ -14,6 +20,7 @@ export type NotifyDispatchResult = {
   related: number;
   sent: number;
   skipped: number;
+  subscriberSends: number;
   errors: string[];
   sentIds: string[];
 };
@@ -26,13 +33,14 @@ export async function dispatchNewTelegramAlerts(options?: {
   const allMessages = options?.allMessages === true;
   const limit = options?.limit ?? 12;
 
-  if (!isTelegramNotifyConfigured()) {
+  if (!isTelegramBotConfigured()) {
     return {
       configured: false,
       checked: 0,
       related: 0,
       sent: 0,
       skipped: 0,
+      subscriberSends: 0,
       errors: ["Telegram not configured"],
       sentIds: [],
     };
@@ -64,12 +72,15 @@ export async function dispatchNewTelegramAlerts(options?: {
     }),
   );
 
+  const subscribers = await listSubscribers();
   const errors: string[] = [];
   const sentIds: string[] = [];
+  let subscriberSends = 0;
 
   for (const item of queue) {
     const track = trackBySource.get(item.id);
     const primaryArea = track?.alertAreas?.[0];
+    const areaIds = track?.alertAreas?.map((a) => a.id) ?? [];
     const text = formatLaunchTelegramMessage({
       text: item.text,
       channel: item.channel,
@@ -81,12 +92,50 @@ export async function dispatchNewTelegramAlerts(options?: {
       mapUrl: primaryArea ? areaMapUrl(primaryArea.id) : undefined,
       weaponHint: track?.speedHintHe,
     });
-    const result = await sendTelegramAlert(text);
-    if (result.ok) {
+
+    let delivered = false;
+
+    // Always try the configured group/channel first (if set).
+    if (isTelegramNotifyConfigured()) {
+      const result = await sendTelegramAlert(text);
+      if (result.ok) {
+        delivered = true;
+      } else {
+        errors.push(`${item.id}: ${result.error ?? "send failed"}`);
+      }
+    }
+
+    for (const sub of subscribers) {
+      if (!subscriberWantsArea(sub, areaIds)) continue;
+      // Avoid double-send when subscriber is the same as default alert chat.
+      if (
+        isTelegramNotifyConfigured() &&
+        String(sub.chatId) ===
+          String(
+            process.env.TELEGRAM_ALERT_CHAT_ID ||
+              process.env.TELEGRAM_CHAT_ID ||
+              process.env.ROCKETS_TELEGRAM_CHAT_ID ||
+              "",
+          ).trim()
+      ) {
+        continue;
+      }
+      const result = await sendTelegramAlertToChat(sub.chatId, text);
+      if (result.ok) {
+        delivered = true;
+        subscriberSends += 1;
+      } else {
+        errors.push(
+          `${item.id}@${sub.chatId}: ${result.error ?? "send failed"}`,
+        );
+      }
+    }
+
+    if (delivered) {
       await markAlertSent(item.id);
       sentIds.push(item.id);
-    } else {
-      errors.push(`${item.id}: ${result.error ?? "send failed"}`);
+    } else if (!isTelegramNotifyConfigured() && subscribers.length === 0) {
+      errors.push(`${item.id}: no default chat and no subscribers`);
     }
   }
 
@@ -96,6 +145,7 @@ export async function dispatchNewTelegramAlerts(options?: {
     related: candidates.length,
     sent: sentIds.length,
     skipped: Math.max(0, candidates.length - queue.length),
+    subscriberSends,
     errors,
     sentIds,
   };
