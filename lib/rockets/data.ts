@@ -112,6 +112,18 @@ export function createDemoTracks(now = Date.now()): RocketTrack[] {
       launchedAt: iso(6 * 60_000),
       etaSeconds: 420,
       speedHintHe: "בליסטי · בינוני",
+      shelterSeconds: 90,
+      alertAreas: [
+        {
+          id: "tel-aviv",
+          labelHe: "תל אביב",
+          regionHe: "מרכז",
+          position: TARGETS.telAviv,
+          shelterSeconds: 90,
+          hitCount: 1,
+          lastSeenAt: iso(6 * 60_000),
+        },
+      ],
     },
     {
       id: "trk-bravo",
@@ -126,6 +138,18 @@ export function createDemoTracks(now = Date.now()): RocketTrack[] {
       launchedAt: iso(2 * 60_000),
       etaSeconds: 780,
       speedHintHe: "בליסטי · ארוך טווח",
+      shelterSeconds: 60,
+      alertAreas: [
+        {
+          id: "haifa",
+          labelHe: "חיפה",
+          regionHe: "צפון",
+          position: TARGETS.haifa,
+          shelterSeconds: 60,
+          hitCount: 1,
+          lastSeenAt: iso(2 * 60_000),
+        },
+      ],
     },
     {
       id: "trk-charlie",
@@ -140,6 +164,27 @@ export function createDemoTracks(now = Date.now()): RocketTrack[] {
       launchedAt: iso(11 * 60_000),
       etaSeconds: 95,
       speedHintHe: "שלב סופי",
+      shelterSeconds: 45,
+      alertAreas: [
+        {
+          id: "ashdod",
+          labelHe: "אשדוד",
+          regionHe: "דרום",
+          position: { lat: 31.8044, lng: 34.6553 },
+          shelterSeconds: 45,
+          hitCount: 1,
+          lastSeenAt: iso(11 * 60_000),
+        },
+        {
+          id: "south",
+          labelHe: "דרום",
+          regionHe: "דרום",
+          position: TARGETS.south,
+          shelterSeconds: 45,
+          hitCount: 1,
+          lastSeenAt: iso(11 * 60_000),
+        },
+      ],
     },
   ];
 }

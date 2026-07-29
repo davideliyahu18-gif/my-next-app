@@ -88,28 +88,65 @@ export function formatLaunchTelegramMessage(input: {
   url: string;
   originLabel?: string;
   targetLabel?: string;
+  areaLabels?: string[];
+  shelterSeconds?: number;
+  mapUrl?: string;
+  weaponHint?: string;
 }): string {
-  const lines = [
-    "🛡️ חמ״ל התרעות איראן",
-    "",
-    input.text.trim(),
-    "",
-  ];
+  const lines = ["🛡️ חמ״ל לייב", ""];
+
+  if (input.weaponHint && input.weaponHint !== "לא צוין") {
+    lines.push(`סוג: ${input.weaponHint}`);
+  }
+  if (input.areaLabels && input.areaLabels.length > 0) {
+    lines.push(`אזור: ${input.areaLabels.join(" · ")}`);
+  } else if (input.targetLabel) {
+    lines.push(`יעד: ${input.targetLabel}`);
+  }
+  if (input.shelterSeconds != null) {
+    const shelter =
+      input.shelterSeconds <= 0
+        ? "מיידי"
+        : input.shelterSeconds < 60
+          ? `${input.shelterSeconds} שניות`
+          : `${Math.floor(input.shelterSeconds / 60)}:${String(input.shelterSeconds % 60).padStart(2, "0")} דק׳`;
+    lines.push(`⏱️ זמן למרחב מוגן: ${shelter}`);
+  }
+  if (input.mapUrl) {
+    lines.push(`🗺️ מפה חיה: ${input.mapUrl}`);
+  }
+  if (
+    input.weaponHint ||
+    input.areaLabels?.length ||
+    input.targetLabel ||
+    input.shelterSeconds != null ||
+    input.mapUrl
+  ) {
+    lines.push("");
+  }
+
+  lines.push(input.text.trim(), "");
+
   if (input.originLabel || input.targetLabel) {
     lines.push(
       `מקור: ${input.originLabel ?? "—"} → יעד: ${input.targetLabel ?? "—"}`,
       "",
     );
   }
-  lines.push(`מקור פיד: @${input.channel}`, input.url);
+  lines.push(
+    "⚠️ הערכת OSINT בלבד — לא מחליף התראת פיקוד העורף",
+    "",
+    `מקור פיד: @${input.channel}`,
+    input.url,
+  );
   return lines.join("\n");
 }
 
 export function formatTestTelegramMessage(): string {
   return [
-    "🛡️ חמ״ל התרעות איראן",
+    "🛡️ חמ״ל לייב",
     "",
-    "✅ בדיקת מערכת — ההתראות לטלגרם עובדות.",
+    "✅ בדיקת מערכת — התראות אזור + זמן למרחב מוגן + מפה.",
     "",
     `זמן: ${new Date().toLocaleString("he-IL", { timeZone: "Asia/Jerusalem" })}`,
     "מקור: Dash rockets",

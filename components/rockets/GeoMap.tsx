@@ -4,13 +4,20 @@ import { useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { ballisticPoint, trajectoryPoints } from "@/lib/rockets/geo";
-import type { LaunchSite, RocketTrack } from "@/lib/rockets/types";
+import type {
+  ActiveAlertArea,
+  LaunchSite,
+  LatLng,
+  RocketTrack,
+} from "@/lib/rockets/types";
 
 type Props = {
   tracks: RocketTrack[];
   sites: LaunchSite[];
   selectedTrackId: string | null;
   onSelectTrack: (id: string) => void;
+  activeAreas?: ActiveAlertArea[];
+  focusAreaId?: string | null;
 };
 
 const CENTER: L.LatLngExpression = [33.2, 42.5];
@@ -59,6 +66,8 @@ export default function GeoMap({
   sites,
   selectedTrackId,
   onSelectTrack,
+  activeAreas = [],
+  focusAreaId = null,
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -66,7 +75,10 @@ export default function GeoMap({
   const labelsRef = useRef<L.LayerGroup | null>(null);
   const fittedKeyRef = useRef<string>("");
   const onSelectRef = useRef(onSelectTrack);
-  onSelectRef.current = onSelectTrack;
+
+  useEffect(() => {
+    onSelectRef.current = onSelectTrack;
+  }, [onSelectTrack]);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -145,6 +157,35 @@ export default function GeoMap({
         .addTo(group);
     }
 
+    for (const area of activeAreas) {
+      const focused = area.id === focusAreaId;
+      L.circle([area.position.lat, area.position.lng], {
+        radius: focused ? 28_000 : 18_000,
+        color: focused ? "#dc2626" : "#f97316",
+        weight: focused ? 2.5 : 1.5,
+        fillColor: focused ? "#ef4444" : "#fb923c",
+        fillOpacity: focused ? 0.22 : 0.12,
+        interactive: false,
+      }).addTo(group);
+
+      L.circleMarker([area.position.lat, area.position.lng], {
+        radius: focused ? 8 : 6,
+        color: "#ffffff",
+        weight: 2,
+        fillColor: focused ? "#dc2626" : "#ea580c",
+        fillOpacity: 1,
+      })
+        .bindTooltip(
+          `${area.labelHe} · ${area.shelterSeconds} שנ׳ למרחב מוגן`,
+          {
+            className: "rocket-map-tooltip-he",
+            direction: "top",
+            permanent: focused,
+          },
+        )
+        .addTo(group);
+    }
+
     for (const track of tracks) {
       const selected = track.id === selectedTrackId;
       const full = trajectoryPoints(track.origin, track.target, 56).map(
@@ -216,11 +257,25 @@ export default function GeoMap({
         .on("click", () => onSelectRef.current(track.id))
         .addTo(group);
     }
-  }, [tracks, sites, selectedTrackId]);
+  }, [tracks, sites, selectedTrackId, activeAreas, focusAreaId]);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || tracks.length === 0) return;
+    if (!map) return;
+
+    const focusPos: LatLng | undefined = activeAreas.find(
+      (a) => a.id === focusAreaId,
+    )?.position;
+    if (focusPos) {
+      const key = `area:${focusAreaId}`;
+      if (fittedKeyRef.current !== key) {
+        fittedKeyRef.current = key;
+        map.flyTo([focusPos.lat, focusPos.lng], 8, { animate: true });
+      }
+      return;
+    }
+
+    if (tracks.length === 0) return;
     const key = tracks.map((t) => t.id).join("|");
     if (fittedKeyRef.current === key) return;
     fittedKeyRef.current = key;
@@ -229,10 +284,13 @@ export default function GeoMap({
       bounds.extend([track.origin.lat, track.origin.lng]);
       bounds.extend([track.target.lat, track.target.lng]);
     }
+    for (const area of activeAreas) {
+      bounds.extend([area.position.lat, area.position.lng]);
+    }
     if (bounds.isValid()) {
       map.fitBounds(bounds.pad(0.45), { animate: true, maxZoom: 6 });
     }
-  }, [tracks]);
+  }, [tracks, activeAreas, focusAreaId]);
 
   return (
     <div className="relative h-[220px] w-full overflow-hidden rounded-2xl bg-[#f3f6f9] sm:h-[280px]">

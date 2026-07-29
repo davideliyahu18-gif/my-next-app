@@ -1,5 +1,9 @@
 import { createDemoTracks, LAUNCH_SITES } from "./data";
-import { isLaunchRelated, messagesToTracks } from "./parse-alert";
+import {
+  aggregateActiveAreas,
+  isLaunchRelated,
+  messagesToTracks,
+} from "./parse-alert";
 import { fetchTelegramLaunchMessages } from "./telegram";
 import type { RocketsSnapshot } from "./types";
 
@@ -18,6 +22,7 @@ export async function getRocketsSnapshot(options?: {
     const tracks = messagesToTracks(messages, new Date(), {
       maxAgeHours: 72,
     });
+    const activeAreas = aggregateActiveAreas(tracks);
 
     // Every scraped message goes into the feed (no filtering out).
     const feed = messages.map((message) => ({
@@ -43,6 +48,7 @@ export async function getRocketsSnapshot(options?: {
         mode: "live",
         tracks,
         feed,
+        activeAreas,
         sources,
         errors,
         timestamp,
@@ -56,6 +62,7 @@ export async function getRocketsSnapshot(options?: {
         mode: "live",
         tracks: [],
         feed,
+        activeAreas: [],
         sources,
         errors,
         timestamp,
@@ -63,11 +70,13 @@ export async function getRocketsSnapshot(options?: {
       };
     }
 
+    const demoTracks = createDemoTracks();
     return {
       ok: true,
       mode: "demo",
-      tracks: createDemoTracks(),
+      tracks: demoTracks,
       feed,
+      activeAreas: aggregateActiveAreas(demoTracks),
       sources,
       errors: [
         ...errors,
@@ -79,11 +88,13 @@ export async function getRocketsSnapshot(options?: {
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Telegram fetch failed";
+    const demoTracks = createDemoTracks();
     return {
       ok: false,
       mode: "demo",
-      tracks: createDemoTracks(),
+      tracks: demoTracks,
       feed: [],
+      activeAreas: aggregateActiveAreas(demoTracks),
       sources: [],
       errors: [message],
       timestamp,

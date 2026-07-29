@@ -1,3 +1,4 @@
+import { areaMapUrl } from "@/lib/rockets/alert-areas";
 import { filterUnsent, markAlertSent } from "@/lib/rockets/alert-dedupe";
 import { isLaunchRelated, messagesToTracks } from "@/lib/rockets/parse-alert";
 import { getRocketsSnapshot } from "@/lib/rockets/snapshot";
@@ -68,12 +69,17 @@ export async function dispatchNewTelegramAlerts(options?: {
 
   for (const item of queue) {
     const track = trackBySource.get(item.id);
+    const primaryArea = track?.alertAreas?.[0];
     const text = formatLaunchTelegramMessage({
       text: item.text,
       channel: item.channel,
       url: item.url,
       originLabel: track?.originLabelHe,
       targetLabel: track?.targetLabelHe,
+      areaLabels: track?.alertAreas?.map((a) => a.labelHe),
+      shelterSeconds: track?.shelterSeconds,
+      mapUrl: primaryArea ? areaMapUrl(primaryArea.id) : undefined,
+      weaponHint: track?.speedHintHe,
     });
     const result = await sendTelegramAlert(text);
     if (result.ok) {
