@@ -1,0 +1,10 @@
+node_modules/
+auth/
+bot-state.json
+qr.png
+outbox/
+heartbeat.json
+auth.bak/
+*.lock
+errors.log
+watchdog-state.json

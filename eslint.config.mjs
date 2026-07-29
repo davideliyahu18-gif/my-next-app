@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Baileys WhatsApp bots (Node scripts, not React)
+    "scripts/**",
   ]),
 ]);
 
