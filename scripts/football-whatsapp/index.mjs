@@ -57,15 +57,21 @@ async function loadEnvFile() {
       if (!trimmed || trimmed.startsWith("#")) continue;
       const idx = trimmed.indexOf("=");
       if (idx === -1) continue;
-      const key = trimmed.slice(0, idx);
-      let value = trimmed.slice(idx + 1);
+      const key = trimmed.slice(0, idx).trim();
+      let value = trimmed.slice(idx + 1).trim();
       if (
         (value.startsWith('"') && value.endsWith('"')) ||
         (value.startsWith("'") && value.endsWith("'"))
       ) {
         value = value.slice(1, -1);
       }
-      if (!process.env[key]) process.env[key] = value;
+      const keyName = key.trim();
+      // .env.local wins for FOOTBALL_BOT_* so phone/operator policy always applies.
+      if (name === ".env.local" && keyName.startsWith("FOOTBALL_BOT_")) {
+        process.env[keyName] = value;
+      } else if (!process.env[keyName]) {
+        process.env[keyName] = value;
+      }
     }
   }
 }
