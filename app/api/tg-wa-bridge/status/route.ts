@@ -1,6 +1,7 @@
 import { verifyBridgeAuth } from "@/lib/tg-wa-bridge/auth";
 import {
   bridgeWhatsAppChatId,
+  bridgeWhatsAppGroupName,
   getBridgeChannels,
   isBridgeEnabled,
 } from "@/lib/tg-wa-bridge/channels";
@@ -22,16 +23,19 @@ export async function GET(request: Request) {
     enabled: isBridgeEnabled(),
     configured: isBridgeConfigured(),
     greenApi: isGreenApiConfigured(),
+    whatsappGroupName: bridgeWhatsAppGroupName(),
     whatsappChatId: bridgeWhatsAppChatId()
       ? `${bridgeWhatsAppChatId().slice(0, 8)}…`
       : "",
     channels: channels.map((c) => ({
       username: c.username,
       label: c.label,
+      url: `https://t.me/${c.username}`,
       preview: `https://t.me/s/${c.username}`,
     })),
     bootstrapped: await isBridgeBootstrapped(),
     pollPath: "/api/cron/tg-wa-bridge",
+    groupsPath: "/api/tg-wa-bridge/groups",
     webhookPath: "/api/tg-wa-bridge/webhook",
   });
 }
