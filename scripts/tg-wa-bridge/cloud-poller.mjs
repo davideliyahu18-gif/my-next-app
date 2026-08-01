@@ -1,6 +1,6 @@
 /**
  * Local/cloud poller: scrape Telegram → WhatsApp via Green API.
- * Loads credentials from env or sibling ../../.env.local
+ * Also listens for group commands (סטטוס) via receiveNotification.
  */
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
@@ -43,6 +43,7 @@ const CHANNEL = (
   .toLowerCase();
 const TITLE = "איראן בזמן אמת – חדשות, דיווחים🇮🇷";
 const INTERVAL_MS = Number(process.env.TG_WA_POLL_MS || 60000);
+const STARTED_AT = Date.now();
 
 function sanitizeForBold(text) {
   return String(text || "")
@@ -65,6 +66,53 @@ function formatMessage(text, url) {
   return `*${TITLE}*\n\n${body}${link}`;
 }
 
+function isStatusCommand(text) {
+  const normalized = String(text || "")
+    .replace(/[\u200e\u200f\u202a-\u202e]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+  if (
+    normalized === "סטטוס" ||
+    normalized === "איראן סטטוס" ||
+    normalized === "סטטוס איראן" ||
+    normalized === "בוט" ||
+    normalized === "status"
+  ) {
+    return true;
+  }
+  return /^(סטטוס|status|בוט)\b/.test(normalized);
+}
+
+function formatStatusReply({ telegramOk, lastPollAt, lastSentAt, error }) {
+  const lastPoll = lastPollAt
+    ? new Date(lastPollAt).toLocaleString("he-IL", {
+        timeZone: "Asia/Jerusalem",
+      })
+    : "טרם";
+  const lastSent = lastSentAt
+    ? new Date(lastSentAt).toLocaleString("he-IL", {
+        timeZone: "Asia/Jerusalem",
+      })
+    : "טרם";
+  const uptimeMin = Math.floor((Date.now() - STARTED_AT) / 60000);
+  const lines = [
+    TITLE,
+    "",
+    "סטטוס בוט — תקין",
+    "וואטסאפ: ✅ מחובר",
+    `טלגרם: ${telegramOk === false ? "❌" : "✅"} סורק`,
+    `ערוץ: @${CHANNEL}`,
+    "קבוצה: דיווחים מבצעי איראן 🇮🇷",
+    `סריקה אחרונה: ${lastPoll}`,
+    `שליחה אחרונה: ${lastSent}`,
+    `עלייה: ${uptimeMin} דק׳`,
+    error ? `שגיאה: ${error}` : "הכל עובד — ממתין להודעות חדשות",
+    'פקודות: סטטוס | איראן סטטוס',
+  ];
+  return boldEveryLine(lines.join("\n"));
+}
+
 if (!TOKEN) {
   console.error("Missing GREEN_API_TOKEN");
   process.exit(1);
@@ -72,6 +120,10 @@ if (!TOKEN) {
 
 const seen = new Set();
 let bootstrapped = false;
+let telegramOk = true;
+let lastPollAt = null;
+let lastSentAt = null;
+let lastError = "";
 
 function stripHtml(html) {
   return html
@@ -112,13 +164,13 @@ async function fetchMessages() {
   return out;
 }
 
-async function sendWhatsApp(text) {
+async function sendWhatsApp(text, chatId = CHAT_ID) {
   const res = await fetch(
     `https://api.green-api.com/waInstance${INSTANCE}/sendMessage/${TOKEN}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chatId: CHAT_ID, message: text }),
+      body: JSON.stringify({ chatId, message: text }),
     },
   );
   if (!res.ok) {
@@ -127,31 +179,147 @@ async function sendWhatsApp(text) {
   }
 }
 
-async function tick() {
-  const messages = await fetchMessages();
-  if (!bootstrapped) {
-    for (const m of messages) seen.add(m.id);
-    bootstrapped = true;
-    console.log(
-      `[tg-wa] bootstrapped ${seen.size} msgs from @${CHANNEL} → ${CHAT_ID}`,
+async function ensureHttpReceiveMode() {
+  try {
+    const settingsRes = await fetch(
+      `https://api.green-api.com/waInstance${INSTANCE}/getSettings/${TOKEN}`,
     );
-    return;
+    const settings = await settingsRes.json();
+    if (settings?.webhookUrl) {
+      console.log("[tg-wa] clearing webhookUrl so receiveNotification works");
+      await fetch(
+        `https://api.green-api.com/waInstance${INSTANCE}/setSettings/${TOKEN}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            webhookUrl: "",
+            incomingWebhook: "yes",
+            outgoingWebhook: "no",
+            stateWebhook: "no",
+          }),
+        },
+      );
+    }
+  } catch (err) {
+    console.warn("[tg-wa] settings check failed", err);
   }
-  const fresh = messages.filter((m) => !seen.has(m.id));
-  for (const m of fresh) {
-    await sendWhatsApp(formatMessage(m.text, m.url));
-    seen.add(m.id);
-    console.log(`[tg-wa] sent ${m.id}`);
+}
+
+function extractIncomingText(body) {
+  const md = body?.messageData;
+  if (!md) return "";
+  if (md.typeMessage === "textMessage") {
+    return md.textMessageData?.textMessage || "";
   }
-  if (!fresh.length) {
-    console.log(`[tg-wa] ok — no new posts (${new Date().toISOString()})`);
+  if (md.typeMessage === "extendedTextMessage") {
+    return md.extendedTextMessageData?.text || "";
+  }
+  if (md.typeMessage === "quotedMessage") {
+    return md.extendedTextMessageData?.text || "";
+  }
+  return "";
+}
+
+async function deleteNotification(receiptId) {
+  await fetch(
+    `https://api.green-api.com/waInstance${INSTANCE}/deleteNotification/${TOKEN}/${receiptId}`,
+    { method: "DELETE" },
+  );
+}
+
+async function handleIncoming(body) {
+  if (body?.typeWebhook !== "incomingMessageReceived") return;
+  const chatId = body?.senderData?.chatId || "";
+  if (chatId !== CHAT_ID) return;
+  const text = extractIncomingText(body);
+  if (!isStatusCommand(text)) return;
+
+  console.log(`[tg-wa] status command from ${body?.senderData?.senderName || "?"}`);
+  const reply = formatStatusReply({
+    telegramOk,
+    lastPollAt,
+    lastSentAt,
+    error: lastError,
+  });
+  await sendWhatsApp(reply, chatId);
+}
+
+async function drainNotifications(max = 30) {
+  for (let i = 0; i < max; i += 1) {
+    const res = await fetch(
+      `https://api.green-api.com/waInstance${INSTANCE}/receiveNotification/${TOKEN}?receiveTimeout=1`,
+    );
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`receiveNotification HTTP ${res.status}: ${body.slice(0, 180)}`);
+    }
+    const data = await res.json();
+    if (!data || data.receiptId == null) break;
+    try {
+      await handleIncoming(data.body);
+    } catch (err) {
+      console.error("[tg-wa] handle incoming failed", err);
+    }
+    await deleteNotification(data.receiptId);
+  }
+}
+
+async function tick() {
+  try {
+    const messages = await fetchMessages();
+    telegramOk = true;
+    lastPollAt = new Date().toISOString();
+    lastError = "";
+
+    if (!bootstrapped) {
+      for (const m of messages) seen.add(m.id);
+      bootstrapped = true;
+      console.log(
+        `[tg-wa] bootstrapped ${seen.size} msgs from @${CHANNEL} → ${CHAT_ID}`,
+      );
+      return;
+    }
+    const fresh = messages.filter((m) => !seen.has(m.id));
+    for (const m of fresh) {
+      await sendWhatsApp(formatMessage(m.text, m.url));
+      seen.add(m.id);
+      lastSentAt = new Date().toISOString();
+      console.log(`[tg-wa] sent ${m.id}`);
+    }
+    if (!fresh.length) {
+      console.log(`[tg-wa] ok — no new posts (${new Date().toISOString()})`);
+    }
+  } catch (err) {
+    telegramOk = false;
+    lastError = err instanceof Error ? err.message : String(err);
+    console.error("[tg-wa] tick failed", err);
+  }
+}
+
+async function commandLoop() {
+  for (;;) {
+    try {
+      await drainNotifications(20);
+    } catch (err) {
+      console.error("[tg-wa] command poll failed", err);
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+    await new Promise((r) => setTimeout(r, 800));
   }
 }
 
 console.log(
   `[tg-wa] polling @${CHANNEL} every ${INTERVAL_MS / 1000}s → ${CHAT_ID}`,
 );
+console.log("[tg-wa] group commands: סטטוס | איראן סטטוס | בוט");
+
+await ensureHttpReceiveMode();
 await tick();
 setInterval(() => {
   tick().catch((err) => console.error("[tg-wa] tick failed", err));
 }, INTERVAL_MS);
+commandLoop().catch((err) => {
+  console.error("[tg-wa] command loop died", err);
+  process.exit(1);
+});
