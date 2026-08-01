@@ -41,10 +41,29 @@ const CHANNEL = (
   .split(":")[0]
   .replace(/^@/, "")
   .toLowerCase();
-const LABEL =
-  (process.env.TG_WA_CHANNELS || "").split(",")[0].split(":")[1] ||
-  "מבזקי ביטחון 24/7";
+const TITLE = "דיווחים חמל איראן 🇮🇷";
 const INTERVAL_MS = Number(process.env.TG_WA_POLL_MS || 60000);
+
+function sanitizeForBold(text) {
+  return String(text || "")
+    .replace(/\*/g, "")
+    .trim();
+}
+
+function boldEveryLine(text) {
+  return String(text || "")
+    .split(/\r?\n/)
+    .map((line) => sanitizeForBold(line))
+    .filter(Boolean)
+    .map((line) => `*${line}*`)
+    .join("\n");
+}
+
+function formatMessage(text, url) {
+  const body = boldEveryLine(text || "(הודעה)");
+  const link = url ? `\n\n*🔗 ${sanitizeForBold(url)}*` : "";
+  return `*${TITLE}*\n\n${body}${link}`;
+}
 
 if (!TOKEN) {
   console.error("Missing GREEN_API_TOKEN");
@@ -120,8 +139,7 @@ async function tick() {
   }
   const fresh = messages.filter((m) => !seen.has(m.id));
   for (const m of fresh) {
-    const body = `*📢 ${LABEL}*\n\n${m.text}\n\n🔗 ${m.url}`;
-    await sendWhatsApp(body);
+    await sendWhatsApp(formatMessage(m.text, m.url));
     seen.add(m.id);
     console.log(`[tg-wa] sent ${m.id}`);
   }
