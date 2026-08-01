@@ -1,13 +1,23 @@
 /**
  * Local/cloud poller: scrape Telegram → WhatsApp via Green API.
- * Also listens for group commands (סטטוס) via receiveNotification.
+ * Also listens for group commands via receiveNotification / lastOutgoing.
+ * Run under supervise.mjs for auto-restart.
  */
-import { readFileSync, existsSync } from "node:fs";
+import {
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  mkdirSync,
+} from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "../..");
+const DATA_DIR = resolve(__dirname, ".data");
+const SEEN_FILE = resolve(DATA_DIR, "seen.json");
+const HEARTBEAT_FILE = resolve(DATA_DIR, "heartbeat.json");
+mkdirSync(DATA_DIR, { recursive: true });
 
 function loadEnvFile(path) {
   if (!existsSync(path)) return;
@@ -174,6 +184,74 @@ let lastSentAt = null;
 let lastError = "";
 /** @type {{id:string,text:string,url:string}|null} */
 let latestChannelMessage = null;
+let tickInFlight = false;
+let commandInFlight = false;
+let consecutiveTickFailures = 0;
+
+function loadState() {
+  try {
+    if (!existsSync(SEEN_FILE)) return;
+    const raw = JSON.parse(readFileSync(SEEN_FILE, "utf8"));
+    const ids = Array.isArray(raw?.ids) ? raw.ids : [];
+    for (const id of ids.slice(-2000)) seen.add(String(id));
+    bootstrapped = Boolean(raw?.bootstrapped) || seen.size > 0;
+    lastSentAt = raw?.lastSentAt || null;
+    console.log(
+      `[tg-wa] loaded state seen=${seen.size} bootstrapped=${bootstrapped}`,
+    );
+  } catch (err) {
+    console.warn("[tg-wa] loadState failed", err);
+  }
+}
+
+function saveState() {
+  try {
+    const ids = [...seen].slice(-2000);
+    writeFileSync(
+      SEEN_FILE,
+      JSON.stringify(
+        {
+          bootstrapped,
+          lastSentAt,
+          updatedAt: new Date().toISOString(),
+          ids,
+        },
+        null,
+        0,
+      ),
+    );
+  } catch (err) {
+    console.warn("[tg-wa] saveState failed", err);
+  }
+}
+
+function writeHeartbeat(extra = {}) {
+  try {
+    writeFileSync(
+      HEARTBEAT_FILE,
+      JSON.stringify(
+        {
+          ok: consecutiveTickFailures < 5,
+          pid: process.pid,
+          channel: CHANNEL,
+          chatId: CHAT_ID,
+          telegramOk,
+          lastPollAt,
+          lastSentAt,
+          lastError: lastError || null,
+          seen: seen.size,
+          uptimeSec: Math.floor((Date.now() - STARTED_AT) / 1000),
+          at: new Date().toISOString(),
+          ...extra,
+        },
+        null,
+        2,
+      ),
+    );
+  } catch {
+    // ignore
+  }
+}
 
 function stripHtml(html) {
   return html
@@ -214,19 +292,39 @@ async function fetchMessages() {
   return out;
 }
 
-async function sendWhatsApp(text, chatId = CHAT_ID) {
-  const res = await fetch(
-    `https://api.green-api.com/waInstance${INSTANCE}/sendMessage/${TOKEN}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chatId, message: text }),
-    },
-  );
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`WhatsApp HTTP ${res.status}: ${body.slice(0, 200)}`);
+async function sendWhatsApp(text, chatId = CHAT_ID, attempts = 3) {
+  let lastError = "";
+  for (let i = 1; i <= attempts; i += 1) {
+    try {
+      const res = await fetch(
+        `https://api.green-api.com/waInstance${INSTANCE}/sendMessage/${TOKEN}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chatId, message: text }),
+        },
+      );
+      if (!res.ok) {
+        const body = await res.text();
+        lastError = `WhatsApp HTTP ${res.status}: ${body.slice(0, 200)}`;
+        // Retry rate-limits / transient errors.
+        if (res.status === 429 || res.status >= 500) {
+          await new Promise((r) => setTimeout(r, 1000 * i));
+          continue;
+        }
+        throw new Error(lastError);
+      }
+      return;
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+      if (i < attempts) {
+        await new Promise((r) => setTimeout(r, 1000 * i));
+        continue;
+      }
+      throw new Error(lastError);
+    }
   }
+  throw new Error(lastError || "WhatsApp send failed");
 }
 
 async function ensureHttpReceiveMode() {
@@ -280,42 +378,61 @@ async function deleteNotification(receiptId) {
 
 const answeredCommands = new Set();
 
+function rememberAnswered(id) {
+  answeredCommands.add(id);
+  if (answeredCommands.size > 500) {
+    const trimmed = [...answeredCommands].slice(-300);
+    answeredCommands.clear();
+    for (const item of trimmed) answeredCommands.add(item);
+  }
+}
+
 async function runCommand(command, source = "webhook") {
-  if (command === "help") {
-    await sendWhatsApp(formatHelpReply(), CHAT_ID);
-  } else if (command === "source") {
-    await sendWhatsApp(formatSourceReply(), CHAT_ID);
-  } else if (command === "test") {
-    await sendWhatsApp(formatTestReply(), CHAT_ID);
-  } else if (command === "status") {
-    await sendWhatsApp(
-      formatStatusReply({
-        telegramOk,
-        lastPollAt,
-        lastSentAt,
-        error: lastError,
-      }),
-      CHAT_ID,
-    );
-  } else if (command === "last") {
-    let latest = latestChannelMessage;
-    if (!latest) {
-      const messages = await fetchMessages();
-      latest = messages[messages.length - 1] || null;
-      if (latest) latestChannelMessage = latest;
-    }
-    if (!latest) {
-      await sendWhatsApp(
-        boldEveryLine(`${TITLE}\n\nאין הודעה אחרונה מהערוץ`),
-        CHAT_ID,
-      );
-    } else {
-      await sendWhatsApp(formatMessage(latest.text, latest.url), CHAT_ID);
-    }
-  } else {
+  if (commandInFlight) {
+    console.log(`[tg-wa] skip ${command} — command already in flight`);
     return;
   }
-  console.log(`[tg-wa] command ${command} replied (${source})`);
+  commandInFlight = true;
+  try {
+    if (command === "help") {
+      await sendWhatsApp(formatHelpReply(), CHAT_ID);
+    } else if (command === "source") {
+      await sendWhatsApp(formatSourceReply(), CHAT_ID);
+    } else if (command === "test") {
+      await sendWhatsApp(formatTestReply(), CHAT_ID);
+    } else if (command === "status") {
+      await sendWhatsApp(
+        formatStatusReply({
+          telegramOk,
+          lastPollAt,
+          lastSentAt,
+          error: lastError,
+        }),
+        CHAT_ID,
+      );
+    } else if (command === "last") {
+      let latest = latestChannelMessage;
+      if (!latest) {
+        const messages = await fetchMessages();
+        latest = messages[messages.length - 1] || null;
+        if (latest) latestChannelMessage = latest;
+      }
+      if (!latest) {
+        await sendWhatsApp(
+          boldEveryLine(`${TITLE}\n\nאין הודעה אחרונה מהערוץ`),
+          CHAT_ID,
+        );
+      } else {
+        await sendWhatsApp(formatMessage(latest.text, latest.url), CHAT_ID);
+      }
+    } else {
+      return;
+    }
+    console.log(`[tg-wa] command ${command} replied (${source})`);
+    writeHeartbeat({ lastCommand: command, lastCommandAt: new Date().toISOString() });
+  } finally {
+    commandInFlight = false;
+  }
 }
 
 async function handleNotification(body) {
@@ -342,7 +459,7 @@ async function handleNotification(body) {
   const idMessage =
     body?.idMessage || `${chatId}:${text}:${body?.timestamp || ""}`;
   if (answeredCommands.has(idMessage)) return;
-  answeredCommands.add(idMessage);
+  rememberAnswered(idMessage);
 
   const who =
     body?.senderData?.senderName ||
@@ -374,7 +491,7 @@ async function pollOutgoingCommands() {
     if (ts && nowSec - ts > 120) continue;
     const id = m.idMessage || `${m.chatId}:${text}:${m.timestamp}`;
     if (answeredCommands.has(id)) continue;
-    answeredCommands.add(id);
+    rememberAnswered(id);
     console.log(`[tg-wa] command ${command} via lastOutgoing: ${text}`);
     await runCommand(command, "lastOutgoing");
   }
@@ -414,11 +531,17 @@ async function drainNotifications(max = 30) {
 }
 
 async function tick() {
+  if (tickInFlight) {
+    console.log("[tg-wa] skip tick — previous still running");
+    return;
+  }
+  tickInFlight = true;
   try {
     const messages = await fetchMessages();
     telegramOk = true;
     lastPollAt = new Date().toISOString();
     lastError = "";
+    consecutiveTickFailures = 0;
     if (messages.length) {
       latestChannelMessage = messages[messages.length - 1];
     }
@@ -426,9 +549,11 @@ async function tick() {
     if (!bootstrapped) {
       for (const m of messages) seen.add(m.id);
       bootstrapped = true;
+      saveState();
       console.log(
         `[tg-wa] bootstrapped ${seen.size} msgs from @${CHANNEL} → ${CHAT_ID}`,
       );
+      writeHeartbeat();
       return;
     }
     const fresh = messages.filter((m) => !seen.has(m.id));
@@ -436,15 +561,26 @@ async function tick() {
       await sendWhatsApp(formatMessage(m.text, m.url));
       seen.add(m.id);
       lastSentAt = new Date().toISOString();
+      saveState();
       console.log(`[tg-wa] sent ${m.id}`);
     }
     if (!fresh.length) {
       console.log(`[tg-wa] ok — no new posts (${new Date().toISOString()})`);
     }
+    writeHeartbeat({ fresh: fresh.length });
   } catch (err) {
     telegramOk = false;
+    consecutiveTickFailures += 1;
     lastError = err instanceof Error ? err.message : String(err);
     console.error("[tg-wa] tick failed", err);
+    writeHeartbeat({ error: lastError });
+    // Escalate only after repeated hard failures so supervisor can restart.
+    if (consecutiveTickFailures >= 8) {
+      console.error("[tg-wa] too many tick failures — exiting for restart");
+      process.exit(1);
+    }
+  } finally {
+    tickInFlight = false;
   }
 }
 
@@ -453,6 +589,7 @@ async function commandLoop() {
     try {
       await drainNotifications(20);
       await pollOutgoingCommands();
+      writeHeartbeat();
     } catch (err) {
       console.error("[tg-wa] command poll failed", err);
       await new Promise((r) => setTimeout(r, 3000));
@@ -461,6 +598,16 @@ async function commandLoop() {
   }
 }
 
+process.on("unhandledRejection", (reason) => {
+  console.error("[tg-wa] unhandledRejection", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[tg-wa] uncaughtException", err);
+  // Let supervisor restart a wedged process.
+  process.exit(1);
+});
+
+loadState();
 console.log(
   `[tg-wa] polling @${CHANNEL} every ${INTERVAL_MS / 1000}s → ${CHAT_ID}`,
 );
@@ -473,6 +620,7 @@ await tick();
 setInterval(() => {
   tick().catch((err) => console.error("[tg-wa] tick failed", err));
 }, INTERVAL_MS);
+setInterval(() => writeHeartbeat(), 30_000);
 commandLoop().catch((err) => {
   console.error("[tg-wa] command loop died", err);
   process.exit(1);

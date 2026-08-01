@@ -37,7 +37,20 @@
 - קבוצה: `דיווחים מבצעי איראן 🇮🇷` → `120363409236894886@g.us`
 - ערוץ: `@Mivzakeybitachon2225`
 
-ב-Vercel חובה להגדיר (לא בקוד):
+### יציבות (מומלץ)
+
+הפעלה עם restart אוטומטי:
+
+```bash
+npm run tg-wa:supervise
+```
+
+זה מריץ את הפולר ומפעיל מחדש אחרי קריסה (backoff).  
+מצב חי נשמר ב-`scripts/tg-wa-bridge/.data/` (seen + heartbeat).
+
+פקודות בקבוצה: `עזרה` | `סטטוס` | `מקור` | `בדיקה` | `אחרון`
+
+ב-Vercel (גיבוי / cron):
 
 ```bash
 GREEN_API_INSTANCE=710722683401
