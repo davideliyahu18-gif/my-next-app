@@ -228,21 +228,76 @@ async function deleteNotification(receiptId) {
   );
 }
 
-async function handleIncoming(body) {
-  if (body?.typeWebhook !== "incomingMessageReceived") return;
-  const chatId = body?.senderData?.chatId || "";
-  if (chatId !== CHAT_ID) return;
-  const text = extractIncomingText(body);
-  if (!isStatusCommand(text)) return;
+const answeredCommands = new Set();
 
-  console.log(`[tg-wa] status command from ${body?.senderData?.senderName || "?"}`);
+async function replyStatus(source = "webhook") {
   const reply = formatStatusReply({
     telegramOk,
     lastPollAt,
     lastSentAt,
     error: lastError,
   });
-  await sendWhatsApp(reply, chatId);
+  await sendWhatsApp(reply, CHAT_ID);
+  console.log(`[tg-wa] status replied (${source})`);
+}
+
+async function handleNotification(body) {
+  const type = body?.typeWebhook || "";
+  // Messages from OTHER phones in the group:
+  //   incomingMessageReceived
+  // Messages typed on the LINKED phone (052-312-3944) in the group:
+  //   outgoingMessageReceived
+  if (
+    type !== "incomingMessageReceived" &&
+    type !== "outgoingMessageReceived"
+  ) {
+    return;
+  }
+
+  const chatId =
+    body?.senderData?.chatId || body?.chatId || body?.senderData?.chat || "";
+  if (chatId !== CHAT_ID) return;
+
+  const text = extractIncomingText(body);
+  if (!isStatusCommand(text)) return;
+
+  const idMessage = body?.idMessage || `${chatId}:${text}:${body?.timestamp || ""}`;
+  if (answeredCommands.has(idMessage)) return;
+  answeredCommands.add(idMessage);
+
+  const who =
+    body?.senderData?.senderName ||
+    body?.senderData?.sender ||
+    (type === "outgoingMessageReceived" ? "linked-phone" : "?");
+  console.log(`[tg-wa] status command (${type}) from ${who}: ${text}`);
+  await replyStatus(type);
+}
+
+/** Fallback: linked phone commands often appear only in lastOutgoingMessages. */
+async function pollOutgoingCommands() {
+  const res = await fetch(
+    `https://api.green-api.com/waInstance${INSTANCE}/lastOutgoingMessages/${TOKEN}?minutes=5`,
+  );
+  if (!res.ok) return;
+  const data = await res.json();
+  if (!Array.isArray(data)) return;
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  for (const m of data) {
+    if (m.chatId !== CHAT_ID) continue;
+    const text = m.textMessage || m.extendedTextMessage || "";
+    if (!isStatusCommand(text)) continue;
+    // Skip our own API replies (they contain the title header).
+    if (String(text).includes(TITLE)) continue;
+    const ts = Number(m.timestamp || 0);
+    // Only react to commands from the last ~2 minutes (linked-phone lag).
+    if (ts && nowSec - ts > 120) continue;
+    const id = m.idMessage || `${m.chatId}:${text}:${m.timestamp}`;
+    if (answeredCommands.has(id)) continue;
+    answeredCommands.add(id);
+    console.log(`[tg-wa] status via lastOutgoing: ${text}`);
+    await replyStatus("lastOutgoing");
+  }
 }
 
 async function drainNotifications(max = 30) {
@@ -250,16 +305,29 @@ async function drainNotifications(max = 30) {
     const res = await fetch(
       `https://api.green-api.com/waInstance${INSTANCE}/receiveNotification/${TOKEN}?receiveTimeout=1`,
     );
+    const raw = await res.text();
+    // 200 null / 408 timeout / empty = no notifications waiting.
+    if (res.status === 408 || !raw || raw === "null") break;
     if (!res.ok) {
-      const body = await res.text();
-      throw new Error(`receiveNotification HTTP ${res.status}: ${body.slice(0, 180)}`);
+      if (raw.includes("Data processing error")) {
+        await new Promise((r) => setTimeout(r, 1500));
+        break;
+      }
+      throw new Error(
+        `receiveNotification HTTP ${res.status}: ${raw.slice(0, 180)}`,
+      );
     }
-    const data = await res.json();
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      break;
+    }
     if (!data || data.receiptId == null) break;
     try {
-      await handleIncoming(data.body);
+      await handleNotification(data.body);
     } catch (err) {
-      console.error("[tg-wa] handle incoming failed", err);
+      console.error("[tg-wa] handle notification failed", err);
     }
     await deleteNotification(data.receiptId);
   }
@@ -301,11 +369,12 @@ async function commandLoop() {
   for (;;) {
     try {
       await drainNotifications(20);
+      await pollOutgoingCommands();
     } catch (err) {
       console.error("[tg-wa] command poll failed", err);
       await new Promise((r) => setTimeout(r, 3000));
     }
-    await new Promise((r) => setTimeout(r, 800));
+    await new Promise((r) => setTimeout(r, 1200));
   }
 }
 

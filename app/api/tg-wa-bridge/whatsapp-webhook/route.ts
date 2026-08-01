@@ -36,7 +36,11 @@ export async function POST(request: Request) {
     return Response.json({ ok: false, error: "invalid json" }, { status: 400 });
   }
 
-  if (body.typeWebhook !== "incomingMessageReceived") {
+  // Linked phone (same WID) sends as outgoingMessageReceived.
+  if (
+    body.typeWebhook !== "incomingMessageReceived" &&
+    body.typeWebhook !== "outgoingMessageReceived"
+  ) {
     return Response.json({ ok: true, ignored: true });
   }
 
