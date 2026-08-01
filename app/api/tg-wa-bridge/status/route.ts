@@ -7,7 +7,10 @@ import {
 } from "@/lib/tg-wa-bridge/channels";
 import { isBridgeConfigured } from "@/lib/tg-wa-bridge/poll";
 import { isBridgeBootstrapped } from "@/lib/tg-wa-bridge/store";
-import { isGreenApiConfigured } from "@/lib/tg-wa-bridge/whatsapp";
+import {
+  bridgeGreenApiInstance,
+  isGreenApiConfigured,
+} from "@/lib/tg-wa-bridge/whatsapp";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -23,6 +26,7 @@ export async function GET(request: Request) {
     enabled: isBridgeEnabled(),
     configured: isBridgeConfigured(),
     greenApi: isGreenApiConfigured(),
+    greenApiInstance: bridgeGreenApiInstance(),
     whatsappGroupName: bridgeWhatsAppGroupName(),
     whatsappChatId: bridgeWhatsAppChatId()
       ? `${bridgeWhatsAppChatId().slice(0, 8)}…`

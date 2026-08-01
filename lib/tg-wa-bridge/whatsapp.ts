@@ -2,12 +2,27 @@ import { bridgeWhatsAppChatId } from "./channels";
 import { formatBridgeWhatsAppMessage } from "./format";
 import type { BridgeChannelMessage } from "./types";
 
+/** Default instance from console.green-api.com (must be authorized via QR). */
+const DEFAULT_GREEN_API_INSTANCE = "710722683401";
+
 function greenApiInstance(): string {
-  return (process.env.GREEN_API_INSTANCE ?? "").trim();
+  return (
+    process.env.GREEN_API_INSTANCE ||
+    process.env.TG_WA_GREEN_API_INSTANCE ||
+    DEFAULT_GREEN_API_INSTANCE
+  ).trim();
 }
 
 function greenApiToken(): string {
-  return (process.env.GREEN_API_TOKEN ?? "").trim();
+  return (
+    process.env.GREEN_API_TOKEN ||
+    process.env.TG_WA_GREEN_API_TOKEN ||
+    ""
+  ).trim();
+}
+
+export function bridgeGreenApiInstance(): string {
+  return greenApiInstance();
 }
 
 export function isGreenApiConfigured(): boolean {

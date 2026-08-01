@@ -2,6 +2,7 @@ import {
   bridgeWhatsAppGroupName,
   normalizeGroupName,
 } from "./channels";
+import { bridgeGreenApiInstance } from "./whatsapp";
 
 export type WhatsAppGroup = {
   id: string;
@@ -9,11 +10,15 @@ export type WhatsAppGroup = {
 };
 
 function greenApiInstance(): string {
-  return (process.env.GREEN_API_INSTANCE ?? "").trim();
+  return bridgeGreenApiInstance();
 }
 
 function greenApiToken(): string {
-  return (process.env.GREEN_API_TOKEN ?? "").trim();
+  return (
+    process.env.GREEN_API_TOKEN ||
+    process.env.TG_WA_GREEN_API_TOKEN ||
+    ""
+  ).trim();
 }
 
 export async function listWhatsAppGroups(): Promise<{
