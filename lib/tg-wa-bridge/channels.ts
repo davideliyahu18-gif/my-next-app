@@ -48,13 +48,16 @@ export function bridgeWhatsAppGroupName(): string {
   ).trim();
 }
 
+/** Default: דיווחים מבצעי איראן 🇮🇷 */
+const DEFAULT_WHATSAPP_CHAT_ID = "120363409236894886@g.us";
+
 export function bridgeWhatsAppChatId(): string {
   return (
     process.env.TG_WA_WHATSAPP_CHAT_ID ||
     process.env.BRIDGE_WHATSAPP_CHAT_ID ||
     process.env.WHATSAPP_GROUP_CHAT_ID ||
     process.env.MISSILE_WHATSAPP_CHAT_ID ||
-    ""
+    DEFAULT_WHATSAPP_CHAT_ID
   ).trim();
 }
 

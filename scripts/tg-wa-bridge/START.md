@@ -31,6 +31,19 @@
 - אל תבקש קוד מכמה מקומות במקביל
 - אם הסטטוס `starting` — שוב **אתחול** למופע
 
-## אחרי שהסטטוס נהיה מורשה
+## סטטוס חיבור (עודכן)
 
-העתק `apiTokenInstance` ושלח לכאן — נסיים חיבור לקבוצה.
+- מופע: `710722683401` — מורשה
+- קבוצה: `דיווחים מבצעי איראן 🇮🇷` → `120363409236894886@g.us`
+- ערוץ: `@Mivzakeybitachon2225`
+
+ב-Vercel חובה להגדיר (לא בקוד):
+
+```bash
+GREEN_API_INSTANCE=710722683401
+GREEN_API_TOKEN=...apiTokenInstance...
+TG_WA_WHATSAPP_CHAT_ID=120363409236894886@g.us
+CRON_SECRET=...
+```
+
+אחרי Deploy — ping כל 1–2 דקות ל-`/api/cron/tg-wa-bridge`.
