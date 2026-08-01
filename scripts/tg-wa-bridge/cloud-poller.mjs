@@ -66,22 +66,31 @@ function formatMessage(text, url) {
   return `*${TITLE}*\n\n${body}${link}`;
 }
 
-function isStatusCommand(text) {
-  const normalized = String(text || "")
+function normalizeCommandText(text) {
+  return String(text || "")
     .replace(/[\u200e\u200f\u202a-\u202e]/g, "")
+    .replace(/[!?.،,]+$/g, "")
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
+}
+
+function parseCommand(text) {
+  const n = normalizeCommandText(text);
   if (
-    normalized === "סטטוס" ||
-    normalized === "איראן סטטוס" ||
-    normalized === "סטטוס איראן" ||
-    normalized === "בוט" ||
-    normalized === "status"
+    n === "סטטוס" ||
+    n === "איראן סטטוס" ||
+    n === "סטטוס איראן" ||
+    n === "בוט" ||
+    n === "status"
   ) {
-    return true;
+    return "status";
   }
-  return /^(סטטוס|status|בוט)\b/.test(normalized);
+  if (n === "עזרה" || n === "help" || n === "פקודות") return "help";
+  if (n === "מקור" || n === "source" || n === "ערוץ") return "source";
+  if (n === "בדיקה" || n === "test" || n === "טסט") return "test";
+  if (n === "אחרון" || n === "last" || n === "אחרונה") return "last";
+  return null;
 }
 
 function formatStatusReply({ telegramOk, lastPollAt, lastSentAt, error }) {
@@ -108,9 +117,48 @@ function formatStatusReply({ telegramOk, lastPollAt, lastSentAt, error }) {
     `שליחה אחרונה: ${lastSent}`,
     `עלייה: ${uptimeMin} דק׳`,
     error ? `שגיאה: ${error}` : "הכל עובד — ממתין להודעות חדשות",
-    'פקודות: סטטוס | איראן סטטוס',
+    "פקודות: עזרה",
   ];
   return boldEveryLine(lines.join("\n"));
+}
+
+function formatHelpReply() {
+  return boldEveryLine(
+    [
+      TITLE,
+      "",
+      "פקודות בוט",
+      "סטטוס — האם הבוט תקין",
+      "עזרה — רשימת פקודות",
+      "מקור — קישור לערוץ הטלגרם",
+      "בדיקה — הודעת בדיקה לקבוצה",
+      "אחרון — ההודעה האחרונה מהערוץ",
+    ].join("\n"),
+  );
+}
+
+function formatSourceReply() {
+  return boldEveryLine(
+    [
+      TITLE,
+      "",
+      "מקור הדיווחים",
+      `ערוץ: @${CHANNEL}`,
+      "שם: מבזקי ביטחון 24/7",
+      `קישור: https://t.me/${CHANNEL}`,
+      `תצוגה: https://t.me/s/${CHANNEL}`,
+      "קבוצה: דיווחים מבצעי איראן 🇮🇷",
+    ].join("\n"),
+  );
+}
+
+function formatTestReply() {
+  const now = new Date().toLocaleString("he-IL", {
+    timeZone: "Asia/Jerusalem",
+  });
+  return boldEveryLine(
+    [TITLE, "", "בדיקה — תקין", "הבוט מחובר ומוכן", `שעה: ${now}`].join("\n"),
+  );
 }
 
 if (!TOKEN) {
@@ -124,6 +172,8 @@ let telegramOk = true;
 let lastPollAt = null;
 let lastSentAt = null;
 let lastError = "";
+/** @type {{id:string,text:string,url:string}|null} */
+let latestChannelMessage = null;
 
 function stripHtml(html) {
   return html
@@ -230,15 +280,42 @@ async function deleteNotification(receiptId) {
 
 const answeredCommands = new Set();
 
-async function replyStatus(source = "webhook") {
-  const reply = formatStatusReply({
-    telegramOk,
-    lastPollAt,
-    lastSentAt,
-    error: lastError,
-  });
-  await sendWhatsApp(reply, CHAT_ID);
-  console.log(`[tg-wa] status replied (${source})`);
+async function runCommand(command, source = "webhook") {
+  if (command === "help") {
+    await sendWhatsApp(formatHelpReply(), CHAT_ID);
+  } else if (command === "source") {
+    await sendWhatsApp(formatSourceReply(), CHAT_ID);
+  } else if (command === "test") {
+    await sendWhatsApp(formatTestReply(), CHAT_ID);
+  } else if (command === "status") {
+    await sendWhatsApp(
+      formatStatusReply({
+        telegramOk,
+        lastPollAt,
+        lastSentAt,
+        error: lastError,
+      }),
+      CHAT_ID,
+    );
+  } else if (command === "last") {
+    let latest = latestChannelMessage;
+    if (!latest) {
+      const messages = await fetchMessages();
+      latest = messages[messages.length - 1] || null;
+      if (latest) latestChannelMessage = latest;
+    }
+    if (!latest) {
+      await sendWhatsApp(
+        boldEveryLine(`${TITLE}\n\nאין הודעה אחרונה מהערוץ`),
+        CHAT_ID,
+      );
+    } else {
+      await sendWhatsApp(formatMessage(latest.text, latest.url), CHAT_ID);
+    }
+  } else {
+    return;
+  }
+  console.log(`[tg-wa] command ${command} replied (${source})`);
 }
 
 async function handleNotification(body) {
@@ -259,9 +336,11 @@ async function handleNotification(body) {
   if (chatId !== CHAT_ID) return;
 
   const text = extractIncomingText(body);
-  if (!isStatusCommand(text)) return;
+  const command = parseCommand(text);
+  if (!command) return;
 
-  const idMessage = body?.idMessage || `${chatId}:${text}:${body?.timestamp || ""}`;
+  const idMessage =
+    body?.idMessage || `${chatId}:${text}:${body?.timestamp || ""}`;
   if (answeredCommands.has(idMessage)) return;
   answeredCommands.add(idMessage);
 
@@ -269,8 +348,8 @@ async function handleNotification(body) {
     body?.senderData?.senderName ||
     body?.senderData?.sender ||
     (type === "outgoingMessageReceived" ? "linked-phone" : "?");
-  console.log(`[tg-wa] status command (${type}) from ${who}: ${text}`);
-  await replyStatus(type);
+  console.log(`[tg-wa] command ${command} (${type}) from ${who}: ${text}`);
+  await runCommand(command, type);
 }
 
 /** Fallback: linked phone commands often appear only in lastOutgoingMessages. */
@@ -286,7 +365,8 @@ async function pollOutgoingCommands() {
   for (const m of data) {
     if (m.chatId !== CHAT_ID) continue;
     const text = m.textMessage || m.extendedTextMessage || "";
-    if (!isStatusCommand(text)) continue;
+    const command = parseCommand(text);
+    if (!command) continue;
     // Skip our own API replies (they contain the title header).
     if (String(text).includes(TITLE)) continue;
     const ts = Number(m.timestamp || 0);
@@ -295,8 +375,8 @@ async function pollOutgoingCommands() {
     const id = m.idMessage || `${m.chatId}:${text}:${m.timestamp}`;
     if (answeredCommands.has(id)) continue;
     answeredCommands.add(id);
-    console.log(`[tg-wa] status via lastOutgoing: ${text}`);
-    await replyStatus("lastOutgoing");
+    console.log(`[tg-wa] command ${command} via lastOutgoing: ${text}`);
+    await runCommand(command, "lastOutgoing");
   }
 }
 
@@ -339,6 +419,9 @@ async function tick() {
     telegramOk = true;
     lastPollAt = new Date().toISOString();
     lastError = "";
+    if (messages.length) {
+      latestChannelMessage = messages[messages.length - 1];
+    }
 
     if (!bootstrapped) {
       for (const m of messages) seen.add(m.id);
@@ -381,7 +464,9 @@ async function commandLoop() {
 console.log(
   `[tg-wa] polling @${CHANNEL} every ${INTERVAL_MS / 1000}s → ${CHAT_ID}`,
 );
-console.log("[tg-wa] group commands: סטטוס | איראן סטטוס | בוט");
+console.log(
+  "[tg-wa] group commands: סטטוס | עזרה | מקור | בדיקה | אחרון",
+);
 
 await ensureHttpReceiveMode();
 await tick();

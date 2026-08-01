@@ -1,9 +1,12 @@
-import { isStatusCommand, formatStatusReply } from "@/lib/tg-wa-bridge/commands";
+import {
+  handleBridgeCommand,
+  parseBridgeCommand,
+} from "@/lib/tg-wa-bridge/commands";
 import { bridgeWhatsAppChatId } from "@/lib/tg-wa-bridge/channels";
-import { sendWhatsAppText } from "@/lib/tg-wa-bridge/whatsapp";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 type GreenIncoming = {
   typeWebhook?: string;
@@ -25,8 +28,8 @@ function extractText(body: GreenIncoming): string {
 }
 
 /**
- * Optional Green API webhook endpoint for group commands (סטטוס).
- * Prefer cloud-poller receiveNotification while the poller is running.
+ * Optional Green API webhook endpoint for group commands.
+ * Prefer cloud-poller receiveNotification / lastOutgoing while the poller runs.
  */
 export async function POST(request: Request) {
   let body: GreenIncoming;
@@ -51,18 +54,15 @@ export async function POST(request: Request) {
   }
 
   const text = extractText(body);
-  if (!isStatusCommand(text)) {
+  const command = parseBridgeCommand(text);
+  if (!command) {
     return Response.json({ ok: true, ignored: "not a command" });
   }
 
-  const reply = formatStatusReply({
-    whatsappOk: true,
-    telegramOk: true,
-  });
-  const result = await sendWhatsAppText(reply, chatId);
-  return Response.json({
-    ok: result.ok,
-    command: "status",
-    error: result.error,
-  });
+  const result = await handleBridgeCommand(
+    command,
+    { whatsappOk: true, telegramOk: true },
+    chatId,
+  );
+  return Response.json(result, { status: result.ok ? 200 : 502 });
 }
