@@ -264,14 +264,28 @@ function stripHtml(html) {
     .trim();
 }
 
+async function fetchWithTimeout(url, options = {}, timeoutMs = 20_000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function fetchMessages() {
   const url = `https://t.me/s/${CHANNEL}?t=${Date.now()}`;
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+  const res = await fetchWithTimeout(
+    url,
+    {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+      },
     },
-  });
+    20_000,
+  );
   if (!res.ok) throw new Error(`Telegram HTTP ${res.status}`);
   const html = await res.text();
   const blocks = html.split('class="tgme_widget_message_wrap');
@@ -296,13 +310,14 @@ async function sendWhatsApp(text, chatId = CHAT_ID, attempts = 3) {
   let lastError = "";
   for (let i = 1; i <= attempts; i += 1) {
     try {
-      const res = await fetch(
+      const res = await fetchWithTimeout(
         `https://api.green-api.com/waInstance${INSTANCE}/sendMessage/${TOKEN}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ chatId, message: text }),
         },
+        25_000,
       );
       if (!res.ok) {
         const body = await res.text();
@@ -536,6 +551,13 @@ async function tick() {
     return;
   }
   tickInFlight = true;
+  // Hard safety: never leave tick stuck forever if something hangs.
+  const stuckTimer = setTimeout(() => {
+    if (tickInFlight) {
+      console.error("[tg-wa] tick watchdog — forcing unlock/exit");
+      process.exit(1);
+    }
+  }, 90_000);
   try {
     const messages = await fetchMessages();
     telegramOk = true;
@@ -580,6 +602,7 @@ async function tick() {
       process.exit(1);
     }
   } finally {
+    clearTimeout(stuckTimer);
     tickInFlight = false;
   }
 }
