@@ -41,7 +41,7 @@ const CHANNEL = (
   .split(":")[0]
   .replace(/^@/, "")
   .toLowerCase();
-const TITLE = "דיווחים חמל איראן 🇮🇷";
+const TITLE = "איראן בזמן אמת – חדשות, דיווחים🇮🇷";
 const INTERVAL_MS = Number(process.env.TG_WA_POLL_MS || 60000);
 
 function sanitizeForBold(text) {

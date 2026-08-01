@@ -1,6 +1,6 @@
 import type { BridgeChannelMessage } from "./types";
 
-export const BRIDGE_MESSAGE_TITLE = "דיווחים חמל איראן 🇮🇷";
+export const BRIDGE_MESSAGE_TITLE = "איראן בזמן אמת – חדשות, דיווחים🇮🇷";
 
 function truncate(text: string, max = 3500): string {
   if (text.length <= max) return text;
