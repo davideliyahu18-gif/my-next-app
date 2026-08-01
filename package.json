@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "tg-wa:start": "node scripts/tg-wa-bridge/cloud-poller.mjs",
+    "tg-wa:supervise": "node scripts/tg-wa-bridge/supervise.mjs"
   },
   "dependencies": {
     "@upstash/redis": "^1.38.0",

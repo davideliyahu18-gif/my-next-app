@@ -40,3 +40,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Telegram → WhatsApp bridge runtime state
+/scripts/tg-wa-bridge/.data/
