@@ -1,6 +1,12 @@
 # בוט כדורגל — כל הליגות (WhatsApp)
 
-בוט WhatsApp (Baileys) שמביא התראות כדורגל ממקור **FIFA** ושולח לקבוצה.
+בוט WhatsApp בקוד פתוח (**Baileys**) עם מקורות **חינמיים** — **בלי 365Scores ובלי API בתשלום**.
+
+| שכבה | מקור | עלות |
+|------|------|------|
+| WhatsApp | [Baileys](https://github.com/WhiskeySockets/Baileys) | חינם / קוד פתוח |
+| ליגות מקומיות | ESPN public scoreboard | חינם |
+| מונדיאל וכו׳ | FIFA API v3 | חינם |
 
 ## מה הוא עושה
 

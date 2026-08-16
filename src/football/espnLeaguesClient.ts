@@ -1,19 +1,22 @@
 /**
  * ESPN soccer scoreboard client for domestic leagues.
- * Used for Premier League, La Liga, Serie A, Ligat Ha'Al.
+ * Used for Premier League, La Liga, Serie A, Ligat Ha'Al, Bundesliga.
  *
- * GET https://site.api.espn.com/apis/site/v2/sports/soccer/{leagueId}/scoreboard
+ * Free public endpoints (no API key / no 365Scores):
+ * GET https://site.web.api.espn.com/apis/site/v2/sports/soccer/{leagueId}/scoreboard
  * Optional: ?dates=YYYYMMDD
+ *
+ * Prefer site.web.api — site.api is often blocked (403) from cloud/server IPs.
  */
 
 export const ESPN_SOCCER_BASE =
   process.env.FOOTBALL_ESPN_BASE_URL?.replace(/\/$/, "") ||
-  "https://site.api.espn.com/apis/site/v2/sports/soccer";
+  "https://site.web.api.espn.com/apis/site/v2/sports/soccer";
 
 /** Standings live under /apis/v2 (site/v2 returns empty {}). */
 export const ESPN_SOCCER_STANDINGS_BASE =
   process.env.FOOTBALL_ESPN_STANDINGS_BASE_URL?.replace(/\/$/, "") ||
-  "https://site.api.espn.com/apis/v2/sports/soccer";
+  "https://site.web.api.espn.com/apis/v2/sports/soccer";
 
 export type EspnJson = Record<string, unknown>;
 
