@@ -7,13 +7,17 @@ import {
   ROCKETS_WHATSAPP_GROUP_NAME,
   ROCKETS_WHATSAPP_INVITE_LINK,
 } from "@/lib/constants";
+import { formatShelterSeconds } from "@/lib/rockets/alert-areas";
 import { createDemoTracks, LAUNCH_SITES, STATUS_LABEL } from "@/lib/rockets/data";
 import { formatClock, statusFromProgress } from "@/lib/rockets/geo";
 import type {
+  ActiveAlertArea,
   RocketFeedItem,
   RocketsSnapshot,
   RocketTrack,
 } from "@/lib/rockets/types";
+import { useSearchParams } from "next/navigation";
+import HamalSiteMenu from "@/components/rockets/HamalSiteMenu";
 
 const GeoMap = dynamic(() => import("@/components/rockets/GeoMap"), {
   ssr: false,
@@ -131,8 +135,13 @@ function buildRegions(tracks: RocketTrack[], feed: RocketFeedItem[]): RegionRow[
 }
 
 export default function RocketTrackingMap() {
+  const searchParams = useSearchParams();
   const [tracks, setTracks] = useState<RocketTrack[]>([]);
   const [feed, setFeed] = useState<RocketFeedItem[]>([]);
+  const [activeAreas, setActiveAreas] = useState<ActiveAlertArea[]>([]);
+  const [focusAreaId, setFocusAreaId] = useState<string | null>(() =>
+    searchParams.get("area"),
+  );
   const [mode, setMode] = useState<RocketsSnapshot["mode"]>("live");
   const [errors, setErrors] = useState<string[]>([]);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
@@ -147,7 +156,11 @@ export default function RocketTrackingMap() {
   const lastTs = useRef<number | null>(null);
   const selectedTrackIdRef = useRef<string | null>(null);
   const seenIdsRef = useRef<Set<string>>(new Set());
-  selectedTrackIdRef.current = selectedTrackId;
+  const mapSectionRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    selectedTrackIdRef.current = selectedTrackId;
+  }, [selectedTrackId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -168,6 +181,15 @@ export default function RocketTrackingMap() {
     if (forceDemo) {
       const demo = createDemoTracks();
       setTracks(demo);
+      setActiveAreas(
+        demo.flatMap((t) => t.alertAreas ?? []).reduce<ActiveAlertArea[]>(
+          (acc, area) => {
+            if (!acc.some((a) => a.id === area.id)) acc.push(area);
+            return acc;
+          },
+          [],
+        ),
+      );
       setMode("demo");
       setSelectedTrackId(demo[0]?.id ?? null);
       setConnected(false);
@@ -204,6 +226,7 @@ export default function RocketTrackingMap() {
 
         setTracks(snapshot.tracks);
         setFeed(incoming);
+        setActiveAreas(snapshot.activeAreas ?? []);
         setMode(snapshot.mode);
         setErrors(snapshot.errors);
         setUpdatedAt(snapshot.timestamp);
@@ -264,16 +287,20 @@ export default function RocketTrackingMap() {
   const launchFeed = feed.filter((f) => f.related);
   const regions = useMemo(() => buildRegions(tracks, feed), [tracks, feed]);
   const waiting = activeTracks.length === 0 && launchFeed.length === 0;
+  const selectedTrack = tracks.find((t) => t.id === selectedTrackId);
+  const displayAreas =
+    activeAreas.length > 0
+      ? activeAreas
+      : (selectedTrack?.alertAreas ?? []);
 
   return (
     <div dir="rtl" className="min-h-screen bg-[#eef1f5] text-slate-900">
-      {/* Dash header */}
-      <header className="bg-[#2f6fed] text-white shadow-sm">
+      <header className="sticky top-0 z-40 bg-[#2f6fed] text-white shadow-sm">
         <div className="mx-auto flex max-w-lg items-center justify-between px-4 py-3">
           <Link href="/" className="text-xs font-medium text-white/80">
             ← בית
           </Link>
-          <h1 className="text-base font-black tracking-tight">Dash - דאש</h1>
+          <h1 className="text-base font-black tracking-tight">חמ״ל לייב</h1>
           <button
             type="button"
             onClick={() => setForceDemo((v) => !v)}
@@ -285,6 +312,23 @@ export default function RocketTrackingMap() {
       </header>
 
       <main className="mx-auto flex max-w-lg flex-col gap-3 px-3 py-3 pb-10">
+        <HamalSiteMenu
+          activeAreas={displayAreas}
+          relatedCount={stats?.related ?? launchFeed.length}
+          trackCount={stats?.tracks ?? tracks.length}
+          updatedAt={updatedAt}
+          focusAreaId={focusAreaId}
+          onFocusArea={setFocusAreaId}
+          onScrollToMap={() => {
+            mapSectionRef.current?.scrollIntoView({
+              behavior: "smooth",
+              block: "start",
+            });
+          }}
+          autoAlerts={autoAlerts}
+          onAutoAlertsChange={setAutoAlerts}
+        />
+
         {/* Monitoring strip — every message is tracked */}
         <section className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 shadow-sm">
           <div className="flex items-center justify-between gap-2">
@@ -304,10 +348,14 @@ export default function RocketTrackingMap() {
         </section>
 
         {/* Live Tracking */}
-        <section className="overflow-hidden rounded-3xl border border-white bg-white shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
+        <section
+          ref={mapSectionRef}
+          id="hamal-map"
+          className="overflow-hidden rounded-3xl border border-white bg-white shadow-[0_8px_24px_rgba(15,23,42,0.06)]"
+        >
           <div className="flex items-center justify-between px-4 pb-2 pt-3">
             <div className="flex items-center gap-2">
-              <h2 className="text-sm font-bold text-slate-800">Live Tracking</h2>
+              <h2 className="text-sm font-bold text-slate-800">מפה חיה</h2>
               <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-white">
                 Live
               </span>
@@ -322,8 +370,97 @@ export default function RocketTrackingMap() {
               sites={LAUNCH_SITES}
               selectedTrackId={selectedTrackId}
               onSelectTrack={setSelectedTrackId}
+              activeAreas={displayAreas}
+              focusAreaId={focusAreaId}
             />
           </div>
+        </section>
+
+        {/* Alert areas + shelter time */}
+        <section className="rounded-3xl border border-white bg-white p-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
+          <div className="mb-2 flex items-center justify-between gap-2 px-1">
+            <div className="flex items-center gap-2">
+              <span className="text-base">⏱️</span>
+              <h2 className="text-sm font-bold text-slate-800">
+                אזורים · זמן למרחב מוגן
+              </h2>
+            </div>
+            {focusAreaId ? (
+              <button
+                type="button"
+                onClick={() => setFocusAreaId(null)}
+                className="text-[11px] font-semibold text-blue-600"
+              >
+                איפוס מפה
+              </button>
+            ) : null}
+          </div>
+
+          {displayAreas.length === 0 ? (
+            <div className="rounded-2xl bg-slate-50 px-4 py-5 text-center">
+              <p className="text-sm font-bold text-slate-700">
+                אין אזור פעיל כרגע
+              </p>
+              <p className="mt-1 text-[11px] text-slate-500">
+                כשיגיע דיווח שיגור — יוצגו כאן אזור + זמן כניסה למרחב מוגן
+              </p>
+            </div>
+          ) : (
+            <ul className="space-y-2">
+              {displayAreas.map((area) => {
+                const focused = focusAreaId === area.id;
+                return (
+                  <li key={area.id}>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setFocusAreaId((id) =>
+                          id === area.id ? null : area.id,
+                        )
+                      }
+                      className={`flex w-full items-center justify-between gap-3 rounded-2xl px-3 py-3 text-right transition ${
+                        focused
+                          ? "bg-red-50 ring-1 ring-red-300"
+                          : "bg-orange-50/70 hover:bg-orange-50"
+                      }`}
+                    >
+                      <div>
+                        <p className="text-sm font-black text-slate-900">
+                          {area.labelHe}
+                        </p>
+                        <p className="text-[11px] text-slate-500">
+                          {area.regionHe}
+                          {area.hitCount > 1
+                            ? ` · ${area.hitCount} דיווחים`
+                            : ""}
+                        </p>
+                      </div>
+                      <div className="text-left">
+                        <p
+                          className={`font-mono text-xl font-black tabular-nums ${
+                            area.shelterSeconds <= 30
+                              ? "text-red-600"
+                              : area.shelterSeconds <= 60
+                                ? "text-orange-600"
+                                : "text-slate-800"
+                          }`}
+                        >
+                          {area.shelterSeconds}
+                          <span className="mr-0.5 text-xs font-bold">שנ׳</span>
+                        </p>
+                        <p className="text-[10px] font-medium text-slate-500">
+                          {formatShelterSeconds(area.shelterSeconds)}
+                        </p>
+                      </div>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <p className="mt-2 px-1 text-[10px] leading-relaxed text-slate-400">
+            הערכת ייחוס פומבית ל־OSINT — לא מחליפה התראת פיקוד העורף הרשמית.
+          </p>
         </section>
 
         {/* Launches status */}
@@ -331,7 +468,7 @@ export default function RocketTrackingMap() {
           <div className="mb-2 flex items-center gap-2 px-1">
             <span className="text-base">🛡️</span>
             <h2 className="text-sm font-bold text-slate-800">
-              חמ״ל התרעות איראן 🛡️
+              חמ״ל התרעות · טילים / כטב״מ
             </h2>
           </div>
 
@@ -371,19 +508,23 @@ export default function RocketTrackingMap() {
             </p>
           </div>
 
-          {selectedTrackId && tracks.find((t) => t.id === selectedTrackId) ? (
+          {selectedTrack ? (
             <div className="mt-3 rounded-2xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-600">
               <div className="flex justify-between gap-2">
                 <span className="font-bold text-slate-800">
-                  {tracks.find((t) => t.id === selectedTrackId)?.labelHe}
+                  {selectedTrack.labelHe}
                 </span>
-                <span>
-                  {
-                    STATUS_LABEL[
-                      tracks.find((t) => t.id === selectedTrackId)!.status
-                    ]
-                  }
-                </span>
+                <span>{STATUS_LABEL[selectedTrack.status]}</span>
+              </div>
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+                <span>יעד: {selectedTrack.targetLabelHe}</span>
+                {selectedTrack.shelterSeconds != null ? (
+                  <span className="font-bold text-orange-700">
+                    מרחב מוגן:{" "}
+                    {formatShelterSeconds(selectedTrack.shelterSeconds)}
+                  </span>
+                ) : null}
+                <span>{selectedTrack.speedHintHe}</span>
               </div>
             </div>
           ) : null}
@@ -463,12 +604,12 @@ export default function RocketTrackingMap() {
                 </p>
                 <p className="mt-0.5 text-[11px] text-slate-600">
                   {telegramConfigured
-                    ? "מחובר — התראות שיגור נשלחות אוטומטית"
+                    ? "מחובר — תפריט בוט + אזור + זמן למרחב מוגן + מפה"
                     : "עדיין לא מחובר — צריך בוט + צ׳אט"}
                 </p>
                 <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
-                  1) פתח BotFather → /newbot · 2) הוסף את הבוט לקבוצה/ערוץ ·
-                  3) שלח לי TOKEN + chat_id
+                  1) BotFather → /newbot · 2) הוסף לקבוצה · 3) הגדר TOKEN +
+                  chat_id · 4) POST /api/rockets/telegram-setup · 5) /start בבוט
                 </p>
               </div>
               <a

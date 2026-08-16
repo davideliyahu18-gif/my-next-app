@@ -16,6 +16,28 @@ export type LaunchSite = {
   noteHe: string;
 };
 
+/** Israeli alert area with illustrative shelter-entry time. */
+export type AlertArea = {
+  id: string;
+  labelHe: string;
+  regionHe: string;
+  aliases: string[];
+  position: LatLng;
+  /** Seconds to enter protected space (זמן למרחב מוגן) — public reference. */
+  shelterSeconds: number;
+};
+
+export type ActiveAlertArea = {
+  id: string;
+  labelHe: string;
+  regionHe: string;
+  position: LatLng;
+  shelterSeconds: number;
+  /** How many recent launch tracks mention this area. */
+  hitCount: number;
+  lastSeenAt: string;
+};
+
 export type RocketTrack = {
   id: string;
   labelHe: string;
@@ -32,6 +54,10 @@ export type RocketTrack = {
   speedHintHe: string;
   sourceUrl?: string;
   rawText?: string;
+  /** Matched Israeli alert areas from the report text. */
+  alertAreas?: ActiveAlertArea[];
+  /** Shortest זמן למרחב מוגן among matched areas (seconds). */
+  shelterSeconds?: number;
 };
 
 export type RocketFeedItem = {
@@ -49,6 +75,8 @@ export type RocketsSnapshot = {
   mode: "live" | "demo";
   tracks: RocketTrack[];
   feed: RocketFeedItem[];
+  /** Aggregated Israeli areas currently under launch-related reports. */
+  activeAreas?: ActiveAlertArea[];
   sources: { username: string; label: string }[];
   errors: string[];
   timestamp: string;

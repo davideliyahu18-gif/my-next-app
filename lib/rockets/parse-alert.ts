@@ -1,6 +1,15 @@
+import {
+  resolveAlertAreas,
+  targetFromAreas,
+} from "./alert-areas";
 import { matchPlaces } from "./locations";
 import type { TelegramChannelMessage } from "./telegram";
-import type { LatLng, RocketTrack, RocketTrackStatus } from "./types";
+import type {
+  ActiveAlertArea,
+  LatLng,
+  RocketTrack,
+  RocketTrackStatus,
+} from "./types";
 import { statusFromProgress } from "./geo";
 
 function isLaunchRelatedMessage(text: string): boolean {
@@ -54,24 +63,63 @@ function parseEtaSeconds(text: string, now: Date): number | null {
   return Math.round((asUtcGuess - now.getTime()) / 1000);
 }
 
+function areasForTrack(
+  text: string,
+  launchedAt: string,
+): ActiveAlertArea[] {
+  return resolveAlertAreas(text).map((area) => ({
+    id: area.id,
+    labelHe: area.labelHe,
+    regionHe: area.regionHe,
+    position: area.position,
+    shelterSeconds: area.shelterSeconds,
+    hitCount: 1,
+    lastSeenAt: launchedAt,
+  }));
+}
+
 function pickTarget(text: string): { position: LatLng; labelHe: string } {
+  const fromAreas = targetFromAreas(resolveAlertAreas(text));
+  if (fromAreas && fromAreas.labelHe !== "ישראל (כללי)") {
+    return fromAreas;
+  }
+
+  const preferredIds = [
+    "kuwait",
+    "bahrain",
+    "aqaba",
+    "jordan",
+    "eilat",
+    "gaza-envelope",
+    "ashdod",
+    "ashkelon",
+    "beer-sheva",
+    "jerusalem",
+    "haifa",
+    "tel-aviv",
+    "south",
+    "north",
+    "center",
+  ];
   const targets = matchPlaces(text, "target").filter(
     (p) => p.id !== "iran-general",
   );
-  // Prefer more specific destinations over generic Israel when both match.
   const preferred =
-    targets.find((p) =>
-      ["kuwait", "bahrain", "aqaba", "jordan", "haifa", "tel-aviv", "south", "north", "center"].includes(
-        p.id,
-      ),
-    ) ?? targets[0];
+    preferredIds
+      .map((id) => targets.find((p) => p.id === id))
+      .find(Boolean) ?? targets[0];
   if (preferred) {
     return { position: preferred.position, labelHe: preferred.labelHe };
   }
   if (/ירדן|עקבה/.test(text)) {
     return { position: { lat: 29.53, lng: 35.0 }, labelHe: "עקבה / ירדן" };
   }
-  return { position: { lat: 32.0853, lng: 34.7818 }, labelHe: "ישראל (כללי)" };
+  return (
+    fromAreas ?? {
+      position: { lat: 32.0853, lng: 34.7818 },
+      labelHe: "ישראל (כללי)",
+    }
+  );
 }
 
 function pickOrigin(text: string): { position: LatLng; labelHe: string } | null {
@@ -169,6 +217,12 @@ export function messageToTrack(
     (/איראן/.test(message.text) ? "איראן" : null) ??
     (/תימן/.test(message.text) ? "תימן" : "לא צוין");
 
+  const alertAreas = areasForTrack(message.text, message.datetime);
+  const shelterSeconds =
+    alertAreas.length > 0
+      ? Math.min(...alertAreas.map((a) => a.shelterSeconds))
+      : null;
+
   return {
     id: `tg-${message.id}`,
     labelHe: `${actor} · ${origin.labelHe}`,
@@ -184,7 +238,32 @@ export function messageToTrack(
     speedHintHe: weaponHint(message.text),
     sourceUrl: message.url,
     rawText: message.text.slice(0, 500),
+    alertAreas,
+    shelterSeconds: shelterSeconds ?? undefined,
   };
+}
+
+export function aggregateActiveAreas(
+  tracks: RocketTrack[],
+): ActiveAlertArea[] {
+  const byId = new Map<string, ActiveAlertArea>();
+  for (const track of tracks) {
+    for (const area of track.alertAreas ?? []) {
+      const existing = byId.get(area.id);
+      if (!existing) {
+        byId.set(area.id, { ...area });
+        continue;
+      }
+      existing.hitCount += 1;
+      if (Date.parse(area.lastSeenAt) > Date.parse(existing.lastSeenAt)) {
+        existing.lastSeenAt = area.lastSeenAt;
+      }
+    }
+  }
+  return [...byId.values()].sort((a, b) => {
+    if (b.hitCount !== a.hitCount) return b.hitCount - a.hitCount;
+    return Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt);
+  });
 }
 
 export function messagesToTracks(
