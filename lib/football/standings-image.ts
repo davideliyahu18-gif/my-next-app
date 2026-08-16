@@ -129,7 +129,7 @@ export async function renderStandingsPng(
 
   ${rowSvg}
 
-  <text x="${width - padX}" y="${height - 20}" text-anchor="end" class="footer" fill="#64748b" font-size="16">דוד – עדכוני כדורגל ⚽</text>
+  <text x="${width - padX}" y="${height - 20}" text-anchor="end" class="footer" fill="#64748b" font-size="16">דוד – עדכוני מונדיאל ⚽</text>
 </svg>`;
 
   return sharp(Buffer.from(svg)).png({ quality: 90 }).toBuffer();

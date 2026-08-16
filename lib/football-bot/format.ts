@@ -4,7 +4,7 @@ import type { FootballBotMatchSnapshot } from "./types";
 
 const JERUSALEM = "Asia/Jerusalem";
 
-export const FOOTBALL_BOT_SIGNATURE = "*📲 דוד – עדכוני כדורגל ⚽*";
+export const FOOTBALL_BOT_SIGNATURE = "*📲 דוד – עדכוני מונדיאל ⚽*";
 
 export function formatKickoffHe(iso: string): string {
   const date = new Date(iso);

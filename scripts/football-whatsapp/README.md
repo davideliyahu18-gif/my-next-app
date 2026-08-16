@@ -22,7 +22,7 @@ FOOTBALL_BOT_SECRET=generate-a-long-random-secret
 FEED_API_SECRET=generate-a-long-random-secret
 
 # שם הקבוצה (חלקי מספיק) — או chat id מלא אחרי החיבור
-FOOTBALL_WHATSAPP_GROUP_NAME=דוד | עדכוני כדורגל
+FOOTBALL_WHATSAPP_GROUP_NAME=דוד | עדכוני מונדיאל
 # FOOTBALL_WHATSAPP_CHAT_ID=120363...@g.us
 
 # אופציונלי — מקור FIFA שתביא:
@@ -55,7 +55,7 @@ npm run football-bot:start
 
 ## 3) שליחה לקבוצה
 
-1. צרו / היכנסו לקבוצה (למשל `דוד | עדכוני כדורגל`)
+1. צרו / היכנסו לקבוצה (למשל `🏆 דוד | עדכוני מונדיאל LIVE ⚽️🔥`)
 2. הוסיפו את **המספר המקושר** לקבוצה
 3. הבוט שולח הודעת «בוט כדורגל מחובר»
 4. כתבו בקבוצה `עזרה` או `תוצאה`
@@ -63,7 +63,8 @@ npm run football-bot:start
 ## מקורות משחקים
 
 ### ליגות מקומיות (ברירת מחדל)
-ESPN scoreboard — `src/football/espnLeaguesClient.ts`
+ESPN scoreboard חינמי — `src/football/espnLeaguesClient.ts`  
+(`site.web.api.espn.com` — בלי מפתח, בלי 365Scores)
 
 | ליגה | מזהה |
 |------|------|

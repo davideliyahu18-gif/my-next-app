@@ -98,7 +98,7 @@ function envConfig() {
       "",
     groupName:
       process.env.FOOTBALL_WHATSAPP_GROUP_NAME ||
-      "דוד | עדכוני כדורגל",
+      "דוד | עדכוני מונדיאל",
     pollCron: process.env.FOOTBALL_BOT_POLL_CRON ?? "*/1 * * * *",
     morningCron: process.env.FOOTBALL_BOT_MORNING_CRON ?? "0 8 * * *",
     morningTimezone:
@@ -512,7 +512,7 @@ function looksLikeRemoteCommand(raw) {
   const t = raw.trim().toLowerCase();
   if (!t) return false;
   // Ignore our own bot replies (echo / fromMe loops).
-  if (t.startsWith("✅") || t.includes("דוד – עדכוני כדורגל")) return false;
+  if (t.startsWith("✅") || t.includes("דוד – עדכוני מונדיאל")) return false;
   if (/^fb:(schedule|lineup|standings):/i.test(t)) return true;
 
   // Short tokens: exact match OR "token …" only — NEVER includes()
@@ -871,7 +871,7 @@ async function sendLeagueInteractive(chatId, interactive) {
         text: interactive.body || "בחרו ליגה 👇",
       }),
       footer: proto.Message.InteractiveMessage.Footer.create({
-        text: interactive.footer || "דוד – עדכוני כדורגל ⚽",
+        text: interactive.footer || "דוד – עדכוני מונדיאל ⚽",
       }),
       header: proto.Message.InteractiveMessage.Header.create({
         title: interactive.title || "ליגות",
@@ -981,7 +981,7 @@ async function handleIncomingMessage(msg) {
 
     const fromMe = Boolean(msg.key.fromMe);
     // Never treat our own bot replies as commands (prevents חי loops).
-    if (fromMe && (body.startsWith("✅") || body.includes("דוד – עדכוני כדורגל"))) {
+    if (fromMe && (body.startsWith("✅") || body.includes("דוד – עדכוני מונדיאל"))) {
       return;
     }
     if (fromMe) {

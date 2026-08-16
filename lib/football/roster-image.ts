@@ -144,7 +144,7 @@ export async function renderRosterPng(
 
   ${bodySvg}
 
-  <text x="${width - padX}" y="${height - 18}" text-anchor="end" class="footer" fill="#64748b" font-size="15">דוד – עדכוני כדורגל ⚽</text>
+  <text x="${width - padX}" y="${height - 18}" text-anchor="end" class="footer" fill="#64748b" font-size="15">דוד – עדכוני מונדיאל ⚽</text>
 </svg>`;
 
   return sharp(Buffer.from(svg)).png({ quality: 90 }).toBuffer();
