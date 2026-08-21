@@ -73,6 +73,21 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const HEARTBEAT_FILE = path.join(DATA_DIR, "heartbeat.json");
+const STALE_HEARTBEAT_MS = Number(process.env.TG_WA_STALE_MS || 180_000);
+
+function heartbeatAgeMs() {
+  try {
+    if (!existsSync(HEARTBEAT_FILE)) return Infinity;
+    const raw = JSON.parse(readFileSync(HEARTBEAT_FILE, "utf8"));
+    const at = Date.parse(raw?.at || "");
+    if (!Number.isFinite(at)) return Infinity;
+    return Date.now() - at;
+  } catch {
+    return Infinity;
+  }
+}
+
 function startChild() {
   restartCount += 1;
   const startedAt = Date.now();
@@ -104,6 +119,28 @@ function startChild() {
   });
 }
 
+function watchStaleHeartbeat() {
+  setInterval(() => {
+    if (stopping || !child) return;
+    // Give brand-new child time to write first heartbeat.
+    const age = heartbeatAgeMs();
+    if (age > STALE_HEARTBEAT_MS) {
+      log(
+        `stale heartbeat ${Math.round(age / 1000)}s — killing hung poller for restart`,
+      );
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }, 30_000).unref();
+}
+
 function shutdown(signal) {
   if (stopping) return;
   stopping = true;
@@ -126,3 +163,4 @@ process.on("exit", releaseLock);
 
 log("supervisor online");
 startChild();
+watchStaleHeartbeat();
