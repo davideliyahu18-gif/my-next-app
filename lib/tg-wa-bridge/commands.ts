@@ -1,5 +1,6 @@
 import {
   bridgeWhatsAppChatId,
+  bridgeWhatsAppChatIds,
   bridgeWhatsAppGroupName,
   getBridgeChannels,
 } from "./channels";
@@ -13,6 +14,7 @@ import {
   bridgeGreenApiInstance,
   isGreenApiConfigured,
   sendWhatsAppText,
+  sendWhatsAppTextToAll,
 } from "./whatsapp";
 import type { BridgeChannelMessage } from "./types";
 
@@ -168,6 +170,7 @@ export function formatStatusReply(runtime: BridgeRuntimeStatus = {}): string {
     `טלגרם: ${telegram} סורק`,
     `ערוץ: ${channelLine}`,
     `קבוצה: ${bridgeWhatsAppGroupName()}`,
+    `גם חמ״ל: ${bridgeWhatsAppChatIds().length > 1 ? "כן" : "לא"}`,
     `מופע: ${bridgeGreenApiInstance()}`,
     `סריקה אחרונה: ${lastPoll}`,
     `שליחה אחרונה: ${lastSent}`,
@@ -199,29 +202,36 @@ export async function handleBridgeCommand(
   runtime: BridgeRuntimeStatus = {},
   chatId = bridgeWhatsAppChatId(),
 ): Promise<{ ok: boolean; command: string; error?: string }> {
+  const send = async (text: string): Promise<{ ok: boolean; error?: string }> => {
+    if (bridgeWhatsAppChatIds().length > 1) {
+      const result = await sendWhatsAppTextToAll(text);
+      if (result.ok) return { ok: true };
+      return {
+        ok: false,
+        error: result.results
+          .filter((r) => !r.ok)
+          .map((r) => r.error || r.chatId)
+          .join(" | "),
+      };
+    }
+    return sendWhatsAppText(text, chatId);
+  };
+
   if (command === "help") {
-    return {
-      ok: (await sendWhatsAppText(formatHelpReply(), chatId)).ok,
-      command,
-    };
+    const result = await send(formatHelpReply());
+    return { ok: result.ok, command, error: result.error };
   }
   if (command === "source") {
-    return {
-      ok: (await sendWhatsAppText(formatSourceReply(), chatId)).ok,
-      command,
-    };
+    const result = await send(formatSourceReply());
+    return { ok: result.ok, command, error: result.error };
   }
   if (command === "test") {
-    return {
-      ok: (await sendWhatsAppText(formatTestReply(), chatId)).ok,
-      command,
-    };
+    const result = await send(formatTestReply());
+    return { ok: result.ok, command, error: result.error };
   }
   if (command === "status") {
-    return {
-      ok: (await sendWhatsAppText(formatStatusReply(runtime), chatId)).ok,
-      command,
-    };
+    const result = await send(formatStatusReply(runtime));
+    return { ok: result.ok, command, error: result.error };
   }
   if (command === "last") {
     try {
@@ -230,16 +240,12 @@ export async function handleBridgeCommand(
         const empty = boldEveryLine(
           `${BRIDGE_MESSAGE_TITLE}\n\nאין הודעה אחרונה מהערוץ`,
         );
-        return {
-          ok: (await sendWhatsAppText(empty, chatId)).ok,
-          command,
-        };
+        const result = await send(empty);
+        return { ok: result.ok, command, error: result.error };
       }
       const text = formatBridgeWhatsAppMessage(latest);
-      return {
-        ok: (await sendWhatsAppText(text, chatId)).ok,
-        command,
-      };
+      const result = await send(text);
+      return { ok: result.ok, command, error: result.error };
     } catch (error) {
       return {
         ok: false,

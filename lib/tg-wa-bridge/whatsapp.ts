@@ -1,4 +1,4 @@
-import { bridgeWhatsAppChatId } from "./channels";
+import { bridgeWhatsAppChatId, bridgeWhatsAppChatIds } from "./channels";
 import { formatBridgeWhatsAppMessage } from "./format";
 import type { BridgeChannelMessage } from "./types";
 
@@ -27,7 +27,9 @@ export function bridgeGreenApiInstance(): string {
 
 export function isGreenApiConfigured(): boolean {
   return Boolean(
-    greenApiInstance() && greenApiToken() && bridgeWhatsAppChatId(),
+    greenApiInstance() &&
+      greenApiToken() &&
+      (bridgeWhatsAppChatIds().length > 0 || bridgeWhatsAppChatId()),
   );
 }
 
@@ -69,6 +71,24 @@ export async function sendWhatsAppText(
   return greenApiCall("sendMessage", { chatId, message: text });
 }
 
+export async function sendWhatsAppTextToAll(
+  text: string,
+  chatIds = bridgeWhatsAppChatIds(),
+): Promise<{
+  ok: boolean;
+  results: { chatId: string; ok: boolean; error?: string }[];
+}> {
+  const targets = chatIds.length
+    ? chatIds
+    : [bridgeWhatsAppChatId()].filter(Boolean);
+  const results: { chatId: string; ok: boolean; error?: string }[] = [];
+  for (const chatId of targets) {
+    const result = await sendWhatsAppText(text, chatId);
+    results.push({ chatId, ok: result.ok, error: result.error });
+  }
+  return { ok: results.some((r) => r.ok), results };
+}
+
 export async function sendWhatsAppFileByUrl(input: {
   url: string;
   caption?: string;
@@ -89,20 +109,36 @@ export async function forwardMessageToWhatsApp(
   message: BridgeChannelMessage,
 ): Promise<{ ok: boolean; error?: string }> {
   const text = formatBridgeWhatsAppMessage(message);
+  const chatIds = bridgeWhatsAppChatIds();
+  const errors: string[] = [];
+  let anyOk = false;
 
-  if (message.imageUrl) {
-    const fileResult = await sendWhatsAppFileByUrl({
-      url: message.imageUrl,
-      caption: text,
-      fileName: `${message.channel}-${message.id.replace(/[^a-zA-Z0-9_-]/g, "_")}.jpg`,
-    });
-    if (fileResult.ok) return fileResult;
-    // Fall back to text-only if media send fails.
-    console.warn(
-      "[tg-wa-bridge] sendFileByUrl failed, falling back to text:",
-      fileResult.error,
-    );
+  for (const chatId of chatIds) {
+    if (message.imageUrl) {
+      const fileResult = await sendWhatsAppFileByUrl({
+        url: message.imageUrl,
+        caption: text,
+        fileName: `${message.channel}-${message.id.replace(/[^a-zA-Z0-9_-]/g, "_")}.jpg`,
+        chatId,
+      });
+      if (fileResult.ok) {
+        anyOk = true;
+        continue;
+      }
+      console.warn(
+        "[tg-wa-bridge] sendFileByUrl failed, falling back to text:",
+        chatId,
+        fileResult.error,
+      );
+    }
+
+    const textResult = await sendWhatsAppText(text, chatId);
+    if (textResult.ok) anyOk = true;
+    else if (textResult.error) errors.push(`${chatId}: ${textResult.error}`);
   }
 
-  return sendWhatsAppText(text);
+  return {
+    ok: anyOk,
+    error: anyOk ? undefined : errors.join(" | ") || "שליחה נכשלה",
+  };
 }

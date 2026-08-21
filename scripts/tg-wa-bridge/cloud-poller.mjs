@@ -42,8 +42,19 @@ loadEnvFile(resolve(root, ".env.local"));
 
 const INSTANCE = process.env.GREEN_API_INSTANCE || "710722683401";
 const TOKEN = process.env.GREEN_API_TOKEN || "";
-const CHAT_ID =
+const PRIMARY_CHAT_ID =
   process.env.TG_WA_WHATSAPP_CHAT_ID || "120363409236894886@g.us";
+const HAMAL_CHAT_ID =
+  process.env.TG_WA_HAMAL_CHAT_ID || "120363410746391414@g.us";
+const CHAT_IDS = (
+  process.env.TG_WA_WHATSAPP_CHAT_IDS ||
+  `${PRIMARY_CHAT_ID},${HAMAL_CHAT_ID}`
+)
+  .split(",")
+  .map((id) => id.trim())
+  .filter(Boolean)
+  .filter((id, i, arr) => arr.indexOf(id) === i);
+const CHAT_ID = PRIMARY_CHAT_ID;
 const CHANNEL = (
   process.env.TG_WA_CHANNELS || "mivzakeybitachon2225:מבזקי ביטחון 24/7"
 )
@@ -122,7 +133,8 @@ function formatStatusReply({ telegramOk, lastPollAt, lastSentAt, error }) {
     "וואטסאפ: ✅ מחובר",
     `טלגרם: ${telegramOk === false ? "❌" : "✅"} סורק`,
     `ערוץ: @${CHANNEL}`,
-    "קבוצה: דיווחים מבצעי איראן 🇮🇷",
+    "קבוצות: דיווחים מבצעי איראן + חמ״ל התרעות",
+    `יעדים: ${CHAT_IDS.length}`,
     `סריקה אחרונה: ${lastPoll}`,
     `שליחה אחרונה: ${lastSent}`,
     `עלייה: ${uptimeMin} דק׳`,
@@ -342,6 +354,27 @@ async function sendWhatsApp(text, chatId = CHAT_ID, attempts = 3) {
   throw new Error(lastError || "WhatsApp send failed");
 }
 
+async function sendWhatsAppToAll(text) {
+  const errors = [];
+  let anyOk = false;
+  for (const chatId of CHAT_IDS) {
+    try {
+      await sendWhatsApp(text, chatId);
+      anyOk = true;
+    } catch (err) {
+      errors.push(
+        `${chatId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+  if (!anyOk) {
+    throw new Error(errors.join(" | ") || "WhatsApp send to all failed");
+  }
+  if (errors.length) {
+    console.warn("[tg-wa] partial send failures:", errors.join(" | "));
+  }
+}
+
 async function ensureHttpReceiveMode() {
   try {
     const settingsRes = await fetch(
@@ -410,20 +443,19 @@ async function runCommand(command, source = "webhook") {
   commandInFlight = true;
   try {
     if (command === "help") {
-      await sendWhatsApp(formatHelpReply(), CHAT_ID);
+      await sendWhatsAppToAll(formatHelpReply());
     } else if (command === "source") {
-      await sendWhatsApp(formatSourceReply(), CHAT_ID);
+      await sendWhatsAppToAll(formatSourceReply());
     } else if (command === "test") {
-      await sendWhatsApp(formatTestReply(), CHAT_ID);
+      await sendWhatsAppToAll(formatTestReply());
     } else if (command === "status") {
-      await sendWhatsApp(
+      await sendWhatsAppToAll(
         formatStatusReply({
           telegramOk,
           lastPollAt,
           lastSentAt,
           error: lastError,
         }),
-        CHAT_ID,
       );
     } else if (command === "last") {
       let latest = latestChannelMessage;
@@ -433,12 +465,11 @@ async function runCommand(command, source = "webhook") {
         if (latest) latestChannelMessage = latest;
       }
       if (!latest) {
-        await sendWhatsApp(
+        await sendWhatsAppToAll(
           boldEveryLine(`${TITLE}\n\nאין הודעה אחרונה מהערוץ`),
-          CHAT_ID,
         );
       } else {
-        await sendWhatsApp(formatMessage(latest.text, latest.url), CHAT_ID);
+        await sendWhatsAppToAll(formatMessage(latest.text, latest.url));
       }
     } else {
       return;
@@ -465,7 +496,7 @@ async function handleNotification(body) {
 
   const chatId =
     body?.senderData?.chatId || body?.chatId || body?.senderData?.chat || "";
-  if (chatId !== CHAT_ID) return;
+  if (!CHAT_IDS.includes(chatId)) return;
 
   const text = extractIncomingText(body);
   const command = parseCommand(text);
@@ -495,7 +526,7 @@ async function pollOutgoingCommands() {
 
   const nowSec = Math.floor(Date.now() / 1000);
   for (const m of data) {
-    if (m.chatId !== CHAT_ID) continue;
+    if (!CHAT_IDS.includes(m.chatId)) continue;
     const text = m.textMessage || m.extendedTextMessage || "";
     const command = parseCommand(text);
     if (!command) continue;
@@ -573,14 +604,14 @@ async function tick() {
       bootstrapped = true;
       saveState();
       console.log(
-        `[tg-wa] bootstrapped ${seen.size} msgs from @${CHANNEL} → ${CHAT_ID}`,
+        `[tg-wa] bootstrapped ${seen.size} msgs from @${CHANNEL} → ${CHAT_IDS.join(",")}`,
       );
       writeHeartbeat();
       return;
     }
     const fresh = messages.filter((m) => !seen.has(m.id));
     for (const m of fresh) {
-      await sendWhatsApp(formatMessage(m.text, m.url));
+      await sendWhatsAppToAll(formatMessage(m.text, m.url));
       seen.add(m.id);
       lastSentAt = new Date().toISOString();
       saveState();
@@ -632,7 +663,7 @@ process.on("uncaughtException", (err) => {
 
 loadState();
 console.log(
-  `[tg-wa] polling @${CHANNEL} every ${INTERVAL_MS / 1000}s → ${CHAT_ID}`,
+  `[tg-wa] polling @${CHANNEL} every ${INTERVAL_MS / 1000}s → ${CHAT_IDS.join(" + ")}`,
 );
 console.log(
   "[tg-wa] group commands: סטטוס | עזרה | מקור | בדיקה | אחרון",

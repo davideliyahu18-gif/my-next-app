@@ -51,6 +51,10 @@ export function bridgeWhatsAppGroupName(): string {
 /** Default: דיווחים מבצעי איראן 🇮🇷 */
 const DEFAULT_WHATSAPP_CHAT_ID = "120363409236894886@g.us";
 
+/** Default second target: חמ״ל התרעות ירי איראן 🛡️ */
+export const DEFAULT_HAMAL_WHATSAPP_CHAT_ID = "120363410746391414@g.us";
+export const DEFAULT_HAMAL_WHATSAPP_GROUP_NAME = "חמ״ל התרעות ירי איראן 🛡️";
+
 export function bridgeWhatsAppChatId(): string {
   return (
     process.env.TG_WA_WHATSAPP_CHAT_ID ||
@@ -59,6 +63,45 @@ export function bridgeWhatsAppChatId(): string {
     process.env.MISSILE_WHATSAPP_CHAT_ID ||
     DEFAULT_WHATSAPP_CHAT_ID
   ).trim();
+}
+
+/**
+ * One or more WhatsApp group chat ids to receive forwards.
+ * Env: TG_WA_WHATSAPP_CHAT_IDS=id1@g.us,id2@g.us
+ * Falls back to primary chat id + optional hamal chat id.
+ */
+export function bridgeWhatsAppChatIds(): string[] {
+  const raw = (
+    process.env.TG_WA_WHATSAPP_CHAT_IDS ||
+    process.env.BRIDGE_WHATSAPP_CHAT_IDS ||
+    ""
+  ).trim();
+
+  const ids: string[] = [];
+  const push = (id: string) => {
+    const cleaned = id.trim();
+    if (!cleaned) return;
+    if (!ids.includes(cleaned)) ids.push(cleaned);
+  };
+
+  if (raw) {
+    for (const part of raw.split(",")) push(part);
+  } else {
+    push(bridgeWhatsAppChatId());
+    const hamal =
+      process.env.TG_WA_HAMAL_CHAT_ID ||
+      process.env.ROCKETS_WHATSAPP_CHAT_ID ||
+      DEFAULT_HAMAL_WHATSAPP_CHAT_ID;
+    // Include hamal by default unless explicitly disabled.
+    const includeHamal = (
+      process.env.TG_WA_INCLUDE_HAMAL ?? "true"
+    ).toLowerCase();
+    if (includeHamal !== "0" && includeHamal !== "false" && includeHamal !== "off") {
+      push(hamal);
+    }
+  }
+
+  return ids.filter((id) => id.endsWith("@g.us") || id.endsWith("@c.us"));
 }
 
 export function isBridgeEnabled(): boolean {
