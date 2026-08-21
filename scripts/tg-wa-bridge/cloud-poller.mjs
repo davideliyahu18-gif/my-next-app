@@ -66,16 +66,17 @@ const CHANNEL = (
 const TITLE = "🇮🇱 חמ״ל התרעות ירי איראן 🛡️";
 const INTERVAL_MS = Number(process.env.TG_WA_POLL_MS || 15_000);
 const FETCH_PAGES = Math.max(1, Number(process.env.TG_WA_FETCH_PAGES || 2));
-const HOURLY_HEALTH_MS = Number(
-  process.env.TG_WA_HOURLY_HEALTH_MS || 60 * 60 * 1000,
-);
 const HOURLY_HEALTH_ENABLED = !(
   process.env.TG_WA_HOURLY_HEALTH === "0" ||
   process.env.TG_WA_HOURLY_HEALTH === "false" ||
   process.env.TG_WA_HOURLY_HEALTH === "off"
 );
+/** Round-hour health in Asia/Jerusalem (09:00, 10:00, …). */
+const HOURLY_HEALTH_TZ = process.env.TG_WA_HOURLY_TZ || "Asia/Jerusalem";
 const STARTED_AT = Date.now();
 const LAST_HOURLY_FILE = resolve(DATA_DIR, "last-hourly.json");
+/** @type {string} last sent hour key e.g. 2026-08-21T09 */
+let lastHourlyHourKey = "";
 let lastHourlyHealthAt = 0;
 
 function sanitizeForBold(text) {
@@ -215,10 +216,10 @@ function formatTestReply() {
   );
 }
 
-/** Hourly bold health ping — same style as the private missile bot. */
+/** Hourly bold health ping — on the clock hour (09:00, 10:00, …). */
 function formatHourlyHealthReply() {
   const time = new Date().toLocaleTimeString("he-IL", {
-    timeZone: "Asia/Jerusalem",
+    timeZone: HOURLY_HEALTH_TZ,
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
@@ -234,44 +235,101 @@ function formatHourlyHealthReply() {
   ].join("\n");
 }
 
+/** Jerusalem parts: { hourKey: "2026-08-21T09", hour, minute, second } */
+function jerusalemNowParts(date = new Date()) {
+  const fmt = new Intl.DateTimeFormat("en-GB", {
+    timeZone: HOURLY_HEALTH_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  const parts = Object.fromEntries(
+    fmt.formatToParts(date).map((p) => [p.type, p.value]),
+  );
+  const hour = Number(parts.hour === "24" ? "0" : parts.hour);
+  const minute = Number(parts.minute);
+  const second = Number(parts.second);
+  const hourKey = `${parts.year}-${parts.month}-${parts.day}T${String(hour).padStart(2, "0")}`;
+  return { hourKey, hour, minute, second, year: parts.year, month: parts.month, day: parts.day };
+}
+
+function nextRoundHourLabel() {
+  const now = jerusalemNowParts();
+  let h = now.hour;
+  let day = Number(now.day);
+  let month = Number(now.month);
+  let year = Number(now.year);
+  // If already past :00 window this hour, next is +1h
+  if (now.minute > 0 || now.second > 90) {
+    h += 1;
+    if (h >= 24) {
+      h = 0;
+      // rough next-day label for logs only
+      day += 1;
+    }
+  }
+  return `${String(h).padStart(2, "0")}:00`;
+}
+
 function loadLastHourly() {
   try {
     if (!existsSync(LAST_HOURLY_FILE)) return;
     const raw = JSON.parse(readFileSync(LAST_HOURLY_FILE, "utf8"));
     lastHourlyHealthAt = Number(raw?.at) || 0;
+    lastHourlyHourKey = String(raw?.hourKey || "");
   } catch {
     lastHourlyHealthAt = 0;
+    lastHourlyHourKey = "";
   }
 }
 
-function saveLastHourly(at = Date.now()) {
+function saveLastHourly(at = Date.now(), hourKey = lastHourlyHourKey) {
   lastHourlyHealthAt = at;
+  lastHourlyHourKey = hourKey;
   try {
     writeFileSync(
       LAST_HOURLY_FILE,
-      JSON.stringify({ at, iso: new Date(at).toISOString() }),
+      JSON.stringify({
+        at,
+        hourKey,
+        iso: new Date(at).toISOString(),
+      }),
     );
   } catch {
     // ignore
   }
 }
 
+/**
+ * Send only on round hours (xx:00) Israel time.
+ * Window: first 2 minutes of the hour so a 60s poll never misses.
+ */
 async function maybeSendHourlyHealth(force = false) {
   if (!HOURLY_HEALTH_ENABLED) return;
-  const now = Date.now();
-  if (!force && lastHourlyHealthAt && now - lastHourlyHealthAt < HOURLY_HEALTH_MS) {
-    return;
-  }
-  // Claim the slot first so a crash mid-send does not double-fire next minute.
-  saveLastHourly(now);
+  const parts = jerusalemNowParts();
+  const onTheHour = parts.minute === 0 || (parts.minute === 1 && parts.second < 30);
+  if (!force && !onTheHour) return;
+  if (!force && lastHourlyHourKey === parts.hourKey) return;
+
+  // Claim this hour immediately to avoid double-send.
+  saveLastHourly(Date.now(), parts.hourKey);
   try {
     await sendWhatsAppToAll(formatHourlyHealthReply());
-    console.log(`[tg-wa] hourly health sent → ${CHAT_IDS.join(" + ")}`);
-    writeHeartbeat({ lastHourlyHealthAt: new Date(now).toISOString() });
+    console.log(
+      `[tg-wa] hourly health sent @ ${parts.hourKey}:00 → ${CHAT_IDS.join(" + ")}`,
+    );
+    writeHeartbeat({
+      lastHourlyHealthAt: new Date().toISOString(),
+      lastHourlyHourKey: parts.hourKey,
+    });
   } catch (err) {
     console.error("[tg-wa] hourly health failed", err);
-    // Allow retry sooner on failure (15 min).
-    saveLastHourly(now - HOURLY_HEALTH_MS + 15 * 60 * 1000);
+    // Clear claim so we retry within the same :00 window.
+    saveLastHourly(0, "");
   }
 }
 
@@ -1075,23 +1133,23 @@ console.log(
 );
 if (HOURLY_HEALTH_ENABLED) {
   console.log(
-    `[tg-wa] hourly health check every ${Math.round(HOURLY_HEALTH_MS / 60000)} min (bold)`,
+    `[tg-wa] hourly health on the clock (Asia/Jerusalem) — next ~${nextRoundHourLabel()}`,
   );
 }
 
 await ensureHttpReceiveMode();
 await tick();
-// First health ping shortly after boot if none was sent this hour window.
-await maybeSendHourlyHealth(false);
+// Do not send on boot — wait for round hour (09:00, 10:00, …).
 setInterval(() => {
   tick().catch((err) => console.error("[tg-wa] tick failed", err));
 }, INTERVAL_MS);
 setInterval(() => writeHeartbeat(), 30_000);
+// Check often near :00 so we never miss the round hour.
 setInterval(() => {
   maybeSendHourlyHealth(false).catch((err) =>
     console.error("[tg-wa] hourly health tick failed", err),
   );
-}, 60_000);
+}, 20_000);
 commandLoop().catch((err) => {
   console.error("[tg-wa] command loop died", err);
   process.exit(1);
