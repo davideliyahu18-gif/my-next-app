@@ -999,22 +999,40 @@ async function pollOutgoingCommands() {
   }
 }
 
-async function drainNotifications(max = 80) {
+async function drainNotifications(max = 25) {
+  const started = Date.now();
+  const budgetMs = 20_000;
   for (let i = 0; i < max; i += 1) {
-    const res = await fetch(
-      `https://api.green-api.com/waInstance${INSTANCE}/receiveNotification/${TOKEN}?receiveTimeout=1`,
-    );
+    if (Date.now() - started > budgetMs) {
+      console.warn("[tg-wa] drainNotifications budget exceeded — yielding");
+      break;
+    }
+    let res;
+    try {
+      res = await fetchWithTimeout(
+        `https://api.green-api.com/waInstance${INSTANCE}/receiveNotification/${TOKEN}?receiveTimeout=1`,
+        {},
+        8_000,
+      );
+    } catch (err) {
+      console.warn(
+        "[tg-wa] receiveNotification timeout/fail:",
+        err instanceof Error ? err.message : err,
+      );
+      break;
+    }
     const raw = await res.text();
     // 200 null / 408 timeout / empty = no notifications waiting.
     if (res.status === 408 || !raw || raw === "null") break;
     if (!res.ok) {
       if (raw.includes("Data processing error")) {
-        await new Promise((r) => setTimeout(r, 1500));
+        await new Promise((r) => setTimeout(r, 800));
         break;
       }
-      throw new Error(
-        `receiveNotification HTTP ${res.status}: ${raw.slice(0, 180)}`,
+      console.warn(
+        `[tg-wa] receiveNotification HTTP ${res.status}: ${raw.slice(0, 120)}`,
       );
+      break;
     }
     let data;
     try {
@@ -1038,7 +1056,11 @@ async function drainNotifications(max = 80) {
     } catch (err) {
       console.error("[tg-wa] handle notification failed", err);
     }
-    await deleteNotification(data.receiptId);
+    try {
+      await deleteNotification(data.receiptId);
+    } catch {
+      // ignore delete failures
+    }
   }
 }
 
@@ -1048,14 +1070,30 @@ async function tick() {
     return;
   }
   tickInFlight = true;
-  // Hard safety: never leave tick stuck forever if something hangs.
-  const stuckTimer = setTimeout(() => {
-    if (tickInFlight) {
-      console.error("[tg-wa] tick watchdog — forcing unlock/exit");
+  // Hard safety: unlock then exit if still wedged.
+  let watchdogStage = 0;
+  const stuckTimer = setInterval(() => {
+    if (!tickInFlight) return;
+    watchdogStage += 1;
+    if (watchdogStage === 1) {
+      console.error("[tg-wa] tick watchdog — unlocking in-flight flag");
+      tickInFlight = false;
+    } else {
+      console.error("[tg-wa] tick watchdog — forcing exit for supervisor restart");
       process.exit(1);
     }
-  }, 120_000);
+  }, 45_000);
   try {
+    // Detect VM/process freeze gaps (cloud suspend).
+    if (lastPollAt) {
+      const gapMs = Date.now() - Date.parse(lastPollAt);
+      if (Number.isFinite(gapMs) && gapMs > 10 * 60_000) {
+        console.warn(
+          `[tg-wa] resume after ${Math.round(gapMs / 60000)} min freeze — catch-up`,
+        );
+        await maybeSendHourlyHealth(false);
+      }
+    }
     const messages = await fetchMessages();
     telegramOk = true;
     lastPollAt = new Date().toISOString();
@@ -1153,7 +1191,7 @@ async function tick() {
       process.exit(1);
     }
   } finally {
-    clearTimeout(stuckTimer);
+    clearInterval(stuckTimer);
     tickInFlight = false;
   }
 }
