@@ -305,22 +305,31 @@ function saveLastHourly(at = Date.now(), hourKey = lastHourlyHourKey) {
 }
 
 /**
- * Send only on round hours (xx:00) Israel time.
- * Window: first 2 minutes of the hour so a 60s poll never misses.
+ * Send once per Israel clock-hour.
+ * - Preferred window: first 10 minutes after xx:00
+ * - Catch-up: if this hour was never sent (process down at :00), send while
+ *   still in that hour (until :50) so a missed 09:00 is not lost.
  */
 async function maybeSendHourlyHealth(force = false) {
   if (!HOURLY_HEALTH_ENABLED) return;
   const parts = jerusalemNowParts();
-  const onTheHour = parts.minute === 0 || (parts.minute === 1 && parts.second < 30);
-  if (!force && !onTheHour) return;
   if (!force && lastHourlyHourKey === parts.hourKey) return;
 
-  // Claim this hour immediately to avoid double-send.
+  if (!force) {
+    const inWindow = parts.minute < 10;
+    const catchUpOk = parts.minute < 50;
+    if (!inWindow && !catchUpOk) return;
+    // Cold start late in the hour with no prior hourKey → wait for next :00
+    if (!inWindow && !lastHourlyHourKey && parts.minute >= 30) return;
+  }
+
   saveLastHourly(Date.now(), parts.hourKey);
   try {
     await sendWhatsAppToAll(formatHourlyHealthReply());
+    const hh = String(parts.hour).padStart(2, "0");
     console.log(
-      `[tg-wa] hourly health sent @ ${parts.hourKey}:00 → ${CHAT_IDS.join(" + ")}`,
+      `[tg-wa] hourly health sent @ ${hh}:00` +
+        `${parts.minute < 10 ? "" : " (catch-up)"} → ${CHAT_IDS.join(" + ")}`,
     );
     writeHeartbeat({
       lastHourlyHealthAt: new Date().toISOString(),
@@ -328,9 +337,34 @@ async function maybeSendHourlyHealth(force = false) {
     });
   } catch (err) {
     console.error("[tg-wa] hourly health failed", err);
-    // Clear claim so we retry within the same :00 window.
     saveLastHourly(0, "");
   }
+}
+
+/** ms until ~2s past the next Asia/Jerusalem xx:00 */
+function msUntilNextRoundHour() {
+  const nowMs = Date.now();
+  const cur = jerusalemNowParts(new Date(nowMs));
+  for (let ms = 500; ms <= 3_661_000; ms += 250) {
+    const p = jerusalemNowParts(new Date(nowMs + ms));
+    if (p.hourKey !== cur.hourKey && p.minute === 0) {
+      return ms + 2000;
+    }
+  }
+  return 60_000;
+}
+
+function scheduleHourlyHealth() {
+  if (!HOURLY_HEALTH_ENABLED) return;
+  const wait = msUntilNextRoundHour();
+  console.log(
+    `[tg-wa] hourly health scheduled in ${Math.round(wait / 1000)}s → ${nextRoundHourLabel()}`,
+  );
+  setTimeout(() => {
+    maybeSendHourlyHealth(false)
+      .catch((err) => console.error("[tg-wa] hourly health tick failed", err))
+      .finally(() => scheduleHourlyHealth());
+  }, wait);
 }
 
 if (!TOKEN) {
@@ -1139,17 +1173,19 @@ if (HOURLY_HEALTH_ENABLED) {
 
 await ensureHttpReceiveMode();
 await tick();
-// Do not send on boot — wait for round hour (09:00, 10:00, …).
+// Catch up if this clock-hour was missed (e.g. process was down at xx:00).
+await maybeSendHourlyHealth(false);
+scheduleHourlyHealth();
 setInterval(() => {
   tick().catch((err) => console.error("[tg-wa] tick failed", err));
 }, INTERVAL_MS);
 setInterval(() => writeHeartbeat(), 30_000);
-// Check often near :00 so we never miss the round hour.
+// Backup poll every 30s — catch-up if the precise timer drifted / process stalled.
 setInterval(() => {
   maybeSendHourlyHealth(false).catch((err) =>
-    console.error("[tg-wa] hourly health tick failed", err),
+    console.error("[tg-wa] hourly health backup tick failed", err),
   );
-}, 20_000);
+}, 30_000);
 commandLoop().catch((err) => {
   console.error("[tg-wa] command loop died", err);
   process.exit(1);
