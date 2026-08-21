@@ -65,7 +65,17 @@ const CHANNEL = (
   .toLowerCase();
 const TITLE = "חמ״ל התרעות ירי איראן 🛡️";
 const INTERVAL_MS = Number(process.env.TG_WA_POLL_MS || 60000);
+const HOURLY_HEALTH_MS = Number(
+  process.env.TG_WA_HOURLY_HEALTH_MS || 60 * 60 * 1000,
+);
+const HOURLY_HEALTH_ENABLED = !(
+  process.env.TG_WA_HOURLY_HEALTH === "0" ||
+  process.env.TG_WA_HOURLY_HEALTH === "false" ||
+  process.env.TG_WA_HOURLY_HEALTH === "off"
+);
 const STARTED_AT = Date.now();
+const LAST_HOURLY_FILE = resolve(DATA_DIR, "last-hourly.json");
+let lastHourlyHealthAt = 0;
 
 function sanitizeForBold(text) {
   return String(text || "")
@@ -180,6 +190,66 @@ function formatTestReply() {
   return boldEveryLine(
     [TITLE, "", "בדיקה — תקין", "הבוט מחובר ומוכן", `שעה: ${now}`].join("\n"),
   );
+}
+
+/** Hourly bold health ping — same style as the private missile bot. */
+function formatHourlyHealthReply() {
+  const time = new Date().toLocaleTimeString("he-IL", {
+    timeZone: "Asia/Jerusalem",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  return [
+    `*🇮🇱 חמ״ל התרעות ירי איראן*`,
+    time,
+    "",
+    `*✅ בדיקת תקינות - הבוט פעיל ומאזין*`,
+    `*חמ״ל התרעות ירי איראן 🛡️*`,
+    "",
+    `*נכון לרגע זה — אין התרעה פעילה בישראל 🇮🇱*`,
+  ].join("\n");
+}
+
+function loadLastHourly() {
+  try {
+    if (!existsSync(LAST_HOURLY_FILE)) return;
+    const raw = JSON.parse(readFileSync(LAST_HOURLY_FILE, "utf8"));
+    lastHourlyHealthAt = Number(raw?.at) || 0;
+  } catch {
+    lastHourlyHealthAt = 0;
+  }
+}
+
+function saveLastHourly(at = Date.now()) {
+  lastHourlyHealthAt = at;
+  try {
+    writeFileSync(
+      LAST_HOURLY_FILE,
+      JSON.stringify({ at, iso: new Date(at).toISOString() }),
+    );
+  } catch {
+    // ignore
+  }
+}
+
+async function maybeSendHourlyHealth(force = false) {
+  if (!HOURLY_HEALTH_ENABLED) return;
+  const now = Date.now();
+  if (!force && lastHourlyHealthAt && now - lastHourlyHealthAt < HOURLY_HEALTH_MS) {
+    return;
+  }
+  // Claim the slot first so a crash mid-send does not double-fire next minute.
+  saveLastHourly(now);
+  try {
+    await sendWhatsAppToAll(formatHourlyHealthReply());
+    console.log(`[tg-wa] hourly health sent → ${CHAT_IDS.join(" + ")}`);
+    writeHeartbeat({ lastHourlyHealthAt: new Date(now).toISOString() });
+  } catch (err) {
+    console.error("[tg-wa] hourly health failed", err);
+    // Allow retry sooner on failure (15 min).
+    saveLastHourly(now - HOURLY_HEALTH_MS + 15 * 60 * 1000);
+  }
 }
 
 if (!TOKEN) {
@@ -769,19 +839,32 @@ process.on("uncaughtException", (err) => {
 
 loadState();
 loadAnswered();
+loadLastHourly();
 console.log(
   `[tg-wa] polling @${CHANNEL} every ${INTERVAL_MS / 1000}s → ${CHAT_IDS.join(" + ")}`,
 );
 console.log(
   "[tg-wa] group commands: סטטוס | עזרה | מקור | בדיקה | אחרון (once / cooldown)",
 );
+if (HOURLY_HEALTH_ENABLED) {
+  console.log(
+    `[tg-wa] hourly health check every ${Math.round(HOURLY_HEALTH_MS / 60000)} min (bold)`,
+  );
+}
 
 await ensureHttpReceiveMode();
 await tick();
+// First health ping shortly after boot if none was sent this hour window.
+await maybeSendHourlyHealth(false);
 setInterval(() => {
   tick().catch((err) => console.error("[tg-wa] tick failed", err));
 }, INTERVAL_MS);
 setInterval(() => writeHeartbeat(), 30_000);
+setInterval(() => {
+  maybeSendHourlyHealth(false).catch((err) =>
+    console.error("[tg-wa] hourly health tick failed", err),
+  );
+}, 60_000);
 commandLoop().catch((err) => {
   console.error("[tg-wa] command loop died", err);
   process.exit(1);
