@@ -63,7 +63,7 @@ export async function runBridgePoll(options?: {
       bootstrapped: false,
       dryRun,
       errors: [
-        "חסר TG_WA_CHANNELS — לדוגמה: TG_WA_CHANNELS=newsil5:מודיעין גלוי",
+        "חסר TG_WA_CHANNELS — לדוגמה: TG_WA_CHANNELS=newsil5:ערוץ מקור",
       ],
       sentIds: [],
     };

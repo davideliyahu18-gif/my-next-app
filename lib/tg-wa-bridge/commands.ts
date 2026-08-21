@@ -90,8 +90,8 @@ export type BridgeRuntimeStatus = {
 
 function primaryChannel() {
   return getBridgeChannels()[0] ?? {
-    username: "mivzakeybitachon2225",
-    label: "מבזקי ביטחון 24/7",
+    username: "newsil5",
+    label: "ערוץ מקור",
   };
 }
 
@@ -116,9 +116,7 @@ export function formatSourceReply(): string {
     "",
     "מקור הדיווחים",
     `ערוץ: @${channel.username}`,
-    `שם: ${channel.label}`,
     `קישור: https://t.me/${channel.username}`,
-    `תצוגה: https://t.me/s/${channel.username}`,
     `קבוצה: ${bridgeWhatsAppGroupName()}`,
   ];
   return boldEveryLine(lines.join("\n"));
@@ -170,7 +168,7 @@ export function formatStatusReply(runtime: BridgeRuntimeStatus = {}): string {
     `טלגרם: ${telegram} סורק`,
     `ערוץ: ${channelLine}`,
     `קבוצה: ${bridgeWhatsAppGroupName()}`,
-    `גם חמ״ל: ${bridgeWhatsAppChatIds().length > 1 ? "כן" : "לא"}`,
+    `יעד: חמ״ל בלבד`,
     `מופע: ${bridgeGreenApiInstance()}`,
     `סריקה אחרונה: ${lastPoll}`,
     `שליחה אחרונה: ${lastSent}`,

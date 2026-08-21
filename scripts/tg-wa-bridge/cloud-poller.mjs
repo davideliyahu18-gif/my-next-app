@@ -43,26 +43,27 @@ loadEnvFile(resolve(root, ".env.local"));
 const INSTANCE = process.env.GREEN_API_INSTANCE || "710722683401";
 const TOKEN = process.env.GREEN_API_TOKEN || "";
 const PRIMARY_CHAT_ID =
-  process.env.TG_WA_WHATSAPP_CHAT_ID || "120363409236894886@g.us";
+  process.env.TG_WA_WHATSAPP_CHAT_ID ||
+  process.env.TG_WA_HAMAL_CHAT_ID ||
+  "120363410746391414@g.us";
 const HAMAL_CHAT_ID =
   process.env.TG_WA_HAMAL_CHAT_ID || "120363410746391414@g.us";
 const CHAT_IDS = (
-  process.env.TG_WA_WHATSAPP_CHAT_IDS ||
-  `${PRIMARY_CHAT_ID},${HAMAL_CHAT_ID}`
+  process.env.TG_WA_WHATSAPP_CHAT_IDS || HAMAL_CHAT_ID || PRIMARY_CHAT_ID
 )
   .split(",")
   .map((id) => id.trim())
   .filter(Boolean)
   .filter((id, i, arr) => arr.indexOf(id) === i);
-const CHAT_ID = PRIMARY_CHAT_ID;
+const CHAT_ID = CHAT_IDS[0] || HAMAL_CHAT_ID;
 const CHANNEL = (
-  process.env.TG_WA_CHANNELS || "mivzakeybitachon2225:מבזקי ביטחון 24/7"
+  process.env.TG_WA_CHANNELS || "newsil5:ערוץ מקור"
 )
   .split(",")[0]
   .split(":")[0]
   .replace(/^@/, "")
   .toLowerCase();
-const TITLE = "איראן בזמן אמת – חדשות, דיווחים🇮🇷";
+const TITLE = "חמ״ל התרעות ירי איראן 🛡️";
 const INTERVAL_MS = Number(process.env.TG_WA_POLL_MS || 60000);
 const STARTED_AT = Date.now();
 
@@ -133,7 +134,7 @@ function formatStatusReply({ telegramOk, lastPollAt, lastSentAt, error }) {
     "וואטסאפ: ✅ מחובר",
     `טלגרם: ${telegramOk === false ? "❌" : "✅"} סורק`,
     `ערוץ: @${CHANNEL}`,
-    "קבוצות: דיווחים מבצעי איראן + חמ״ל התרעות",
+    "יעד: חמ״ל התרעות ירי איראן",
     `יעדים: ${CHAT_IDS.length}`,
     `סריקה אחרונה: ${lastPoll}`,
     `שליחה אחרונה: ${lastSent}`,
@@ -166,10 +167,8 @@ function formatSourceReply() {
       "",
       "מקור הדיווחים",
       `ערוץ: @${CHANNEL}`,
-      "שם: מבזקי ביטחון 24/7",
       `קישור: https://t.me/${CHANNEL}`,
-      `תצוגה: https://t.me/s/${CHANNEL}`,
-      "קבוצה: דיווחים מבצעי איראן 🇮🇷",
+      "קבוצה: חמ״ל התרעות ירי איראן 🛡️",
     ].join("\n"),
   );
 }

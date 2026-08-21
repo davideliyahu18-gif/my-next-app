@@ -1,6 +1,7 @@
 import type { BridgeChannelMessage } from "./types";
 
-export const BRIDGE_MESSAGE_TITLE = "איראן בזמן אמת – חדשות, דיווחים🇮🇷";
+/** Bold header on every WhatsApp forward — Hamal only, no source brand. */
+export const BRIDGE_MESSAGE_TITLE = "חמ״ל התרעות ירי איראן 🛡️";
 
 function truncate(text: string, max = 3500): string {
   if (text.length <= max) return text;

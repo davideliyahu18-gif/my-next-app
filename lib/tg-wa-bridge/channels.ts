@@ -1,20 +1,20 @@
 import type { BridgeChannelConfig } from "./types";
 
-/** Default: https://t.me/Mivzakeybitachon2225 */
+/** Default: https://t.me/newsil5 — label kept neutral (do not expose מודיעין גלוי). */
 const DEFAULT_CHANNELS: BridgeChannelConfig[] = [
   {
-    username: "mivzakeybitachon2225",
-    label: "מבזקי ביטחון 24/7",
+    username: "newsil5",
+    label: "ערוץ מקור",
   },
 ];
 
-/** WhatsApp group the user opened for this bridge. */
-export const DEFAULT_WHATSAPP_GROUP_NAME = "דיווחים מבצעי איראן 🇮🇷";
+/** WhatsApp group: חמ״ל only. */
+export const DEFAULT_WHATSAPP_GROUP_NAME = "חמ״ל התרעות ירי איראן 🛡️";
 
 /**
  * Channels to forward.
  * Format: username or username:Label, comma-separated.
- * Default: Mivzakeybitachon2225
+ * Default: newsil5
  */
 export function getBridgeChannels(): BridgeChannelConfig[] {
   const raw = (
@@ -48,12 +48,10 @@ export function bridgeWhatsAppGroupName(): string {
   ).trim();
 }
 
-/** Default: דיווחים מבצעי איראן 🇮🇷 */
-const DEFAULT_WHATSAPP_CHAT_ID = "120363409236894886@g.us";
-
-/** Default second target: חמ״ל התרעות ירי איראן 🛡️ */
+/** Default target: חמ״ל התרעות ירי איראן 🛡️ only */
 export const DEFAULT_HAMAL_WHATSAPP_CHAT_ID = "120363410746391414@g.us";
 export const DEFAULT_HAMAL_WHATSAPP_GROUP_NAME = "חמ״ל התרעות ירי איראן 🛡️";
+const DEFAULT_WHATSAPP_CHAT_ID = DEFAULT_HAMAL_WHATSAPP_CHAT_ID;
 
 export function bridgeWhatsAppChatId(): string {
   return (
@@ -61,14 +59,16 @@ export function bridgeWhatsAppChatId(): string {
     process.env.BRIDGE_WHATSAPP_CHAT_ID ||
     process.env.WHATSAPP_GROUP_CHAT_ID ||
     process.env.MISSILE_WHATSAPP_CHAT_ID ||
+    process.env.TG_WA_HAMAL_CHAT_ID ||
+    process.env.ROCKETS_WHATSAPP_CHAT_ID ||
     DEFAULT_WHATSAPP_CHAT_ID
   ).trim();
 }
 
 /**
- * One or more WhatsApp group chat ids to receive forwards.
- * Env: TG_WA_WHATSAPP_CHAT_IDS=id1@g.us,id2@g.us
- * Falls back to primary chat id + optional hamal chat id.
+ * WhatsApp group chat ids to receive forwards.
+ * Default: חמ״ל only (no דיווחים / מודיעין גלוי group).
+ * Env: TG_WA_WHATSAPP_CHAT_IDS=id@g.us
  */
 export function bridgeWhatsAppChatIds(): string[] {
   const raw = (
@@ -88,17 +88,6 @@ export function bridgeWhatsAppChatIds(): string[] {
     for (const part of raw.split(",")) push(part);
   } else {
     push(bridgeWhatsAppChatId());
-    const hamal =
-      process.env.TG_WA_HAMAL_CHAT_ID ||
-      process.env.ROCKETS_WHATSAPP_CHAT_ID ||
-      DEFAULT_HAMAL_WHATSAPP_CHAT_ID;
-    // Include hamal by default unless explicitly disabled.
-    const includeHamal = (
-      process.env.TG_WA_INCLUDE_HAMAL ?? "true"
-    ).toLowerCase();
-    if (includeHamal !== "0" && includeHamal !== "false" && includeHamal !== "off") {
-      push(hamal);
-    }
   }
 
   return ids.filter((id) => id.endsWith("@g.us") || id.endsWith("@c.us"));
