@@ -1,7 +1,7 @@
 import type { BridgeChannelMessage } from "./types";
 
-/** Bold header on every WhatsApp forward — Hamal only, no source brand. */
-export const BRIDGE_MESSAGE_TITLE = "חמ״ל התרעות ירי איראן 🛡️";
+/** Bold header on every WhatsApp forward — Hamal only, no source brand, no links. */
+export const BRIDGE_MESSAGE_TITLE = "🇮🇱 חמ״ל התרעות ירי איראן 🛡️";
 
 function truncate(text: string, max = 3500): string {
   if (text.length <= max) return text;
@@ -23,14 +23,11 @@ export function boldEveryLine(text: string): string {
     .join("\n");
 }
 
-/** WhatsApp-friendly text — title + every line bold. */
+/** WhatsApp text: title + message only (never include Telegram links). */
 export function formatBridgeWhatsAppMessage(
   message: BridgeChannelMessage,
 ): string {
   const header = `*${BRIDGE_MESSAGE_TITLE}*`;
   const body = boldEveryLine(message.text || "(הודעה)");
-  const link = message.url
-    ? `\n\n*🔗 ${sanitizeForBold(message.url)}*`
-    : "";
-  return truncate(`${header}\n\n${body}${link}`);
+  return truncate(`${header}\n\n${body}`);
 }

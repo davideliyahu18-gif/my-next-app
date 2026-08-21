@@ -63,7 +63,7 @@ const CHANNEL = (
   .split(":")[0]
   .replace(/^@/, "")
   .toLowerCase();
-const TITLE = "חמ״ל התרעות ירי איראן 🛡️";
+const TITLE = "🇮🇱 חמ״ל התרעות ירי איראן 🛡️";
 const INTERVAL_MS = Number(process.env.TG_WA_POLL_MS || 15_000);
 const FETCH_PAGES = Math.max(1, Number(process.env.TG_WA_FETCH_PAGES || 2));
 const HOURLY_HEALTH_MS = Number(
@@ -93,10 +93,10 @@ function boldEveryLine(text) {
     .join("\n");
 }
 
-function formatMessage(text, url) {
+function formatMessage(text, _url) {
   const body = boldEveryLine(text || "(הודעה)");
-  const link = url ? `\n\n*🔗 ${sanitizeForBold(url)}*` : "";
-  return `*${TITLE}*\n\n${body}${link}`;
+  // Name only + message — never attach Telegram links.
+  return `*${TITLE}*\n\n${body}`;
 }
 
 function normalizeCommandText(text) {
@@ -202,7 +202,7 @@ function formatHourlyHealthReply() {
     hour12: false,
   });
   return [
-    `*🇮🇱 חמ״ל התרעות ירי איראן*`,
+    `*🇮🇱 חמ״ל התרעות ירי איראן 🛡️*`,
     time,
     "",
     `*✅ בדיקת תקינות - הבוט פעיל ומאזין*`,
