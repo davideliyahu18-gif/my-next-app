@@ -64,7 +64,8 @@ const CHANNEL = (
   .replace(/^@/, "")
   .toLowerCase();
 const TITLE = "חמ״ל התרעות ירי איראן 🛡️";
-const INTERVAL_MS = Number(process.env.TG_WA_POLL_MS || 60000);
+const INTERVAL_MS = Number(process.env.TG_WA_POLL_MS || 15_000);
+const FETCH_PAGES = Math.max(1, Number(process.env.TG_WA_FETCH_PAGES || 2));
 const HOURLY_HEALTH_MS = Number(
   process.env.TG_WA_HOURLY_HEALTH_MS || 60 * 60 * 1000,
 );
@@ -340,9 +341,20 @@ function stripHtml(html) {
     .replace(/<\/p>/gi, "\n")
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/g, " ")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
     .replace(/&amp;/g, "&")
-    .replace(/\s+/g, " ")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\s+\n/g, "\n")
+    .replace(/\n\s+/g, "\n")
+    .replace(/[ \t]+/g, " ")
     .trim();
+}
+
+function postNumericId(id) {
+  const n = Number(String(id).split(":").pop());
+  return Number.isFinite(n) ? n : 0;
 }
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = 20_000) {
@@ -355,39 +367,70 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 20_000) {
   }
 }
 
-async function fetchMessages() {
-  const url = `https://t.me/s/${CHANNEL}?t=${Date.now()}`;
-  const res = await fetchWithTimeout(
-    url,
-    {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-      },
-    },
-    20_000,
-  );
-  if (!res.ok) throw new Error(`Telegram HTTP ${res.status}`);
-  const html = await res.text();
+function parseChannelHtml(html) {
   const blocks = html.split('class="tgme_widget_message_wrap');
   const out = [];
+  let oldestId = null;
   for (const block of blocks.slice(1)) {
     const post = block.match(
       new RegExp(`data-post="${CHANNEL}/(\\d+)"`, "i"),
     );
     if (!post) continue;
+    const num = Number(post[1]);
+    oldestId = oldestId == null ? num : Math.min(oldestId, num);
     const id = `${CHANNEL}:${post[1]}`;
     const textMatch = block.match(
       /class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/,
     );
-    const text = textMatch ? stripHtml(textMatch[1]) : "(הודעה)";
+    let text = textMatch ? stripHtml(textMatch[1]) : "";
+    const hasPhoto = /tgme_widget_message_photo/.test(block);
+    const hasVideo = /tgme_widget_message_video/.test(block);
+    const hasDoc = /tgme_widget_message_document/.test(block);
+    if (!text) {
+      if (hasPhoto) text = "(תמונה)";
+      else if (hasVideo) text = "(וידאו)";
+      else if (hasDoc) text = "(קובץ)";
+      else text = "(הודעה)";
+    }
     const urlMsg = `https://t.me/${CHANNEL}/${post[1]}`;
-    out.push({ id, text, url: urlMsg });
+    out.push({ id, text, url: urlMsg, num });
   }
-  return out;
+  return { messages: out, oldestId };
 }
 
-async function sendWhatsApp(text, chatId = CHAT_ID, attempts = 3) {
+async function fetchMessages() {
+  const byId = new Map();
+  let before;
+  for (let page = 0; page < FETCH_PAGES; page += 1) {
+    const base = before
+      ? `https://t.me/s/${CHANNEL}?before=${before}`
+      : `https://t.me/s/${CHANNEL}`;
+    const url = `${base}${base.includes("?") ? "&" : "?"}t=${Date.now()}`;
+    const res = await fetchWithTimeout(
+      url,
+      {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          Accept: "text/html,application/xhtml+xml",
+          "Cache-Control": "no-cache",
+          Pragma: "no-cache",
+        },
+      },
+      20_000,
+    );
+    if (!res.ok) throw new Error(`Telegram HTTP ${res.status}`);
+    const html = await res.text();
+    const { messages, oldestId } = parseChannelHtml(html);
+    if (!messages.length) break;
+    for (const m of messages) byId.set(m.id, m);
+    if (oldestId == null) break;
+    before = oldestId;
+  }
+  return [...byId.values()].sort((a, b) => a.num - b.num);
+}
+
+async function sendWhatsApp(text, chatId = CHAT_ID, attempts = 4) {
   let lastError = "";
   for (let i = 1; i <= attempts; i += 1) {
     try {
@@ -400,21 +443,41 @@ async function sendWhatsApp(text, chatId = CHAT_ID, attempts = 3) {
         },
         25_000,
       );
+      const body = await res.text();
       if (!res.ok) {
-        const body = await res.text();
         lastError = `WhatsApp HTTP ${res.status}: ${body.slice(0, 200)}`;
-        // Retry rate-limits / transient errors.
-        if (res.status === 429 || res.status >= 500) {
-          await new Promise((r) => setTimeout(r, 1000 * i));
+        // Retry rate-limits / transient / quota flaps.
+        if (
+          res.status === 429 ||
+          res.status >= 500 ||
+          /quota|timeout|temporar/i.test(body)
+        ) {
+          await new Promise((r) => setTimeout(r, 1500 * i));
           continue;
         }
         throw new Error(lastError);
+      }
+      // Green API sometimes returns 200 with an error payload.
+      try {
+        const json = JSON.parse(body);
+        if (json?.error || json?.status === "error") {
+          lastError = `WhatsApp API: ${JSON.stringify(json).slice(0, 200)}`;
+          await new Promise((r) => setTimeout(r, 1500 * i));
+          continue;
+        }
+        if (!json?.idMessage && i < attempts) {
+          lastError = `WhatsApp no idMessage: ${body.slice(0, 160)}`;
+          await new Promise((r) => setTimeout(r, 1000 * i));
+          continue;
+        }
+      } catch {
+        // non-JSON success body — treat as ok
       }
       return;
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
       if (i < attempts) {
-        await new Promise((r) => setTimeout(r, 1000 * i));
+        await new Promise((r) => setTimeout(r, 1500 * i));
         continue;
       }
       throw new Error(lastError);
@@ -757,7 +820,7 @@ async function tick() {
       console.error("[tg-wa] tick watchdog — forcing unlock/exit");
       process.exit(1);
     }
-  }, 90_000);
+  }, 120_000);
   try {
     const messages = await fetchMessages();
     telegramOk = true;
@@ -778,18 +841,72 @@ async function tick() {
       writeHeartbeat();
       return;
     }
-    const fresh = messages.filter((m) => !seen.has(m.id));
+
+    const seenNums = [...seen]
+      .map(postNumericId)
+      .filter((n) => n > 0);
+    const maxSeen = seenNums.length ? Math.max(...seenNums) : 0;
+
+    // Older posts that appear only on page 2 after bootstrap are history — mark,
+    // never forward. Only forward posts newer than the high-water mark.
+    let markedHistory = 0;
+    for (const m of messages) {
+      if (m.num <= maxSeen && !seen.has(m.id)) {
+        seen.add(m.id);
+        markedHistory += 1;
+      }
+    }
+    if (markedHistory) saveState();
+
+    const fresh = messages
+      .filter((m) => !seen.has(m.id) && m.num > maxSeen)
+      .sort((a, b) => a.num - b.num);
+
+    if (maxSeen > 0 && fresh.length) {
+      console.log(
+        `[tg-wa] ${fresh.length} new after #${maxSeen}: ${fresh.map((m) => m.num).join(",")}`,
+      );
+    }
+
+    let sentNow = 0;
     for (const m of fresh) {
-      await sendWhatsAppToAll(formatMessage(m.text, m.url));
-      seen.add(m.id);
-      lastSentAt = new Date().toISOString();
-      saveState();
-      console.log(`[tg-wa] sent ${m.id}`);
+      try {
+        await sendWhatsAppToAll(formatMessage(m.text, m.url));
+        seen.add(m.id);
+        lastSentAt = new Date().toISOString();
+        saveState();
+        sentNow += 1;
+        console.log(`[tg-wa] sent ${m.id}`);
+        // Small pacing so Green API does not drop a burst.
+        if (fresh.length > 1) await new Promise((r) => setTimeout(r, 400));
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err);
+        console.error(
+          `[tg-wa] send failed ${m.id} — will retry next poll:`,
+          lastError,
+        );
+        writeHeartbeat({ error: lastError, pending: fresh.length - sentNow });
+        // Keep order: stop queue; unsent stay unseen for retry.
+        break;
+      }
     }
     if (!fresh.length) {
-      console.log(`[tg-wa] ok — no new posts (${new Date().toISOString()})`);
+      console.log(
+        `[tg-wa] ok — synced @${CHANNEL} thru #${maxSeen || "—"} (scanned ${messages.length}) (${new Date().toISOString()})`,
+      );
+    } else if (sentNow === fresh.length) {
+      console.log(`[tg-wa] forwarded ${sentNow}/${fresh.length} new posts`);
+    } else {
+      console.log(
+        `[tg-wa] forwarded ${sentNow}/${fresh.length} — ${fresh.length - sentNow} pending retry`,
+      );
     }
-    writeHeartbeat({ fresh: fresh.length });
+    writeHeartbeat({
+      fresh: fresh.length,
+      sentNow,
+      scanned: messages.length,
+      maxSeen,
+    });
   } catch (err) {
     telegramOk = false;
     consecutiveTickFailures += 1;
