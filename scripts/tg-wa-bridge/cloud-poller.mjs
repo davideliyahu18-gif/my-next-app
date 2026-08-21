@@ -379,6 +379,22 @@ function scheduleHourlyHealth() {
   }, wait);
 }
 
+/**
+ * Near :00 switch to a 5s pulse so we never miss the round hour
+ * even if the long setTimeout drifted or the event loop hiccuped.
+ */
+function startHourlyPulse() {
+  if (!HOURLY_HEALTH_ENABLED) return;
+  setInterval(() => {
+    const p = jerusalemNowParts();
+    const nearHour = p.minute >= 59 || p.minute < 5;
+    if (!nearHour) return;
+    maybeSendHourlyHealth(false).catch((err) =>
+      console.error("[tg-wa] hourly pulse failed", err),
+    );
+  }, 5_000).unref?.();
+}
+
 if (!TOKEN) {
   console.error("Missing GREEN_API_TOKEN");
   process.exit(1);
@@ -1225,6 +1241,7 @@ await tick();
 // Catch up if this clock-hour was missed (e.g. process was down at xx:00).
 await maybeSendHourlyHealth(false);
 scheduleHourlyHealth();
+startHourlyPulse();
 setInterval(() => {
   tick().catch((err) => console.error("[tg-wa] tick failed", err));
 }, INTERVAL_MS);

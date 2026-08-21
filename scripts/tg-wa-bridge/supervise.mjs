@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Keep cloud-poller.mjs running with exponential backoff restarts.
+ * Keep cloud-poller.mjs + hourly-failsafe.mjs running with restarts.
  */
 import { spawn } from "node:child_process";
 import {
@@ -16,15 +16,19 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "../..");
 const BOT_ENTRY = path.join(__dirname, "cloud-poller.mjs");
+const FAILSAFE_ENTRY = path.join(__dirname, "hourly-failsafe.mjs");
 const DATA_DIR = path.join(__dirname, ".data");
 const LOCK_FILE = path.join(DATA_DIR, "supervise.lock");
+const HEARTBEAT_FILE = path.join(DATA_DIR, "heartbeat.json");
 const MIN_BACKOFF_MS = 2_000;
 const MAX_BACKOFF_MS = 60_000;
 const HEALTHY_MS = 90_000;
+const STALE_HEARTBEAT_MS = Number(process.env.TG_WA_STALE_MS || 180_000);
 
 mkdirSync(DATA_DIR, { recursive: true });
 
 let child = null;
+let failsafe = null;
 let stopping = false;
 let backoffMs = MIN_BACKOFF_MS;
 let restartCount = 0;
@@ -73,9 +77,6 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-const HEARTBEAT_FILE = path.join(DATA_DIR, "heartbeat.json");
-const STALE_HEARTBEAT_MS = Number(process.env.TG_WA_STALE_MS || 180_000);
-
 function heartbeatAgeMs() {
   try {
     if (!existsSync(HEARTBEAT_FILE)) return Infinity;
@@ -86,6 +87,25 @@ function heartbeatAgeMs() {
   } catch {
     return Infinity;
   }
+}
+
+function startFailsafe() {
+  if (failsafe || stopping) return;
+  log("starting hourly failsafe watcher");
+  failsafe = spawn(process.execPath, [FAILSAFE_ENTRY], {
+    cwd: ROOT,
+    env: { ...process.env, TG_WA_SUPERVISED: "1" },
+    stdio: "inherit",
+  });
+  failsafe.on("exit", async (code, signal) => {
+    failsafe = null;
+    log(
+      `failsafe exited code=${code} signal=${signal || "-"} — restarting in 3s`,
+    );
+    if (stopping) return;
+    await sleep(3_000);
+    if (!stopping) startFailsafe();
+  });
 }
 
 function startChild() {
@@ -122,7 +142,6 @@ function startChild() {
 function watchStaleHeartbeat() {
   setInterval(() => {
     if (stopping || !child) return;
-    // Give brand-new child time to write first heartbeat.
     const age = heartbeatAgeMs();
     if (age > STALE_HEARTBEAT_MS) {
       log(
@@ -145,9 +164,10 @@ function shutdown(signal) {
   if (stopping) return;
   stopping = true;
   log(`received ${signal} — shutting down`);
-  if (child) {
+  for (const proc of [child, failsafe]) {
+    if (!proc) continue;
     try {
-      child.kill("SIGTERM");
+      proc.kill("SIGTERM");
     } catch {
       // ignore
     }
@@ -163,4 +183,5 @@ process.on("exit", releaseLock);
 
 log("supervisor online");
 startChild();
+startFailsafe();
 watchStaleHeartbeat();
