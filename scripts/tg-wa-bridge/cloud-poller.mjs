@@ -515,6 +515,34 @@ async function handleNotification(body) {
   await runCommand(command, type);
 }
 
+/** Fallback: personal phone commands arrive as incoming to the bot number. */
+async function pollIncomingCommands() {
+  const res = await fetch(
+    `https://api.green-api.com/waInstance${INSTANCE}/lastIncomingMessages/${TOKEN}?minutes=5`,
+  );
+  if (!res.ok) return;
+  const data = await res.json();
+  if (!Array.isArray(data)) return;
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  for (const m of data) {
+    if (!CHAT_IDS.includes(m.chatId)) continue;
+    const text = m.textMessage || m.extendedTextMessage || "";
+    const command = parseCommand(text);
+    if (!command) continue;
+    if (String(text).includes(TITLE)) continue;
+    const ts = Number(m.timestamp || 0);
+    if (ts && nowSec - ts > 120) continue;
+    const id = m.idMessage || `${m.chatId}:${text}:${m.timestamp}`;
+    if (answeredCommands.has(id)) continue;
+    rememberAnswered(id);
+    console.log(
+      `[tg-wa] command ${command} via lastIncoming from ${m.senderId || "?"}: ${text}`,
+    );
+    await runCommand(command, "lastIncoming");
+  }
+}
+
 /** Fallback: linked phone commands often appear only in lastOutgoingMessages. */
 async function pollOutgoingCommands() {
   const res = await fetch(
@@ -543,7 +571,7 @@ async function pollOutgoingCommands() {
   }
 }
 
-async function drainNotifications(max = 30) {
+async function drainNotifications(max = 80) {
   for (let i = 0; i < max; i += 1) {
     const res = await fetch(
       `https://api.green-api.com/waInstance${INSTANCE}/receiveNotification/${TOKEN}?receiveTimeout=1`,
@@ -568,7 +596,17 @@ async function drainNotifications(max = 30) {
     }
     if (!data || data.receiptId == null) break;
     try {
-      await handleNotification(data.body);
+      const type = data.body?.typeWebhook || "";
+      // Developer-plan quota spam must be deleted quickly or it blocks commands.
+      if (type === "quotaExceeded") {
+        if (i === 0) {
+          console.warn(
+            "[tg-wa] Green API correspondents quota exceeded — free a slot or upgrade",
+          );
+        }
+      } else {
+        await handleNotification(data.body);
+      }
     } catch (err) {
       console.error("[tg-wa] handle notification failed", err);
     }
@@ -641,8 +679,9 @@ async function tick() {
 async function commandLoop() {
   for (;;) {
     try {
-      await drainNotifications(20);
+      await drainNotifications(80);
       await pollOutgoingCommands();
+      await pollIncomingCommands();
       writeHeartbeat();
     } catch (err) {
       console.error("[tg-wa] command poll failed", err);
