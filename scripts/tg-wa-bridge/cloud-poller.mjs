@@ -424,15 +424,76 @@ async function deleteNotification(receiptId) {
   );
 }
 
+/** One reply per command — never re-answer the same סטטוס every poll (~1s). */
+const COMMAND_COOLDOWN_MS = Number(process.env.TG_WA_COMMAND_COOLDOWN_MS || 120_000);
+const COMMAND_MAX_AGE_SEC = 45;
+const ANSWERED_FILE = resolve(DATA_DIR, "answered-commands.json");
 const answeredCommands = new Set();
+/** @type {Map<string, number>} key = command → last reply epoch ms */
+const lastCommandReplyAt = new Map();
+let lastHistoryPollAt = 0;
+
+function loadAnswered() {
+  try {
+    if (!existsSync(ANSWERED_FILE)) return;
+    const raw = JSON.parse(readFileSync(ANSWERED_FILE, "utf8"));
+    for (const id of raw.ids || []) answeredCommands.add(id);
+    for (const [cmd, at] of Object.entries(raw.cooldowns || {})) {
+      lastCommandReplyAt.set(cmd, Number(at) || 0);
+    }
+  } catch {
+    /* ignore corrupt file */
+  }
+}
+
+function saveAnswered() {
+  try {
+    const ids = [...answeredCommands].slice(-400);
+    const cooldowns = Object.fromEntries(lastCommandReplyAt.entries());
+    writeFileSync(
+      ANSWERED_FILE,
+      JSON.stringify({ ids, cooldowns, updatedAt: new Date().toISOString() }),
+    );
+  } catch (err) {
+    console.warn("[tg-wa] save answered failed", err);
+  }
+}
 
 function rememberAnswered(id) {
+  if (!id) return;
   answeredCommands.add(id);
   if (answeredCommands.size > 500) {
     const trimmed = [...answeredCommands].slice(-300);
     answeredCommands.clear();
     for (const item of trimmed) answeredCommands.add(item);
   }
+}
+
+function fingerprint(chatId, command, timestamp) {
+  return `${chatId}|${command}|${Number(timestamp) || 0}`;
+}
+
+/**
+ * Claim a command once. Returns false if already answered / on cooldown.
+ * Cooldown is global per command (replies go to all groups).
+ */
+function claimCommand(command, chatId, timestamp, ...ids) {
+  if (!command) return false;
+  const now = Date.now();
+  const last = lastCommandReplyAt.get(command) || 0;
+  if (now - last < COMMAND_COOLDOWN_MS) return false;
+
+  const fp = fingerprint(chatId, command, timestamp);
+  if (answeredCommands.has(fp)) return false;
+  for (const id of ids) {
+    if (id && answeredCommands.has(id)) return false;
+  }
+
+  lastCommandReplyAt.set(command, now);
+  rememberAnswered(fp);
+  for (const id of ids) rememberAnswered(id);
+  saveAnswered();
+  return true;
 }
 
 async function runCommand(command, source = "webhook") {
@@ -485,7 +546,7 @@ async function handleNotification(body) {
   const type = body?.typeWebhook || "";
   // Messages from OTHER phones in the group:
   //   incomingMessageReceived
-  // Messages typed on the LINKED phone (052-312-3944) in the group:
+  // Messages typed on the LINKED phone in the group:
   //   outgoingMessageReceived
   if (
     type !== "incomingMessageReceived" &&
@@ -499,13 +560,14 @@ async function handleNotification(body) {
   if (!CHAT_IDS.includes(chatId)) return;
 
   const text = extractIncomingText(body);
+  if (String(text).includes(TITLE)) return;
   const command = parseCommand(text);
   if (!command) return;
 
+  const ts = body?.timestamp || body?.messageData?.timestamp || 0;
   const idMessage =
-    body?.idMessage || `${chatId}:${text}:${body?.timestamp || ""}`;
-  if (answeredCommands.has(idMessage)) return;
-  rememberAnswered(idMessage);
+    body?.idMessage || `${chatId}:${text}:${ts}`;
+  if (!claimCommand(command, chatId, ts, idMessage)) return;
 
   const who =
     body?.senderData?.senderName ||
@@ -518,7 +580,7 @@ async function handleNotification(body) {
 /** Fallback: personal phone commands arrive as incoming to the bot number. */
 async function pollIncomingCommands() {
   const res = await fetch(
-    `https://api.green-api.com/waInstance${INSTANCE}/lastIncomingMessages/${TOKEN}?minutes=5`,
+    `https://api.green-api.com/waInstance${INSTANCE}/lastIncomingMessages/${TOKEN}?minutes=2`,
   );
   if (!res.ok) return;
   const data = await res.json();
@@ -528,25 +590,26 @@ async function pollIncomingCommands() {
   for (const m of data) {
     if (!CHAT_IDS.includes(m.chatId)) continue;
     const text = m.textMessage || m.extendedTextMessage || "";
+    if (String(text).includes(TITLE)) continue;
     const command = parseCommand(text);
     if (!command) continue;
-    if (String(text).includes(TITLE)) continue;
     const ts = Number(m.timestamp || 0);
-    if (ts && nowSec - ts > 120) continue;
+    if (ts && nowSec - ts > COMMAND_MAX_AGE_SEC) continue;
     const id = m.idMessage || `${m.chatId}:${text}:${m.timestamp}`;
-    if (answeredCommands.has(id)) continue;
-    rememberAnswered(id);
+    if (!claimCommand(command, m.chatId, ts, id)) continue;
     console.log(
       `[tg-wa] command ${command} via lastIncoming from ${m.senderId || "?"}: ${text}`,
     );
     await runCommand(command, "lastIncoming");
+    // One command claim per history poll — avoid spam from duplicate API rows.
+    break;
   }
 }
 
 /** Fallback: linked phone commands often appear only in lastOutgoingMessages. */
 async function pollOutgoingCommands() {
   const res = await fetch(
-    `https://api.green-api.com/waInstance${INSTANCE}/lastOutgoingMessages/${TOKEN}?minutes=5`,
+    `https://api.green-api.com/waInstance${INSTANCE}/lastOutgoingMessages/${TOKEN}?minutes=2`,
   );
   if (!res.ok) return;
   const data = await res.json();
@@ -556,18 +619,17 @@ async function pollOutgoingCommands() {
   for (const m of data) {
     if (!CHAT_IDS.includes(m.chatId)) continue;
     const text = m.textMessage || m.extendedTextMessage || "";
-    const command = parseCommand(text);
-    if (!command) continue;
     // Skip our own API replies (they contain the title header).
     if (String(text).includes(TITLE)) continue;
+    const command = parseCommand(text);
+    if (!command) continue;
     const ts = Number(m.timestamp || 0);
-    // Only react to commands from the last ~2 minutes (linked-phone lag).
-    if (ts && nowSec - ts > 120) continue;
+    if (ts && nowSec - ts > COMMAND_MAX_AGE_SEC) continue;
     const id = m.idMessage || `${m.chatId}:${text}:${m.timestamp}`;
-    if (answeredCommands.has(id)) continue;
-    rememberAnswered(id);
+    if (!claimCommand(command, m.chatId, ts, id)) continue;
     console.log(`[tg-wa] command ${command} via lastOutgoing: ${text}`);
     await runCommand(command, "lastOutgoing");
+    break;
   }
 }
 
@@ -680,14 +742,20 @@ async function commandLoop() {
   for (;;) {
     try {
       await drainNotifications(80);
-      await pollOutgoingCommands();
-      await pollIncomingCommands();
+      // History APIs only every ~8s — receiveNotification handles realtime.
+      // Prevents re-scanning the same סטטוס every second.
+      const now = Date.now();
+      if (now - lastHistoryPollAt >= 8_000) {
+        lastHistoryPollAt = now;
+        await pollOutgoingCommands();
+        await pollIncomingCommands();
+      }
       writeHeartbeat();
     } catch (err) {
       console.error("[tg-wa] command poll failed", err);
       await new Promise((r) => setTimeout(r, 3000));
     }
-    await new Promise((r) => setTimeout(r, 1200));
+    await new Promise((r) => setTimeout(r, 1500));
   }
 }
 
@@ -701,11 +769,12 @@ process.on("uncaughtException", (err) => {
 });
 
 loadState();
+loadAnswered();
 console.log(
   `[tg-wa] polling @${CHANNEL} every ${INTERVAL_MS / 1000}s → ${CHAT_IDS.join(" + ")}`,
 );
 console.log(
-  "[tg-wa] group commands: סטטוס | עזרה | מקור | בדיקה | אחרון",
+  "[tg-wa] group commands: סטטוס | עזרה | מקור | בדיקה | אחרון (once / cooldown)",
 );
 
 await ensureHttpReceiveMode();
