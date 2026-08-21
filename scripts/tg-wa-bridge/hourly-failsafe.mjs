@@ -37,10 +37,6 @@ const INSTANCE = process.env.GREEN_API_INSTANCE;
 const TOKEN = process.env.GREEN_API_TOKEN;
 const GROUP =
   process.env.TG_WA_WHATSAPP_CHAT_IDS || process.env.TG_WA_HAMAL_CHAT_ID;
-const RING = (process.env.TG_WA_RING_CHAT_IDS || "972523123944@c.us")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
 const TITLE = "🇮🇱 חמ״ל התרעות ירי איראן 🛡️";
 
 function partsNow() {
@@ -106,7 +102,7 @@ function formatMsg() {
 }
 
 async function sendAll(message) {
-  const targets = [...new Set([GROUP, ...RING].filter(Boolean))];
+  const targets = [...new Set([GROUP].filter(Boolean))];
   for (const chatId of targets) {
     const res = await fetch(
       `https://api.green-api.com/waInstance${INSTANCE}/sendMessage/${TOKEN}`,

@@ -56,18 +56,6 @@ const CHAT_IDS = (
   .filter(Boolean)
   .filter((id, i, arr) => arr.indexOf(id) === i);
 const CHAT_ID = CHAT_IDS[0] || HAMAL_CHAT_ID;
-/** Personal phones that must get a private copy so they ring (not the QR-linked bot). */
-const RING_CHAT_IDS = (
-  process.env.TG_WA_RING_CHAT_IDS ||
-  process.env.TG_WA_PERSONAL_CHAT_ID ||
-  "972523123944@c.us"
-)
-  .split(",")
-  .map((id) => id.trim())
-  .filter(Boolean)
-  .filter((id, i, arr) => arr.indexOf(id) === i)
-  // Never "ring" the Green API linked bot number — messages to self don't notify.
-  .filter((id) => id !== "972549676816@c.us");
 const CHANNEL = (
   process.env.TG_WA_CHANNELS || "newsil5:ערוץ מקור"
 )
@@ -688,18 +676,12 @@ async function sendWhatsAppFileByUrl(chatId, mediaUrl, fileName, caption) {
   throw new Error(lastError || "sendFileByUrl failed");
 }
 
-/** Send media with bold title+text caption, or text-only. Never includes t.me links.
- *  Always mirrors to RING_CHAT_IDS (personal 3944) so that phone gets a notification.
- */
+/** Send media with bold title+text caption, or text-only. Group only — no personal DMs. */
 async function forwardPost(message) {
   const caption = formatMessage(message.text);
-  const targets = [...CHAT_IDS];
-  for (const ringId of RING_CHAT_IDS) {
-    if (!targets.includes(ringId)) targets.push(ringId);
-  }
   const errors = [];
   let anyOk = false;
-  for (const chatId of targets) {
+  for (const chatId of CHAT_IDS) {
     try {
       if (message.mediaUrl) {
         try {
@@ -724,9 +706,6 @@ async function forwardPost(message) {
       }
       await sendWhatsApp(caption, chatId);
       anyOk = true;
-      if (RING_CHAT_IDS.includes(chatId)) {
-        console.log(`[tg-wa] ring notify → ${chatId}`);
-      }
     } catch (err) {
       errors.push(
         `${chatId}: ${err instanceof Error ? err.message : String(err)}`,
@@ -742,19 +721,12 @@ async function forwardPost(message) {
 }
 
 async function sendWhatsAppToAll(text) {
-  const targets = [...CHAT_IDS];
-  for (const ringId of RING_CHAT_IDS) {
-    if (!targets.includes(ringId)) targets.push(ringId);
-  }
   const errors = [];
   let anyOk = false;
-  for (const chatId of targets) {
+  for (const chatId of CHAT_IDS) {
     try {
       await sendWhatsApp(text, chatId);
       anyOk = true;
-      if (RING_CHAT_IDS.includes(chatId)) {
-        console.log(`[tg-wa] ring notify → ${chatId}`);
-      }
     } catch (err) {
       errors.push(
         `${chatId}: ${err instanceof Error ? err.message : String(err)}`,
@@ -1222,11 +1194,6 @@ loadLastHourly();
 console.log(
   `[tg-wa] polling @${CHANNEL} every ${INTERVAL_MS / 1000}s → ${CHAT_IDS.join(" + ")}`,
 );
-if (RING_CHAT_IDS.length) {
-  console.log(
-    `[tg-wa] ring notify (private) → ${RING_CHAT_IDS.join(" + ")} (3944; bot QR is 6816)`,
-  );
-}
 console.log(
   "[tg-wa] group commands: סטטוס | עזרה | מקור | בדיקה | אחרון (once / cooldown)",
 );
