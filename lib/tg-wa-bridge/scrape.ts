@@ -21,6 +21,8 @@ function stripHtml(html: string): string {
 }
 
 function extractImage(block: string): string | undefined {
+  const video = block.match(/<video[^>]+src="([^"]+)"/i);
+  if (video?.[1]) return video[1];
   const bg = block.match(
     /tgme_widget_message_photo_wrap[^>]*style="[^"]*background-image:url\('([^']+)'\)/,
   );

@@ -100,9 +100,18 @@ export async function sendWhatsAppFileByUrl(input: {
   return greenApiCall("sendFileByUrl", {
     chatId,
     urlFile: input.url,
-    fileName: input.fileName || "image.jpg",
+    fileName: input.fileName || guessFileName(input.url),
     caption: input.caption || "",
   });
+}
+
+function guessFileName(url: string): string {
+  const clean = url.split("?")[0] || url;
+  if (/\.mp4$/i.test(clean)) return "video.mp4";
+  if (/\.webm$/i.test(clean)) return "video.webm";
+  if (/\.png$/i.test(clean)) return "photo.png";
+  if (/\.webp$/i.test(clean)) return "photo.webp";
+  return "photo.jpg";
 }
 
 export async function forwardMessageToWhatsApp(
@@ -115,10 +124,13 @@ export async function forwardMessageToWhatsApp(
 
   for (const chatId of chatIds) {
     if (message.imageUrl) {
+      const ext = /\.mp4|\.webm/i.test(message.imageUrl.split("?")[0] || "")
+        ? "mp4"
+        : "jpg";
       const fileResult = await sendWhatsAppFileByUrl({
         url: message.imageUrl,
         caption: text,
-        fileName: `${message.channel}-${message.id.replace(/[^a-zA-Z0-9_-]/g, "_")}.jpg`,
+        fileName: `${message.channel}-${message.id.replace(/[^a-zA-Z0-9_-]/g, "_")}.${ext}`,
         chatId,
       });
       if (fileResult.ok) {

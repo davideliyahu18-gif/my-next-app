@@ -96,7 +96,29 @@ function boldEveryLine(text) {
 function formatMessage(text, _url) {
   const body = boldEveryLine(text || "(הודעה)");
   // Name only + message — never attach Telegram links.
-  return `*${TITLE}*\n\n${body}`;
+  const full = `*${TITLE}*\n\n${body}`;
+  // Green API caption limit is 1024.
+  return full.length > 1000 ? `${full.slice(0, 999)}…` : full;
+}
+
+function extractMedia(block) {
+  const video = block.match(/<video[^>]+src="([^"]+)"/i);
+  if (video?.[1]) {
+    return { mediaUrl: video[1], mediaKind: "video", fileName: "video.mp4" };
+  }
+  const photoBg = block.match(
+    /tgme_widget_message_photo_wrap[^>]*style="[^"]*background-image:url\('([^']+)'\)/i,
+  );
+  if (photoBg?.[1]) {
+    return { mediaUrl: photoBg[1], mediaKind: "photo", fileName: "photo.jpg" };
+  }
+  const photoImg = block.match(
+    /<img[^>]+class="tgme_widget_message_photo"[^>]+src="([^"]+)"/i,
+  );
+  if (photoImg?.[1]) {
+    return { mediaUrl: photoImg[1], mediaKind: "photo", fileName: "photo.jpg" };
+  }
+  return { mediaUrl: null, mediaKind: null, fileName: null };
 }
 
 function normalizeCommandText(text) {
@@ -383,17 +405,26 @@ function parseChannelHtml(html) {
       /class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/,
     );
     let text = textMatch ? stripHtml(textMatch[1]) : "";
-    const hasPhoto = /tgme_widget_message_photo/.test(block);
-    const hasVideo = /tgme_widget_message_video/.test(block);
+    const media = extractMedia(block);
+    const hasPhoto = media.mediaKind === "photo" || /tgme_widget_message_photo/.test(block);
+    const hasVideo = media.mediaKind === "video" || /tgme_widget_message_video/.test(block);
     const hasDoc = /tgme_widget_message_document/.test(block);
     if (!text) {
-      if (hasPhoto) text = "(תמונה)";
-      else if (hasVideo) text = "(וידאו)";
+      if (hasVideo) text = "(וידאו)";
+      else if (hasPhoto) text = "(תמונה)";
       else if (hasDoc) text = "(קובץ)";
       else text = "(הודעה)";
     }
     const urlMsg = `https://t.me/${CHANNEL}/${post[1]}`;
-    out.push({ id, text, url: urlMsg, num });
+    out.push({
+      id,
+      text,
+      url: urlMsg,
+      num,
+      mediaUrl: media.mediaUrl,
+      mediaKind: media.mediaKind,
+      fileName: media.fileName,
+    });
   }
   return { messages: out, oldestId };
 }
@@ -484,6 +515,85 @@ async function sendWhatsApp(text, chatId = CHAT_ID, attempts = 4) {
     }
   }
   throw new Error(lastError || "WhatsApp send failed");
+}
+
+async function sendWhatsAppFileByUrl(chatId, mediaUrl, fileName, caption) {
+  let lastError = "";
+  for (let i = 1; i <= 4; i += 1) {
+    try {
+      const res = await fetchWithTimeout(
+        `https://api.green-api.com/waInstance${INSTANCE}/sendFileByUrl/${TOKEN}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chatId,
+            urlFile: mediaUrl,
+            fileName: fileName || "file.bin",
+            caption: caption || "",
+          }),
+        },
+        60_000,
+      );
+      const body = await res.text();
+      if (!res.ok) {
+        lastError = `sendFileByUrl HTTP ${res.status}: ${body.slice(0, 200)}`;
+        if (res.status === 429 || res.status >= 500) {
+          await new Promise((r) => setTimeout(r, 1500 * i));
+          continue;
+        }
+        throw new Error(lastError);
+      }
+      try {
+        const json = JSON.parse(body);
+        if (json?.idMessage) return;
+        if (json?.error) {
+          lastError = `sendFileByUrl: ${JSON.stringify(json).slice(0, 200)}`;
+          await new Promise((r) => setTimeout(r, 1500 * i));
+          continue;
+        }
+      } catch {
+        return;
+      }
+      return;
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+      if (i < 4) {
+        await new Promise((r) => setTimeout(r, 1500 * i));
+        continue;
+      }
+      throw new Error(lastError);
+    }
+  }
+  throw new Error(lastError || "sendFileByUrl failed");
+}
+
+/** Send media with bold title+text caption, or text-only. Never includes t.me links. */
+async function forwardPost(message) {
+  const caption = formatMessage(message.text);
+  for (const chatId of CHAT_IDS) {
+    if (message.mediaUrl) {
+      try {
+        await sendWhatsAppFileByUrl(
+          chatId,
+          message.mediaUrl,
+          message.fileName ||
+            (message.mediaKind === "video" ? "video.mp4" : "photo.jpg"),
+          caption,
+        );
+        console.log(
+          `[tg-wa] media ${message.mediaKind || "file"} sent for ${message.id}`,
+        );
+        continue;
+      } catch (err) {
+        console.warn(
+          `[tg-wa] media send failed ${message.id}, fallback text:`,
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+    await sendWhatsApp(caption, chatId);
+  }
 }
 
 async function sendWhatsAppToAll(text) {
@@ -662,7 +772,7 @@ async function runCommand(command, source = "webhook") {
           boldEveryLine(`${TITLE}\n\nאין הודעה אחרונה מהערוץ`),
         );
       } else {
-        await sendWhatsAppToAll(formatMessage(latest.text, latest.url));
+        await forwardPost(latest);
       }
     } else {
       return;
@@ -871,14 +981,14 @@ async function tick() {
     let sentNow = 0;
     for (const m of fresh) {
       try {
-        await sendWhatsAppToAll(formatMessage(m.text, m.url));
+        await forwardPost(m);
         seen.add(m.id);
         lastSentAt = new Date().toISOString();
         saveState();
         sentNow += 1;
-        console.log(`[tg-wa] sent ${m.id}`);
+        console.log(`[tg-wa] sent ${m.id}${m.mediaKind ? ` (${m.mediaKind})` : ""}`);
         // Small pacing so Green API does not drop a burst.
-        if (fresh.length > 1) await new Promise((r) => setTimeout(r, 400));
+        if (fresh.length > 1) await new Promise((r) => setTimeout(r, 600));
       } catch (err) {
         lastError = err instanceof Error ? err.message : String(err);
         console.error(
