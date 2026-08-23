@@ -24,20 +24,22 @@ export default function Hero() {
             </p>
 
             <h1 className="font-display text-5xl font-black leading-[1.05] tracking-tight text-gold-gradient sm:text-6xl md:text-7xl">
-              ליגות אירופה והעל
+              ליגות לייב
             </h1>
 
             <p className="mt-5 max-w-lg text-lg text-zinc-200 md:mr-0 md:ml-auto md:text-xl">
-              לוח משחקים מסודר וטבלאות מעודכנות — אנגלית, ספרדית, גרמנית, צרפתית, איטלקית וליגת העל
+              כל מה שקורה היום בכדורגל — משחקים, טבלאות וליגת האלופות במקום אחד
             </p>
-            <p className="mt-2 text-sm text-zinc-500">מקור נתונים: 365scores</p>
+            <p className="mt-2 text-sm text-zinc-500">
+              אתר עכשיו · אפליקציה בהמשך · נתונים מ-365scores
+            </p>
 
             <div className="mt-9 flex flex-wrap items-center justify-center gap-3 md:justify-start">
               <Link
-                href="/schedule"
+                href="#today"
                 className="inline-flex items-center gap-2 rounded-full bg-gold px-7 py-3.5 text-sm font-black text-black shadow-[0_12px_40px_rgba(212,175,55,0.4)] transition-all hover:scale-[1.03] hover:shadow-[0_16px_48px_rgba(212,175,55,0.55)]"
               >
-                לוח משחקים מלא
+                מה היום
               </Link>
               <a
                 href={WHATSAPP_GROUP_URL}
@@ -48,10 +50,10 @@ export default function Hero() {
                 התראות WhatsApp
               </a>
               <Link
-                href="#ucl"
+                href="/schedule"
                 className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/5 px-6 py-3.5 text-sm font-bold text-white transition-all hover:scale-[1.03] hover:border-gold/40 hover:text-gold"
               >
-                ליגת האלופות
+                לוח מלא
               </Link>
             </div>
           </div>

@@ -14,14 +14,30 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ליגות כדורגל · משחקים וטבלאות",
-  description: "לוח משחקים וטבלאות מעודכנות — ליגה אנגלית, ספרדית, גרמנית, צרפתית, איטלקית וליגת העל",
+  title: "ליגות לייב · משחקים וטבלאות",
+  description:
+    "היום בכדורגל — לוח משחקים, טבלאות וליגת האלופות בזמן אמת. אתר עכשיו, אפליקציה בהמשך.",
+  applicationName: "ליגות לייב",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "ליגות לייב",
+  },
+  icons: {
+    icon: [
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/icon-192.png", sizes: "192x192", type: "image/png" }],
+  },
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  themeColor: "#050505",
 };
 
 export default function RootLayout({

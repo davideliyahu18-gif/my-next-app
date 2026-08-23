@@ -9,6 +9,7 @@ import LeagueMatchesPanel from "./LeagueMatchesPanel";
 import LeagueNextMatch from "./LeagueNextMatch";
 import LeagueStandingsSection from "./LeagueStandingsSection";
 import SocialBar from "./SocialBar";
+import TodayFootballHub from "./TodayFootballHub";
 
 export default function LeaguesDashboard({
   initial,
@@ -45,6 +46,14 @@ export default function LeaguesDashboard({
 
   return (
     <>
+      <TodayFootballHub
+        leagues={data.leagues}
+        matchesByLeague={data.matchesByLeague}
+        liveMatches={data.liveMatches}
+        championsLeague={data.championsLeague}
+        nextMatch={data.nextMatch}
+      />
+
       <div className="mb-5 flex items-center justify-end gap-2 text-[11px] text-zinc-500">
         <span
           className={`h-1.5 w-1.5 rounded-full ${
