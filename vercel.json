@@ -3,6 +3,10 @@
     {
       "path": "/api/rockets/notify",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/push/live-goals",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

@@ -51,7 +51,7 @@ export async function POST(request: Request) {
     // Immediate proof that push works for this device.
     await sendPushToSubscriber(subscriber, {
       title: `${SITE_BRAND.nameWithEmoji}`,
-      body: "ההתראות הופעלו בהצלחה ✓ תקבל עדכונים על משחקים",
+      body: "ההתראות הופעלו ✓ תקבל פוש על שערי לייב",
       url: "/#today",
       tag: "push-welcome",
     });

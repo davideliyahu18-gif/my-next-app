@@ -26,6 +26,8 @@ export default function LeaguesDashboard({
       if (!response.ok) return;
       const dashboard = (await response.json()) as LeaguesDashboardView;
       setData(dashboard);
+      // Drive live-goal push detection while visitors are on the site.
+      void fetch("/api/push/live-goals", { method: "POST", cache: "no-store" });
     } catch {
       // Keep last good snapshot on transient network errors.
     } finally {
