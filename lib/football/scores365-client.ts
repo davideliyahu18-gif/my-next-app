@@ -121,5 +121,9 @@ export async function getScores365Game(
   gameId: string | number,
   options?: { fresh?: boolean },
 ): Promise<Scores365Json> {
-  return scores365Get("game/", { gameId }, { fresh: options?.fresh });
+  return scores365Get(
+    "game/",
+    { gameId, appTypeId: 5 },
+    { fresh: options?.fresh },
+  );
 }

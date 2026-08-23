@@ -12,6 +12,20 @@ import {
 } from "./scores365-client";
 import { scores365CompetitorLogoUrl } from "./team-logo";
 
+/** Friendly shortcuts → 365scores nameForURL slugs */
+const CLUB_SLUG_ALIASES: Record<string, string> = {
+  barcelona: "fc-barcelona",
+  barca: "fc-barcelona",
+  city: "manchester-city",
+  united: "manchester-united",
+  madrid: "real-madrid",
+  liverpool: "liverpool",
+  arsenal: "arsenal",
+  chelsea: "chelsea",
+  "real-madrid": "real-madrid",
+  "manchester-city": "manchester-city",
+};
+
 export type MatchEventKind = "goal" | "yellow" | "red" | "sub" | "other";
 
 export interface MatchEventView {
@@ -337,7 +351,9 @@ async function fetchCompetitorMatches(
 export async function fetchClubProfile(
   slug: string,
 ): Promise<ClubProfileView | null> {
-  const club = await findCompetitorInStandings(slug);
+  const raw = slug.trim().toLowerCase();
+  const resolved = CLUB_SLUG_ALIASES[raw] ?? raw;
+  const club = await findCompetitorInStandings(resolved);
   if (!club || !club.id) return null;
 
   const matches = await fetchCompetitorMatches(club.id);
