@@ -24,6 +24,10 @@ export interface LeagueMatchView {
   leagueFlag: string;
   home: string;
   away: string;
+  homeId: number;
+  awayId: number;
+  homeSlug: string;
+  awaySlug: string;
   homeLogo: string | null;
   awayLogo: string | null;
   homeScore: number | null;
@@ -130,7 +134,7 @@ function formatKickoff(iso: string): { dateLabel: string; timeLabel: string } {
   };
 }
 
-function parseGame(game: Scores365Json, league: FootballLeague): LeagueMatchView | null {
+export function parseGame(game: Scores365Json, league: FootballLeague): LeagueMatchView | null {
   const id = String(game.id ?? "");
   if (!id) return null;
 
@@ -162,6 +166,10 @@ function parseGame(game: Scores365Json, league: FootballLeague): LeagueMatchView
     leagueFlag: league.countryFlag,
     home: homeName,
     away: awayName,
+    homeId: Number(home.id ?? 0),
+    awayId: Number(away.id ?? 0),
+    homeSlug: String(home.nameForURL ?? ""),
+    awaySlug: String(away.nameForURL ?? ""),
     homeLogo: scores365CompetitorLogoUrl(
       home.id as string | number | null | undefined,
       home.imageVersion as string | number | null | undefined,
