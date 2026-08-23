@@ -1,13 +1,13 @@
 import Link from "next/link";
 import Footer from "@/components/Footer";
-import FullScheduleTable from "@/components/FullScheduleTable";
 import Header from "@/components/Header";
-import { getFullSchedule } from "@/lib/api";
+import LeagueScheduleTable from "@/components/LeagueScheduleTable";
+import { getLeagueSchedule } from "@/lib/api";
 
-export const revalidate = 30;
+export const revalidate = 60;
 
 export default async function SchedulePage() {
-  const matches = await getFullSchedule();
+  const schedule = await getLeagueSchedule();
 
   return (
     <div dir="rtl" className="min-h-screen bg-background font-sans text-foreground">
@@ -19,9 +19,10 @@ export default async function SchedulePage() {
         >
           ← חזרה לדף הבית
         </Link>
-        <FullScheduleTable
-          matches={matches}
-          fetchedAt={new Date().toISOString()}
+        <LeagueScheduleTable
+          leagues={schedule.leagues}
+          matchesByLeague={schedule.matchesByLeague}
+          fetchedAt={schedule.fetchedAt}
         />
       </main>
       <Footer />

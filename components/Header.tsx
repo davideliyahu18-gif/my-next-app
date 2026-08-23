@@ -124,14 +124,14 @@ export default function Header() {
           className="group flex items-center gap-3 text-right transition-opacity hover:opacity-90"
         >
           <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-gold/30 bg-gold/10 text-lg shadow-[0_0_24px_rgba(212,175,55,0.2)] transition-transform group-hover:scale-105">
-            🏆
+            ⚽
           </span>
           <span className="leading-tight">
             <span className="block text-[10px] font-bold tracking-[0.28em] text-gold">
-              LIVE THE DREAM
+              LIVE FOOTBALL
             </span>
             <span className="block text-base font-black tracking-wide text-white md:text-lg">
-              מונדיאל <span className="text-gold">2026</span>
+              ליגות <span className="text-gold">כדורגל</span>
             </span>
           </span>
         </button>

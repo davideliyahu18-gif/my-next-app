@@ -1,4 +1,3 @@
-import { TOURNAMENT_META } from "@/lib/constants";
 import ScrollLink from "./ScrollLink";
 
 const FOOTER_LINKS = [
@@ -14,9 +13,9 @@ export default function Footer() {
       <div className="mx-auto flex max-w-[1440px] flex-col items-center justify-between gap-6 px-4 py-12 md:flex-row md:px-8">
         <div className="text-center md:text-right">
           <p className="text-lg font-black text-white">
-            מונדיאל <span className="text-gold">2026</span>
+            ליגות <span className="text-gold">כדורגל</span>
           </p>
-          <p className="mt-1 text-xs text-zinc-500">{TOURNAMENT_META.footerHosts}</p>
+          <p className="mt-1 text-xs text-zinc-500">משחקים וטבלאות מעודכנות</p>
         </div>
 
         <div className="flex flex-wrap justify-center gap-6 text-sm text-zinc-400">
@@ -31,7 +30,7 @@ export default function Footer() {
           ))}
         </div>
 
-        <p className="text-xs text-zinc-600">© 2026 FIFA World Cup</p>
+        <p className="text-xs text-zinc-600">© 2026 · נתונים מ-365scores</p>
       </div>
     </footer>
   );
