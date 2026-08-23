@@ -38,6 +38,17 @@ export const FIFA_CONFIG = {
 
 export const TOURNAMENT_ID = "fifa-world-cup-2026";
 
+/** Public site brand — web now, app later. */
+export const SITE_BRAND = {
+  name: "כדורגל בזמן אמת",
+  nameWithEmoji: "כדורגל בזמן אמת ⚽",
+  shortName: "בזמן אמת",
+  eyebrow: "REAL-TIME FOOTBALL",
+  tagline: "משחקים, טבלאות וליגת האלופות — בזמן אמת",
+  description:
+    "כדורגל בזמן אמת ⚽ — לוח משחקים, טבלאות וליגת האלופות. אתר עכשיו, אפליקציה בהמשך.",
+} as const;
+
 export const IMAGES = {
   stadium:
     "https://images.unsplash.com/photo-1529900748604-07564a03e7a6?w=2400&q=85",

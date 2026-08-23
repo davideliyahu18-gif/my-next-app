@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { NAV_LINKS } from "@/lib/constants";
+import { NAV_LINKS, SITE_BRAND } from "@/lib/constants";
 import ScrollLink, { scrollToSection } from "./ScrollLink";
 
 const HASH_LINKS = NAV_LINKS.filter((link) => link.href.startsWith("#"));
@@ -128,10 +128,10 @@ export default function Header() {
           </span>
           <span className="leading-tight">
             <span className="block text-[10px] font-bold tracking-[0.28em] text-gold">
-              LIVE FOOTBALL
+              {SITE_BRAND.eyebrow}
             </span>
-            <span className="block text-base font-black tracking-wide text-white md:text-lg">
-              ליגות <span className="text-gold">לייב</span>
+            <span className="block text-sm font-black tracking-wide text-white sm:text-base md:text-lg">
+              כדורגל <span className="text-gold">בזמן אמת</span> ⚽
             </span>
           </span>
         </button>

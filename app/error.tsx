@@ -19,7 +19,7 @@ export default function Error({
       dir="rtl"
       className="flex min-h-screen flex-col items-center justify-center bg-black px-4 text-center text-white"
     >
-      <h1 className="text-2xl font-black text-[#d4af37]">מונדיאל 2026</h1>
+      <h1 className="text-2xl font-black text-[#d4af37]">כדורגל בזמן אמת ⚽</h1>
       <p className="mt-4 max-w-md text-sm text-zinc-400">
         משהו השתבש בטעינת הנתונים. האתר יחזור לעבוד בעוד רגע.
       </p>

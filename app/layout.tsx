@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist_Mono, Heebo } from "next/font/google";
+import { SITE_BRAND } from "@/lib/constants";
 import "./globals.css";
 
 const heebo = Heebo({
@@ -14,15 +15,14 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ליגות לייב · משחקים וטבלאות",
-  description:
-    "היום בכדורגל — לוח משחקים, טבלאות וליגת האלופות בזמן אמת. אתר עכשיו, אפליקציה בהמשך.",
-  applicationName: "ליגות לייב",
+  title: `${SITE_BRAND.nameWithEmoji} · משחקים וטבלאות`,
+  description: SITE_BRAND.description,
+  applicationName: SITE_BRAND.name,
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "ליגות לייב",
+    title: SITE_BRAND.name,
   },
   icons: {
     icon: [
