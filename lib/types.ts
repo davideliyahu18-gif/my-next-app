@@ -219,6 +219,8 @@ export interface FifaDashboardView {
   fetchedAt: string;
 }
 
+export type { LeaguesDashboardView } from "./football/leagues-data";
+
 export interface LineupPlayerView {
   id: string;
   name: string;

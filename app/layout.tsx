@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "מונדיאל 2026 · FIFA World Cup",
-  description: "עדכונים חיים, משחקים, בתים ומבקיעים — מונדיאל 2026",
+  title: "ליגות כדורגל · משחקים וטבלאות",
+  description: "לוח משחקים וטבלאות מעודכנות — ליגה אנגלית, ספרדית, גרמנית, צרפתית, איטלקית וליגת העל",
 };
 
 export const viewport: Viewport = {

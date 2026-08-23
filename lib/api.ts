@@ -1,6 +1,11 @@
 import { unstable_cache } from "next/cache";
 import { LIVE_DATA_REVALIDATE_SECONDS } from "./constants";
 import {
+  fetchLeagueSchedule,
+  fetchLeaguesDashboard,
+  type LeaguesDashboardView,
+} from "./football/leagues-data";
+import {
   fetchFifaDashboard,
   fetchFullSchedule,
   fetchGroupStandings,
@@ -87,6 +92,41 @@ export function getSemiFinalLineups(): Promise<SemiFinalLineupMatchView[]> {
       return fetchSemiFinalLineups(schedule, false);
     },
     [],
+  );
+}
+
+const emptyLeaguesDashboard = (): LeaguesDashboardView => ({
+  leagues: [],
+  matchesByLeague: {},
+  standings: [],
+  liveMatches: [],
+  nextMatch: null,
+  fetchedAt: new Date().toISOString(),
+});
+
+/** Cached leagues dashboard for SSR. */
+export function getLeaguesDashboard(): Promise<LeaguesDashboardView> {
+  return cachedFetch(
+    "leagues_dashboard",
+    () => fetchLeaguesDashboard(false),
+    emptyLeaguesDashboard(),
+  );
+}
+
+/** Live leagues dashboard for client polling. */
+export function getLeaguesDashboardLive(): Promise<LeaguesDashboardView> {
+  return safeFetch(
+    "leagues_dashboard_live",
+    () => fetchLeaguesDashboard(true),
+    emptyLeaguesDashboard(),
+  );
+}
+
+export function getLeagueSchedule(): Promise<LeaguesDashboardView> {
+  return cachedFetch(
+    "league_schedule",
+    () => fetchLeagueSchedule(false),
+    emptyLeaguesDashboard(),
   );
 }
 
