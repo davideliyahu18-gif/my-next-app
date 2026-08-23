@@ -22,6 +22,7 @@ export default async function SchedulePage() {
         <LeagueScheduleTable
           leagues={schedule.leagues}
           matchesByLeague={schedule.matchesByLeague}
+          championsLeague={schedule.championsLeague}
           fetchedAt={schedule.fetchedAt}
         />
       </main>

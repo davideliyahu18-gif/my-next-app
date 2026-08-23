@@ -12,6 +12,7 @@ export interface FootballLeague {
   espnId?: string;
 }
 
+/** Domestic leagues — shown together in the leagues board. */
 export const FOOTBALL_LEAGUES: FootballLeague[] = [
   {
     id: 11,
@@ -63,14 +64,33 @@ export const FOOTBALL_LEAGUES: FootballLeague[] = [
   },
 ];
 
+/** Champions League — separate category from domestic leagues. */
+export const CHAMPIONS_LEAGUE: FootballLeague = {
+  id: 572,
+  slug: "ucl",
+  nameHe: "ליגת האלופות",
+  nameEn: "UEFA Champions League",
+  countryFlag: "🏆",
+  espnId: "uefa.champions",
+};
+
+export const ALL_FOOTBALL_COMPETITIONS: FootballLeague[] = [
+  ...FOOTBALL_LEAGUES,
+  CHAMPIONS_LEAGUE,
+];
+
 export const LEAGUE_BY_ID = new Map(
-  FOOTBALL_LEAGUES.map((league) => [league.id, league]),
+  ALL_FOOTBALL_COMPETITIONS.map((league) => [league.id, league]),
 );
 
 export const LEAGUE_BY_SLUG = new Map(
-  FOOTBALL_LEAGUES.map((league) => [league.slug, league]),
+  ALL_FOOTBALL_COMPETITIONS.map((league) => [league.slug, league]),
 );
 
 export function getLeagueIdsCsv(): string {
   return FOOTBALL_LEAGUES.map((league) => league.id).join(",");
+}
+
+export function getDomesticAndUclIdsCsv(): string {
+  return ALL_FOOTBALL_COMPETITIONS.map((league) => league.id).join(",");
 }

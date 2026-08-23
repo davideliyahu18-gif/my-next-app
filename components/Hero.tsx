@@ -48,10 +48,10 @@ export default function Hero() {
                 התראות WhatsApp
               </a>
               <Link
-                href="#standings"
+                href="#ucl"
                 className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/5 px-6 py-3.5 text-sm font-bold text-white transition-all hover:scale-[1.03] hover:border-gold/40 hover:text-gold"
               >
-                טבלאות ליגות
+                ליגת האלופות
               </Link>
             </div>
           </div>
