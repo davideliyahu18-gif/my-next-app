@@ -37,6 +37,11 @@ yarn-error.log*
 # vercel
 .vercel
 
+# capacitor ios build artifacts (keep ios/App source in git)
+ios/App/build
+ios/App/Pods
+ios/DerivedData
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
