@@ -2,6 +2,7 @@ import type {
   ChampionsLeagueView,
   LeagueMatchView,
 } from "@/lib/football/leagues-data";
+import Link from "next/link";
 import { formatGoalDifference } from "@/lib/utils";
 import DashboardCard from "./DashboardCard";
 import TeamCrest from "./TeamCrest";
@@ -15,9 +16,10 @@ function MatchRow({ match }: { match: LeagueMatchView }) {
       : match.timeLabel || "VS";
 
   return (
-    <div
+    <Link
+      href={`/match/${match.id}`}
       className={`flex items-center gap-3 border-b border-white/[0.05] px-5 py-4 last:border-0 ${
-        isLive ? "bg-live/[0.06]" : ""
+        isLive ? "bg-live/[0.06] hover:bg-live/[0.1]" : "hover:bg-white/[0.02]"
       }`}
     >
       <div className="w-16 shrink-0 text-center">
@@ -60,7 +62,7 @@ function MatchRow({ match }: { match: LeagueMatchView }) {
           <p className="text-[10px] font-bold text-zinc-400">{match.minute}</p>
         )}
       </div>
-    </div>
+    </Link>
   );
 }
 

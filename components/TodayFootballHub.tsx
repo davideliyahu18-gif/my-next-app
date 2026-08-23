@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type {
   ChampionsLeagueView,
@@ -62,8 +63,9 @@ function MatchTile({ match }: { match: LeagueMatchView }) {
       : match.timeLabel;
 
   return (
-    <article
-      className={`min-w-[220px] snap-start rounded-2xl border px-4 py-4 transition-transform duration-300 hover:-translate-y-1 ${
+    <Link
+      href={`/match/${match.id}`}
+      className={`block min-w-[220px] snap-start rounded-2xl border px-4 py-4 transition-transform duration-300 hover:-translate-y-1 ${
         isLive
           ? "border-live/40 bg-gradient-to-b from-red-950/50 to-black/40"
           : "border-white/[0.08] bg-white/[0.03] hover:border-gold/35"
@@ -99,7 +101,7 @@ function MatchTile({ match }: { match: LeagueMatchView }) {
       >
         {score}
       </p>
-    </article>
+    </Link>
   );
 }
 

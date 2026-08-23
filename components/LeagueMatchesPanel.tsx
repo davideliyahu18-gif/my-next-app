@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import type { FootballLeague, LeagueMatchView } from "@/lib/football/leagues-data";
 import DashboardCard from "./DashboardCard";
@@ -36,10 +37,11 @@ function MatchRow({ match }: { match: LeagueMatchView }) {
       : match.timeLabel || "VS";
 
   return (
-    <div
+    <Link
+      href={`/match/${match.id}`}
       className={`flex items-center gap-3 border-b border-white/[0.05] px-5 py-4 last:border-0 transition-colors ${
         isLive
-          ? "bg-gradient-to-l from-live/[0.08] via-transparent to-transparent"
+          ? "bg-gradient-to-l from-live/[0.08] via-transparent to-transparent hover:from-live/[0.12]"
           : "hover:bg-white/[0.02]"
       }`}
     >
@@ -84,7 +86,7 @@ function MatchRow({ match }: { match: LeagueMatchView }) {
           <p className="text-[10px] font-bold text-zinc-400">{match.minute}</p>
         )}
       </div>
-    </div>
+    </Link>
   );
 }
 
