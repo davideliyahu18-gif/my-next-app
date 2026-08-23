@@ -203,9 +203,16 @@ export default function TodayFootballHub({
           <p className="text-[11px] font-bold tracking-[0.24em] text-gold">
             היום בכדורגל
           </p>
-          <h2 className="mt-2 text-3xl font-black leading-tight text-white md:text-4xl">
-            כל המשחקים של היום במקום אחד
-          </h2>
+          <div className="mt-2 space-y-2">
+            <h2 className="flex items-start gap-2 text-2xl font-black leading-tight text-white md:text-3xl">
+              <span className="text-gold">•</span>
+              <span>הכדורגל שלך — בזמן אמת</span>
+            </h2>
+            <p className="flex items-start gap-2 text-xl font-black leading-tight text-gold md:text-2xl">
+              <span>•</span>
+              <span>לא מפספסים גול</span>
+            </p>
+          </div>
           <p className="mt-2 text-sm text-zinc-400">{todayLabel}</p>
 
           {spotlight ? (
