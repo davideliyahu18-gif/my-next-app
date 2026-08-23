@@ -1,7 +1,9 @@
 import {
+  ALL_FOOTBALL_COMPETITIONS,
+  CHAMPIONS_LEAGUE,
   FOOTBALL_LEAGUES,
   LEAGUE_BY_ID,
-  getLeagueIdsCsv,
+  getDomesticAndUclIdsCsv,
   type FootballLeague,
 } from "./competitions";
 export type { FootballLeague } from "./competitions";
@@ -43,6 +45,9 @@ export interface LeagueStandingRowView {
   goalsAgainst: number;
   gd: number;
   points: number;
+  /** Qualification / zone label when available (e.g. שמינית גמר). */
+  zone: string | null;
+  zoneColor: string | null;
 }
 
 export interface LeagueStandingsView {
@@ -54,10 +59,17 @@ export interface LeagueStandingsView {
   rows: LeagueStandingRowView[];
 }
 
+export interface ChampionsLeagueView {
+  competition: FootballLeague;
+  matches: LeagueMatchView[];
+  standings: LeagueStandingsView;
+}
+
 export interface LeaguesDashboardView {
   leagues: FootballLeague[];
   matchesByLeague: Record<string, LeagueMatchView[]>;
   standings: LeagueStandingsView[];
+  championsLeague: ChampionsLeagueView;
   liveMatches: LeagueMatchView[];
   nextMatch: LeagueMatchView | null;
   fetchedAt: string;
@@ -170,6 +182,19 @@ function parseStandingsPayload(
     ? (block.rows as Scores365Json[])
     : [];
 
+  const destinations = Array.isArray(block.destinations)
+    ? (block.destinations as Scores365Json[])
+    : [];
+  const destinationByNum = new Map<number, { name: string; color: string | null }>();
+  for (const destination of destinations) {
+    const num = Number(destination.num);
+    if (!Number.isFinite(num)) continue;
+    destinationByNum.set(num, {
+      name: String(destination.name ?? destination.guaranteedText ?? "").trim(),
+      color: destination.color ? String(destination.color) : null,
+    });
+  }
+
   const rows: LeagueStandingRowView[] = rowsRaw
     .map((row) => {
       const competitor = asRecord(row.competitor) ?? {};
@@ -183,6 +208,9 @@ function parseStandingsPayload(
           ? Math.trunc(Number(row.ratio))
           : goalsFor - goalsAgainst;
 
+      const destinationNum = Number(row.destinationNum ?? 0);
+      const destination = destinationByNum.get(destinationNum);
+
       return {
         rank: Math.trunc(Number(row.position ?? 0)) || 0,
         teamName,
@@ -194,15 +222,19 @@ function parseStandingsPayload(
         goalsAgainst,
         gd,
         points: Math.trunc(Number(row.points ?? 0)),
+        zone: destination?.name || null,
+        zoneColor: destination?.color || null,
       };
     })
     .filter((row): row is LeagueStandingRowView => Boolean(row))
     .sort((a, b) => a.rank - b.rank || b.points - a.points);
 
   const season = asRecord(payload.season);
-  const seasonLabel = season
-    ? String(season.displayName ?? season.name ?? "").trim() || null
-    : null;
+  const seasonLabel =
+    (block.displayName ? String(block.displayName).trim() : null) ||
+    (season
+      ? String(season.displayName ?? season.name ?? "").trim() || null
+      : null);
 
   return {
     leagueId: league.id,
@@ -222,7 +254,7 @@ function addDays(base: Date, days: number): Date {
 
 function groupMatchesByLeague(matches: LeagueMatchView[]): Record<string, LeagueMatchView[]> {
   const grouped: Record<string, LeagueMatchView[]> = {};
-  for (const league of FOOTBALL_LEAGUES) {
+  for (const league of ALL_FOOTBALL_COMPETITIONS) {
     grouped[league.slug] = [];
   }
   for (const match of matches) {
@@ -237,7 +269,12 @@ function groupMatchesByLeague(matches: LeagueMatchView[]): Record<string, League
   return grouped;
 }
 
-function pickBoardMatches(matches: LeagueMatchView[]): LeagueMatchView[] {
+function pickBoardMatches(
+  matches: LeagueMatchView[],
+  options?: { upcomingLimit?: number; recentLimit?: number },
+): LeagueMatchView[] {
+  const upcomingLimit = options?.upcomingLimit ?? 8;
+  const recentLimit = options?.recentLimit ?? 4;
   const now = Date.now();
   const live = matches.filter((match) => match.status === "live");
   const upcoming = matches
@@ -248,9 +285,9 @@ function pickBoardMatches(matches: LeagueMatchView[]): LeagueMatchView[] {
     .sort(
       (a, b) => new Date(b.kickoffAt).getTime() - new Date(a.kickoffAt).getTime(),
     )
-    .slice(0, 4);
+    .slice(0, recentLimit);
 
-  const board = [...live, ...upcoming.slice(0, 8), ...recent];
+  const board = [...live, ...upcoming.slice(0, upcomingLimit), ...recent];
   const seen = new Set<string>();
   return board.filter((match) => {
     if (seen.has(match.id)) return false;
@@ -259,29 +296,24 @@ function pickBoardMatches(matches: LeagueMatchView[]): LeagueMatchView[] {
   });
 }
 
-export async function fetchLeaguesDashboard(
-  fresh = false,
-): Promise<LeaguesDashboardView> {
-  const now = new Date();
-  const start = addDays(now, -3);
-  const end = addDays(now, 14);
+function emptyChampionsLeague(): ChampionsLeagueView {
+  return {
+    competition: CHAMPIONS_LEAGUE,
+    matches: [],
+    standings: {
+      leagueId: CHAMPIONS_LEAGUE.id,
+      leagueSlug: CHAMPIONS_LEAGUE.slug,
+      leagueName: CHAMPIONS_LEAGUE.nameHe,
+      leagueFlag: CHAMPIONS_LEAGUE.countryFlag,
+      seasonLabel: null,
+      rows: [],
+    },
+  };
+}
 
-  const [gamesPayload, ...standingsPayloads] = await Promise.all([
-    getScores365Games({
-      competitionIds: getLeagueIdsCsv(),
-      startDate: start,
-      endDate: end,
-      fresh,
-    }),
-    ...FOOTBALL_LEAGUES.map((league) =>
-      getScores365Standings(league.id, { fresh }).catch(() => ({ standings: [] })),
-    ),
-  ]);
-
-  const games = Array.isArray(gamesPayload.games)
-    ? (gamesPayload.games as Scores365Json[])
-    : [];
-
+function parseMatchesFromGames(
+  games: Scores365Json[],
+): LeagueMatchView[] {
   const allMatches: LeagueMatchView[] = [];
   for (const game of games) {
     const competitionId = Number(game.competitionId ?? 0);
@@ -290,22 +322,77 @@ export async function fetchLeaguesDashboard(
     const parsed = parseGame(game, league);
     if (parsed) allMatches.push(parsed);
   }
+  return allMatches;
+}
+
+export async function fetchLeaguesDashboard(
+  fresh = false,
+): Promise<LeaguesDashboardView> {
+  const now = new Date();
+  const start = addDays(now, -3);
+  const end = addDays(now, 21);
+
+  const [gamesPayload, uclStandingsPayload, ...standingsPayloads] =
+    await Promise.all([
+      getScores365Games({
+        competitionIds: getDomesticAndUclIdsCsv(),
+        startDate: start,
+        endDate: end,
+        fresh,
+      }),
+      getScores365Standings(CHAMPIONS_LEAGUE.id, { fresh }).catch(() => ({
+        standings: [],
+      })),
+      ...FOOTBALL_LEAGUES.map((league) =>
+        getScores365Standings(league.id, { fresh }).catch(() => ({
+          standings: [],
+        })),
+      ),
+    ]);
+
+  const games = Array.isArray(gamesPayload.games)
+    ? (gamesPayload.games as Scores365Json[])
+    : [];
+
+  const allMatches = parseMatchesFromGames(games);
 
   const matchesByLeague: Record<string, LeagueMatchView[]> = {};
   for (const league of FOOTBALL_LEAGUES) {
-    const leagueMatches = allMatches.filter((match) => match.leagueId === league.id);
+    const leagueMatches = allMatches.filter(
+      (match) => match.leagueId === league.id,
+    );
     matchesByLeague[league.slug] = pickBoardMatches(leagueMatches);
   }
+
+  const uclMatches = allMatches.filter(
+    (match) => match.leagueId === CHAMPIONS_LEAGUE.id,
+  );
+  const championsLeague: ChampionsLeagueView = {
+    competition: CHAMPIONS_LEAGUE,
+    matches: pickBoardMatches(uclMatches, {
+      upcomingLimit: 16,
+      recentLimit: 8,
+    }),
+    standings: parseStandingsPayload(
+      uclStandingsPayload as Scores365Json,
+      CHAMPIONS_LEAGUE,
+    ),
+  };
+
+  const domesticMatches = allMatches.filter(
+    (match) => match.leagueId !== CHAMPIONS_LEAGUE.id,
+  );
 
   const liveMatches = allMatches
     .filter((match) => match.status === "live")
     .sort((a, b) => new Date(a.kickoffAt).getTime() - new Date(b.kickoffAt).getTime());
 
   const nextMatch =
-    allMatches
+    domesticMatches
       .filter((match) => match.status === "upcoming")
       .sort(
-        (a, b) => new Date(a.kickoffAt).getTime() - new Date(b.kickoffAt).getTime(),
+        (a, b) =>
+          new Date(a.kickoffAt).getTime() - new Date(b.kickoffAt).getTime(),
       )[0] ?? null;
 
   const standings = FOOTBALL_LEAGUES.map((league, index) =>
@@ -316,6 +403,7 @@ export async function fetchLeaguesDashboard(
     leagues: FOOTBALL_LEAGUES,
     matchesByLeague,
     standings,
+    championsLeague,
     liveMatches,
     nextMatch,
     fetchedAt: new Date().toISOString(),
@@ -327,32 +415,39 @@ export async function fetchLeagueSchedule(
 ): Promise<LeaguesDashboardView> {
   const now = new Date();
   const start = addDays(now, -7);
-  const end = addDays(now, 21);
+  const end = addDays(now, 28);
 
-  const gamesPayload = await getScores365Games({
-    competitionIds: getLeagueIdsCsv(),
-    startDate: start,
-    endDate: end,
-    fresh,
-  });
+  const [gamesPayload, uclStandingsPayload] = await Promise.all([
+    getScores365Games({
+      competitionIds: getDomesticAndUclIdsCsv(),
+      startDate: start,
+      endDate: end,
+      fresh,
+    }),
+    getScores365Standings(CHAMPIONS_LEAGUE.id, { fresh }).catch(() => ({
+      standings: [],
+    })),
+  ]);
 
   const games = Array.isArray(gamesPayload.games)
     ? (gamesPayload.games as Scores365Json[])
     : [];
 
-  const allMatches: LeagueMatchView[] = [];
-  for (const game of games) {
-    const competitionId = Number(game.competitionId ?? 0);
-    const league = LEAGUE_BY_ID.get(competitionId);
-    if (!league) continue;
-    const parsed = parseGame(game, league);
-    if (parsed) allMatches.push(parsed);
-  }
+  const allMatches = parseMatchesFromGames(games);
+  const grouped = groupMatchesByLeague(allMatches);
 
   return {
     leagues: FOOTBALL_LEAGUES,
-    matchesByLeague: groupMatchesByLeague(allMatches),
+    matchesByLeague: grouped,
     standings: [],
+    championsLeague: {
+      competition: CHAMPIONS_LEAGUE,
+      matches: grouped[CHAMPIONS_LEAGUE.slug] ?? [],
+      standings: parseStandingsPayload(
+        uclStandingsPayload as Scores365Json,
+        CHAMPIONS_LEAGUE,
+      ),
+    },
     liveMatches: allMatches.filter((match) => match.status === "live"),
     nextMatch: null,
     fetchedAt: new Date().toISOString(),

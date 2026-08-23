@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { FIFA_LIVE_POLL_MS } from "@/lib/constants";
 import type { LeaguesDashboardView } from "@/lib/football/leagues-data";
 import FeedNews from "./FeedNews";
+import ChampionsLeagueSection from "./ChampionsLeagueSection";
 import LeagueMatchesPanel from "./LeagueMatchesPanel";
 import LeagueNextMatch from "./LeagueNextMatch";
 import LeagueStandingsSection from "./LeagueStandingsSection";
@@ -79,6 +80,7 @@ export default function LeaguesDashboard({
       </div>
 
       <LeagueStandingsSection standings={data.standings} />
+      <ChampionsLeagueSection data={data.championsLeague} />
     </>
   );
 }

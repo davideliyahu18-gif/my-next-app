@@ -1,6 +1,10 @@
 "use client";
 
-import type { FootballLeague, LeagueMatchView } from "@/lib/football/leagues-data";
+import type {
+  ChampionsLeagueView,
+  FootballLeague,
+  LeagueMatchView,
+} from "@/lib/football/leagues-data";
 import DashboardCard from "./DashboardCard";
 
 function ScheduleRow({ match }: { match: LeagueMatchView }) {
@@ -20,13 +24,59 @@ function ScheduleRow({ match }: { match: LeagueMatchView }) {
   );
 }
 
+function MatchesCard({
+  title,
+  badge,
+  matches,
+  emptyText,
+}: {
+  title: string;
+  badge: string;
+  matches: LeagueMatchView[];
+  emptyText: string;
+}) {
+  return (
+    <DashboardCard
+      title={title}
+      badge={
+        <span className="text-[10px] font-semibold text-zinc-500">{badge}</span>
+      }
+    >
+      {matches.length === 0 ? (
+        <p className="px-5 py-10 text-center text-sm text-zinc-500">{emptyText}</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px] text-sm">
+            <thead>
+              <tr className="border-b border-white/[0.06] text-[11px] text-zinc-500">
+                <th className="px-4 py-2.5 text-right font-semibold">תאריך</th>
+                <th className="px-2 py-2.5 text-right font-semibold">בית</th>
+                <th className="px-2 py-2.5 text-center font-semibold">תוצאה</th>
+                <th className="px-2 py-2.5 text-right font-semibold">חוץ</th>
+                <th className="px-4 py-2.5 text-right font-semibold">סטטוס</th>
+              </tr>
+            </thead>
+            <tbody>
+              {matches.map((match) => (
+                <ScheduleRow key={match.id} match={match} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </DashboardCard>
+  );
+}
+
 export default function LeagueScheduleTable({
   leagues,
   matchesByLeague,
+  championsLeague,
   fetchedAt,
 }: {
   leagues: FootballLeague[];
   matchesByLeague: Record<string, LeagueMatchView[]>;
+  championsLeague?: ChampionsLeagueView;
   fetchedAt: string;
 }) {
   return (
@@ -48,43 +98,33 @@ export default function LeagueScheduleTable({
         </span>
       </div>
 
+      {championsLeague && (
+        <div className="space-y-3">
+          <h2 className="text-xl font-black text-gold">
+            {championsLeague.competition.countryFlag}{" "}
+            {championsLeague.competition.nameHe}
+          </h2>
+          <MatchesCard
+            title="משחקי ליגת האלופות"
+            badge={`${championsLeague.matches.length} משחקים`}
+            matches={championsLeague.matches}
+            emptyText="אין משחקים בלוח לליגת האלופות כרגע"
+          />
+        </div>
+      )}
+
+      <h2 className="text-xl font-black text-white">ליגות מקומיות</h2>
+
       {leagues.map((league) => {
         const matches = matchesByLeague[league.slug] ?? [];
         return (
-          <DashboardCard
+          <MatchesCard
             key={league.slug}
             title={`${league.countryFlag} ${league.nameHe}`}
-            badge={
-              <span className="text-[10px] font-semibold text-zinc-500">
-                {matches.length} משחקים
-              </span>
-            }
-          >
-            {matches.length === 0 ? (
-              <p className="px-5 py-10 text-center text-sm text-zinc-500">
-                אין משחקים בלוח לליגה הזו
-              </p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[640px] text-sm">
-                  <thead>
-                    <tr className="border-b border-white/[0.06] text-[11px] text-zinc-500">
-                      <th className="px-4 py-2.5 text-right font-semibold">תאריך</th>
-                      <th className="px-2 py-2.5 text-right font-semibold">בית</th>
-                      <th className="px-2 py-2.5 text-center font-semibold">תוצאה</th>
-                      <th className="px-2 py-2.5 text-right font-semibold">חוץ</th>
-                      <th className="px-4 py-2.5 text-right font-semibold">סטטוס</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {matches.map((match) => (
-                      <ScheduleRow key={match.id} match={match} />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </DashboardCard>
+            badge={`${matches.length} משחקים`}
+            matches={matches}
+            emptyText="אין משחקים בלוח לליגה הזו"
+          />
         );
       })}
     </div>

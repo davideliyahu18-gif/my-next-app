@@ -43,7 +43,8 @@ html {
 #standings,
 #scorers,
 #stats,
-#teams {
+#teams,
+#ucl {
   scroll-margin-top: 4.5rem;
 }
 
