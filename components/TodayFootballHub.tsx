@@ -7,6 +7,7 @@ import type {
   LeagueMatchView,
 } from "@/lib/football/leagues-data";
 import MatchCountdown from "./MatchCountdown";
+import EnablePushNotifications from "./EnablePushNotifications";
 
 const FAVORITES_KEY = "football-favorite-leagues-v1";
 
@@ -291,7 +292,10 @@ export default function TodayFootballHub({
             </div>
           )}
 
-          <div className="mt-6 flex flex-col gap-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.06] p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="mt-6 space-y-3">
+            <EnablePushNotifications />
+
+            <div className="flex flex-col gap-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.06] p-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-sm font-bold text-emerald-300">אתר עכשיו · אפליקציה בהמשך</p>
               <p className="mt-1 text-xs text-zinc-400">
@@ -316,6 +320,7 @@ export default function TodayFootballHub({
           {installTip && (
             <p className="mt-3 text-xs font-semibold text-emerald-300/90">{installTip}</p>
           )}
+          </div>
         </div>
       </div>
     </section>
