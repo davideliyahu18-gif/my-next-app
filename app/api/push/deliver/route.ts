@@ -55,7 +55,7 @@ export async function POST(request: Request) {
       tag: body.tag || "goal-client",
     });
 
-    return NextResponse.json({ ok: result.ok, ...result });
+    return NextResponse.json({ ok: result.ok, gone: result.gone, error: result.error });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Deliver failed";
     console.error("[push] deliver failed:", error);
