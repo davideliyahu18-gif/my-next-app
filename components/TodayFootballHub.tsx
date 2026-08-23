@@ -204,7 +204,7 @@ export default function TodayFootballHub({
             היום בכדורגל
           </p>
           <h2 className="mt-2 text-3xl font-black leading-tight text-white md:text-4xl">
-            למה לפתוח עכשיו
+            כל המשחקים של היום במקום אחד
           </h2>
           <p className="mt-2 text-sm text-zinc-400">{todayLabel}</p>
 
