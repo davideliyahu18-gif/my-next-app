@@ -1,5 +1,6 @@
 import type { LeagueMatchView } from "@/lib/football/leagues-data";
 import DashboardCard from "./DashboardCard";
+import TeamCrest from "./TeamCrest";
 
 export default function LeagueNextMatch({
   match,
@@ -35,11 +36,19 @@ export default function LeagueNextMatch({
           </p>
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-2">
-              <span className="truncate text-sm font-bold text-white">{match.home}</span>
+              <span className="flex min-w-0 items-center gap-2">
+                <TeamCrest src={match.homeLogo} name={match.home} size={24} />
+                <span className="truncate text-sm font-bold text-white">
+                  {match.home}
+                </span>
+              </span>
               <span className="text-lg font-black text-zinc-300">VS</span>
             </div>
-            <div className="flex items-center justify-between gap-2">
-              <span className="truncate text-sm font-bold text-white">{match.away}</span>
+            <div className="flex items-center gap-2">
+              <TeamCrest src={match.awayLogo} name={match.away} size={24} />
+              <span className="truncate text-sm font-bold text-white">
+                {match.away}
+              </span>
             </div>
           </div>
           <div className="mt-4 flex items-center justify-between border-t border-white/[0.06] pt-4 text-xs text-zinc-400">

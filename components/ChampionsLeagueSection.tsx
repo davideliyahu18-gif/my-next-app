@@ -4,6 +4,7 @@ import type {
 } from "@/lib/football/leagues-data";
 import { formatGoalDifference } from "@/lib/utils";
 import DashboardCard from "./DashboardCard";
+import TeamCrest from "./TeamCrest";
 
 function MatchRow({ match }: { match: LeagueMatchView }) {
   const isLive = match.status === "live";
@@ -33,9 +34,15 @@ function MatchRow({ match }: { match: LeagueMatchView }) {
         )}
       </div>
 
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-bold text-white">{match.home}</p>
-        <p className="mt-1 truncate text-sm font-bold text-white">{match.away}</p>
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <p className="flex items-center gap-2 truncate text-sm font-bold text-white">
+          <TeamCrest src={match.homeLogo} name={match.home} size={20} />
+          <span className="truncate">{match.home}</span>
+        </p>
+        <p className="flex items-center gap-2 truncate text-sm font-bold text-white">
+          <TeamCrest src={match.awayLogo} name={match.away} size={20} />
+          <span className="truncate">{match.away}</span>
+        </p>
         {match.roundLabel && (
           <p className="mt-1 text-[10px] text-zinc-500">{match.roundLabel}</p>
         )}
@@ -162,7 +169,14 @@ export default function ChampionsLeagueSection({
                           </span>
                         </td>
                         <td className="px-2 py-2.5 font-semibold text-white">
-                          {team.teamName}
+                          <span className="inline-flex min-w-0 items-center gap-2">
+                            <TeamCrest
+                              src={team.teamLogo}
+                              name={team.teamName}
+                              size={20}
+                            />
+                            <span className="truncate">{team.teamName}</span>
+                          </span>
                         </td>
                         <td className="px-2 py-2.5 text-center text-zinc-400">
                           {team.played}

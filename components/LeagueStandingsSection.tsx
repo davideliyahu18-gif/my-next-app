@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { LeagueStandingsView } from "@/lib/football/leagues-data";
 import { formatGoalDifference } from "@/lib/utils";
 import DashboardCard from "./DashboardCard";
+import TeamCrest from "./TeamCrest";
 
 function StandingsTable({ table }: { table: LeagueStandingsView }) {
   return (
@@ -34,7 +35,12 @@ function StandingsTable({ table }: { table: LeagueStandingsView }) {
                 {team.rank}
               </span>
             </td>
-            <td className="px-2 py-3 font-semibold text-white">{team.teamName}</td>
+            <td className="px-2 py-3 font-semibold text-white">
+              <span className="inline-flex min-w-0 items-center gap-2">
+                <TeamCrest src={team.teamLogo} name={team.teamName} size={20} />
+                <span className="truncate">{team.teamName}</span>
+              </span>
+            </td>
             <td className="px-2 py-3 text-center text-zinc-400">{team.played}</td>
             <td className="px-2 py-3 text-center text-zinc-400">{team.won}</td>
             <td className="px-2 py-3 text-center text-zinc-400">{team.drawn}</td>
@@ -156,7 +162,14 @@ export default function LeagueStandingsSection({
                         {team.rank}
                       </td>
                       <td className="px-2 py-2.5 font-semibold text-white">
-                        {team.teamName}
+                        <span className="inline-flex min-w-0 items-center gap-2">
+                          <TeamCrest
+                            src={team.teamLogo}
+                            name={team.teamName}
+                            size={18}
+                          />
+                          <span className="truncate">{team.teamName}</span>
+                        </span>
                       </td>
                       <td className="px-4 py-2.5 text-center font-black text-gold">
                         {team.points}
