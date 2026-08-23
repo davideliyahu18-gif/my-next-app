@@ -12,6 +12,7 @@ import {
   getScores365Standings,
   type Scores365Json,
 } from "./scores365-client";
+import { scores365CompetitorLogoUrl } from "./team-logo";
 
 export type LeagueMatchStatus = "live" | "upcoming" | "finished";
 
@@ -23,6 +24,8 @@ export interface LeagueMatchView {
   leagueFlag: string;
   home: string;
   away: string;
+  homeLogo: string | null;
+  awayLogo: string | null;
   homeScore: number | null;
   awayScore: number | null;
   status: LeagueMatchStatus;
@@ -37,6 +40,7 @@ export interface LeagueMatchView {
 export interface LeagueStandingRowView {
   rank: number;
   teamName: string;
+  teamLogo: string | null;
   played: number;
   won: number;
   drawn: number;
@@ -158,6 +162,14 @@ function parseGame(game: Scores365Json, league: FootballLeague): LeagueMatchView
     leagueFlag: league.countryFlag,
     home: homeName,
     away: awayName,
+    homeLogo: scores365CompetitorLogoUrl(
+      home.id as string | number | null | undefined,
+      home.imageVersion as string | number | null | undefined,
+    ),
+    awayLogo: scores365CompetitorLogoUrl(
+      away.id as string | number | null | undefined,
+      away.imageVersion as string | number | null | undefined,
+    ),
     homeScore: parseScore(home.score),
     awayScore: parseScore(away.score),
     status: mapped.status,
@@ -214,6 +226,10 @@ function parseStandingsPayload(
       return {
         rank: Math.trunc(Number(row.position ?? 0)) || 0,
         teamName,
+        teamLogo: scores365CompetitorLogoUrl(
+          competitor.id as string | number | null | undefined,
+          competitor.imageVersion as string | number | null | undefined,
+        ),
         played: Math.trunc(Number(row.gamePlayed ?? 0)),
         won: Math.trunc(Number(row.gamesWon ?? 0)),
         drawn: Math.trunc(Number(row.gamesEven ?? 0)),

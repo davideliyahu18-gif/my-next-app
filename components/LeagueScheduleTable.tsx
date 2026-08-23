@@ -6,6 +6,7 @@ import type {
   LeagueMatchView,
 } from "@/lib/football/leagues-data";
 import DashboardCard from "./DashboardCard";
+import TeamCrest from "./TeamCrest";
 
 function ScheduleRow({ match }: { match: LeagueMatchView }) {
   const score =
@@ -16,9 +17,19 @@ function ScheduleRow({ match }: { match: LeagueMatchView }) {
   return (
     <tr className="border-b border-white/[0.04] last:border-0 hover:bg-white/[0.02]">
       <td className="px-4 py-3 text-xs text-zinc-500">{match.dateLabel}</td>
-      <td className="px-2 py-3 text-sm font-bold text-white">{match.home}</td>
+      <td className="px-2 py-3 text-sm font-bold text-white">
+        <span className="inline-flex min-w-0 items-center gap-2">
+          <TeamCrest src={match.homeLogo} name={match.home} size={18} />
+          <span className="truncate">{match.home}</span>
+        </span>
+      </td>
       <td className="px-2 py-3 text-center text-sm font-black text-gold">{score}</td>
-      <td className="px-2 py-3 text-sm font-bold text-white">{match.away}</td>
+      <td className="px-2 py-3 text-sm font-bold text-white">
+        <span className="inline-flex min-w-0 items-center gap-2">
+          <TeamCrest src={match.awayLogo} name={match.away} size={18} />
+          <span className="truncate">{match.away}</span>
+        </span>
+      </td>
       <td className="px-4 py-3 text-xs text-zinc-500">{match.statusLabel}</td>
     </tr>
   );

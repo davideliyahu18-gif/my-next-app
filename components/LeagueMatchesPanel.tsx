@@ -3,6 +3,29 @@
 import { useState } from "react";
 import type { FootballLeague, LeagueMatchView } from "@/lib/football/leagues-data";
 import DashboardCard from "./DashboardCard";
+import TeamCrest from "./TeamCrest";
+
+function TeamLine({
+  name,
+  logo,
+  sideLabel,
+}: {
+  name: string;
+  logo: string | null;
+  sideLabel?: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="flex min-w-0 items-center gap-2">
+        <TeamCrest src={logo} name={name} size={22} />
+        <span className="truncate text-sm font-bold text-white">{name}</span>
+      </span>
+      {sideLabel ? (
+        <span className="text-xs text-zinc-500">{sideLabel}</span>
+      ) : null}
+    </div>
+  );
+}
 
 function MatchRow({ match }: { match: LeagueMatchView }) {
   const isLive = match.status === "live";
@@ -36,19 +59,17 @@ function MatchRow({ match }: { match: LeagueMatchView }) {
         )}
       </div>
 
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center justify-between gap-2">
-          <span className="truncate text-sm font-bold text-white">{match.home}</span>
-          {!isFinished && !isLive && (
-            <span className="text-xs text-zinc-500">בית</span>
-          )}
-        </div>
-        <div className="mt-1 flex items-center justify-between gap-2">
-          <span className="truncate text-sm font-bold text-white">{match.away}</span>
-          {!isFinished && !isLive && (
-            <span className="text-xs text-zinc-500">חוץ</span>
-          )}
-        </div>
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <TeamLine
+          name={match.home}
+          logo={match.homeLogo}
+          sideLabel={!isFinished && !isLive ? "בית" : undefined}
+        />
+        <TeamLine
+          name={match.away}
+          logo={match.awayLogo}
+          sideLabel={!isFinished && !isLive ? "חוץ" : undefined}
+        />
       </div>
 
       <div className="shrink-0 text-center">

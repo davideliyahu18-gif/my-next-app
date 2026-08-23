@@ -21,6 +21,11 @@ const remotePatterns: NonNullable<NextConfig["images"]>["remotePatterns"] = [
     hostname: "ui-avatars.com",
     pathname: "/api/**",
   },
+  {
+    protocol: "https",
+    hostname: "imagecache.365scores.com",
+    pathname: "/**",
+  },
 ];
 
 const nextConfig: NextConfig = {

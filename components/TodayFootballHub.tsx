@@ -8,6 +8,7 @@ import type {
 } from "@/lib/football/leagues-data";
 import MatchCountdown from "./MatchCountdown";
 import EnablePushNotifications from "./EnablePushNotifications";
+import TeamCrest from "./TeamCrest";
 
 const FAVORITES_KEY = "football-favorite-leagues-v1";
 
@@ -83,8 +84,14 @@ function MatchTile({ match }: { match: LeagueMatchView }) {
           </span>
         )}
       </div>
-      <p className="truncate text-sm font-bold text-white">{match.home}</p>
-      <p className="mt-1 truncate text-sm font-bold text-white">{match.away}</p>
+      <p className="flex items-center gap-2 truncate text-sm font-bold text-white">
+        <TeamCrest src={match.homeLogo} name={match.home} size={20} />
+        <span className="truncate">{match.home}</span>
+      </p>
+      <p className="mt-1.5 flex items-center gap-2 truncate text-sm font-bold text-white">
+        <TeamCrest src={match.awayLogo} name={match.away} size={20} />
+        <span className="truncate">{match.away}</span>
+      </p>
       <p
         className={`mt-3 text-center text-xl font-black tabular-nums ${
           isLive ? "text-white" : "text-gold"
