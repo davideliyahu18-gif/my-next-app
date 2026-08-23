@@ -6,11 +6,20 @@ export const WHATSAPP_FEED_INITIAL_LIMIT = 50;
 /** Shared secret for POST /api/feed (set on Vercel + bot). */
 export const FEED_API_SECRET = process.env.FEED_API_SECRET ?? "";
 
-/** WhatsApp group invite for live match alerts. */
+/** WhatsApp group invite for live football alerts. */
 export const WHATSAPP_INVITE_LINK =
   process.env.WHATSAPP_INVITE_LINK ||
   process.env.NEXT_PUBLIC_WHATSAPP_INVITE_LINK ||
-  "https://chat.whatsapp.com/L47SyZIjYAR0k8qZ0C2Fcl";
+  "https://chat.whatsapp.com/BhEThcue1kmE8pgUxtpmma";
+
+export const WHATSAPP_GROUP_NAME =
+  process.env.WHATSAPP_GROUP_NAME ||
+  process.env.NEXT_PUBLIC_WHATSAPP_GROUP_NAME ||
+  "כדורגל בזמן אמת";
+
+export const WHATSAPP_GROUP_CAPTION =
+  process.env.WHATSAPP_GROUP_CAPTION ||
+  `קישור לקבוצת WhatsApp · ${WHATSAPP_GROUP_NAME}`;
 
 /** WhatsApp group for rocket / חמ״ל התרעות איראן alerts. */
 export const ROCKETS_WHATSAPP_INVITE_LINK =
