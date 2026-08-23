@@ -10,6 +10,10 @@ import {
   type Scores365Json,
 } from "@/lib/football/scores365-client";
 import { broadcastPush } from "@/lib/push/send";
+import {
+  savePushSubscriber,
+  type PushSubscriptionJSON,
+} from "@/lib/push/store";
 import { isPushConfigured } from "@/lib/push/vapid";
 
 type MatchScoreSnap = {
@@ -271,7 +275,16 @@ function formatGoalPush(event: GoalEvent) {
   };
 }
 
-export async function processLiveGoals(): Promise<{
+export type LiveGoalsTickOptions = {
+  /** Browser push subscription — delivers even when Redis is not configured. */
+  subscription?: PushSubscriptionJSON | null;
+  leagues?: string[];
+  userAgent?: string;
+};
+
+export async function processLiveGoals(
+  options: LiveGoalsTickOptions = {},
+): Promise<{
   ran: boolean;
   skipped?: string;
   tracked: number;
@@ -288,6 +301,19 @@ export async function processLiveGoals(): Promise<{
       sent: 0,
       failed: 0,
     };
+  }
+
+  let deliverTo = null as Awaited<ReturnType<typeof savePushSubscriber>> | null;
+  if (options.subscription?.endpoint) {
+    try {
+      deliverTo = await savePushSubscriber({
+        subscription: options.subscription,
+        leagues: options.leagues,
+        userAgent: options.userAgent,
+      });
+    } catch (error) {
+      console.error("[push] failed to refresh caller subscription:", error);
+    }
   }
 
   const locked = await acquireLock();
@@ -316,9 +342,9 @@ export async function processLiveGoals(): Promise<{
     const payload = formatGoalPush(goal);
     const result = await broadcastPush(payload, {
       leagues: [goal.leagueSlug],
+      // Prefer the caller device when Redis is missing on Hobby/serverless.
+      extra: deliverTo ? [deliverTo] : undefined,
     });
-    // Also notify subscribers with empty favorites (all leagues).
-    // broadcastPush already includes empty-league subscribers when filtering.
     sent += result.sent;
     failed += result.failed;
   }

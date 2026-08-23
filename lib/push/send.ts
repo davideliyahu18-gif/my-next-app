@@ -64,17 +64,21 @@ export async function sendPushToSubscriber(
 
 export async function broadcastPush(
   payload: PushPayload,
-  options?: { leagues?: string[] },
+  options?: { leagues?: string[]; extra?: PushSubscriber[] },
 ): Promise<{ sent: number; failed: number; total: number }> {
   const subscribers = await listPushSubscribers();
-  const filtered = options?.leagues?.length
-    ? subscribers.filter((subscriber) => {
-        if (!subscriber.leagues.length) return true;
-        return subscriber.leagues.some((league) =>
-          options.leagues!.includes(league),
-        );
-      })
-    : subscribers;
+  const byEndpoint = new Map<string, PushSubscriber>();
+  for (const subscriber of [...subscribers, ...(options?.extra ?? [])]) {
+    byEndpoint.set(subscriber.endpoint, subscriber);
+  }
+
+  const filtered = [...byEndpoint.values()].filter((subscriber) => {
+    if (!options?.leagues?.length) return true;
+    if (!subscriber.leagues.length) return true;
+    return subscriber.leagues.some((league) =>
+      options.leagues!.includes(league),
+    );
+  });
 
   let sent = 0;
   let failed = 0;
