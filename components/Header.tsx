@@ -131,7 +131,7 @@ export default function Header() {
               LIVE FOOTBALL
             </span>
             <span className="block text-base font-black tracking-wide text-white md:text-lg">
-              ליגות <span className="text-gold">כדורגל</span>
+              ליגות <span className="text-gold">לייב</span>
             </span>
           </span>
         </button>
