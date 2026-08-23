@@ -1,3 +1,4 @@
+import { SITE_BRAND } from "@/lib/constants";
 import ScrollLink from "./ScrollLink";
 
 const FOOTER_LINKS = [
@@ -13,9 +14,9 @@ export default function Footer() {
       <div className="mx-auto flex max-w-[1440px] flex-col items-center justify-between gap-6 px-4 py-12 md:flex-row md:px-8">
         <div className="text-center md:text-right">
           <p className="text-lg font-black text-white">
-            ליגות <span className="text-gold">כדורגל</span>
+            כדורגל <span className="text-gold">בזמן אמת</span> ⚽
           </p>
-          <p className="mt-1 text-xs text-zinc-500">משחקים וטבלאות מעודכנות</p>
+          <p className="mt-1 text-xs text-zinc-500">{SITE_BRAND.tagline}</p>
         </div>
 
         <div className="flex flex-wrap justify-center gap-6 text-sm text-zinc-400">

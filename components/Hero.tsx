@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { IMAGES, WHATSAPP_INVITE_LINK } from "@/lib/constants";
+import { IMAGES, SITE_BRAND, WHATSAPP_INVITE_LINK } from "@/lib/constants";
 
 const WHATSAPP_GROUP_URL =
   WHATSAPP_INVITE_LINK || "https://chat.whatsapp.com/L47SyZIjYAR0k8qZ0C2Fcl";
@@ -20,15 +20,15 @@ export default function Hero() {
           <div className="max-w-2xl animate-fade-up text-center md:text-right">
             <p className="mb-4 inline-flex items-center gap-2 rounded-full border border-gold/30 bg-gold/10 px-3 py-1 text-[11px] font-bold tracking-[0.2em] text-gold">
               <span className="h-1.5 w-1.5 animate-live-pulse rounded-full bg-live" />
-              LIVE FOOTBALL
+              {SITE_BRAND.eyebrow}
             </p>
 
-            <h1 className="font-display text-5xl font-black leading-[1.05] tracking-tight text-gold-gradient sm:text-6xl md:text-7xl">
-              ליגות לייב
+            <h1 className="font-display text-4xl font-black leading-[1.08] tracking-tight text-gold-gradient sm:text-5xl md:text-6xl lg:text-7xl">
+              {SITE_BRAND.nameWithEmoji}
             </h1>
 
             <p className="mt-5 max-w-lg text-lg text-zinc-200 md:mr-0 md:ml-auto md:text-xl">
-              כל מה שקורה היום בכדורגל — משחקים, טבלאות וליגת האלופות במקום אחד
+              {SITE_BRAND.tagline}
             </p>
             <p className="mt-2 text-sm text-zinc-500">
               אתר עכשיו · אפליקציה בהמשך · נתונים מ-365scores
