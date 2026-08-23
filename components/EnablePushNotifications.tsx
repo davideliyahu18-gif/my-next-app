@@ -226,9 +226,9 @@ export default function EnablePushNotifications() {
     <div className="rounded-2xl border border-sky-400/20 bg-sky-400/[0.06] p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="text-sm font-bold text-sky-200">התראות פוש</p>
+          <p className="text-sm font-bold text-sky-200">התראות פוש · שערי לייב</p>
           <p className="mt-1 text-xs text-zinc-400">
-            קבל עדכון במסך הנעילה כשיש משחק חשוב / התראת בדיקה
+            קבל התראה במסך הנעילה כשנכבש גול בליגות שלך
           </p>
         </div>
         <button
