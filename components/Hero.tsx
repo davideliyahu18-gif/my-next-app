@@ -1,8 +1,12 @@
 import Link from "next/link";
-import { IMAGES, SITE_BRAND, WHATSAPP_INVITE_LINK } from "@/lib/constants";
+import {
+  IMAGES,
+  SITE_BRAND,
+  WHATSAPP_GROUP_CAPTION,
+  WHATSAPP_INVITE_LINK,
+} from "@/lib/constants";
 
-const WHATSAPP_GROUP_URL =
-  WHATSAPP_INVITE_LINK || "https://chat.whatsapp.com/L47SyZIjYAR0k8qZ0C2Fcl";
+const WHATSAPP_GROUP_URL = WHATSAPP_INVITE_LINK;
 
 export default function Hero() {
   return (
@@ -41,14 +45,19 @@ export default function Hero() {
               >
                 מה היום
               </Link>
-              <a
-                href={WHATSAPP_GROUP_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 rounded-full border border-whatsapp/40 bg-whatsapp/10 px-6 py-3.5 text-sm font-bold text-whatsapp transition-all hover:scale-[1.03] hover:bg-whatsapp/20"
-              >
-                התראות WhatsApp
-              </a>
+              <div className="flex flex-col items-center gap-1.5 md:items-start">
+                <a
+                  href={WHATSAPP_GROUP_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 rounded-full border border-whatsapp/40 bg-whatsapp/10 px-6 py-3.5 text-sm font-bold text-whatsapp transition-all hover:scale-[1.03] hover:bg-whatsapp/20"
+                >
+                  הצטרפו לוואטסאפ
+                </a>
+                <p className="max-w-[220px] text-center text-[11px] font-semibold leading-snug text-whatsapp/80 md:text-right">
+                  {WHATSAPP_GROUP_CAPTION}
+                </p>
+              </div>
               <Link
                 href="/schedule"
                 className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/5 px-6 py-3.5 text-sm font-bold text-white transition-all hover:scale-[1.03] hover:border-gold/40 hover:text-gold"

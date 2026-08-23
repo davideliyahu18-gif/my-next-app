@@ -1,12 +1,15 @@
 import Link from "next/link";
 import Footer from "@/components/Footer";
 import Header from "@/components/Header";
-import { WHATSAPP_INVITE_LINK } from "@/lib/constants";
+import {
+  WHATSAPP_GROUP_CAPTION,
+  WHATSAPP_GROUP_NAME,
+  WHATSAPP_INVITE_LINK,
+} from "@/lib/constants";
 
 export const revalidate = 3600;
 
-const WHATSAPP_GROUP_URL =
-  WHATSAPP_INVITE_LINK || "https://chat.whatsapp.com/L47SyZIjYAR0k8qZ0C2Fcl";
+const WHATSAPP_GROUP_URL = WHATSAPP_INVITE_LINK;
 
 const CHANNELS = [
   {
@@ -67,9 +70,11 @@ export default function WatchPage() {
         </div>
 
         <section className="mt-10 rounded-2xl border border-whatsapp/30 bg-gradient-to-br from-[#0d1f14] to-card p-6">
-          <h2 className="text-lg font-extrabold text-white">לא ליד הטלוויזיה?</h2>
+          <h2 className="text-lg font-extrabold text-white">
+            קבוצת WhatsApp · {WHATSAPP_GROUP_NAME}
+          </h2>
           <p className="mt-2 text-sm text-zinc-400">
-            הצטרפו לקבוצת WhatsApp וקבלו שערים, VAR ועדכונים חיים ישירות לנייד.
+            הצטרפו לקבוצה וקבלו שערים, VAR ועדכונים חיים ישירות לנייד.
           </p>
           <a
             href={WHATSAPP_GROUP_URL}
@@ -77,8 +82,11 @@ export default function WatchPage() {
             rel="noopener noreferrer"
             className="mt-5 inline-flex items-center gap-2 rounded-full bg-whatsapp px-5 py-2.5 text-sm font-black text-white transition-transform hover:scale-[1.03]"
           >
-            הצטרפו להתראות
+            הצטרפו לקבוצה
           </a>
+          <p className="mt-2 text-[11px] font-semibold text-whatsapp/80">
+            {WHATSAPP_GROUP_CAPTION}
+          </p>
         </section>
 
         <p className="mt-8 text-xs leading-relaxed text-zinc-600">

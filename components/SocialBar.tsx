@@ -1,8 +1,11 @@
-import { WHATSAPP_INVITE_LINK } from "@/lib/constants";
+import {
+  WHATSAPP_GROUP_CAPTION,
+  WHATSAPP_GROUP_NAME,
+  WHATSAPP_INVITE_LINK,
+} from "@/lib/constants";
 import DashboardCard from "./DashboardCard";
 
-const WHATSAPP_GROUP_URL =
-  WHATSAPP_INVITE_LINK || "https://chat.whatsapp.com/L47SyZIjYAR0k8qZ0C2Fcl";
+const WHATSAPP_GROUP_URL = WHATSAPP_INVITE_LINK;
 
 function WhatsAppIcon({ className = "h-5 w-5" }: { className?: string }) {
   return (
@@ -29,9 +32,24 @@ function YouTubeIcon({ className = "h-4 w-4" }: { className?: string }) {
 }
 
 const SOCIAL_LINKS = [
-  { label: "WhatsApp", href: WHATSAPP_GROUP_URL, icon: WhatsAppIcon, hover: "hover:border-whatsapp/50 hover:text-whatsapp" },
-  { label: "YouTube", href: "https://www.youtube.com/@FIFA", icon: YouTubeIcon, hover: "hover:border-red-400/40 hover:text-red-400" },
-  { label: "Instagram", href: "https://www.instagram.com/fifa", icon: InstagramIcon, hover: "hover:border-pink-400/40 hover:text-pink-400" },
+  {
+    label: "WhatsApp",
+    href: WHATSAPP_GROUP_URL,
+    icon: WhatsAppIcon,
+    hover: "hover:border-whatsapp/50 hover:text-whatsapp",
+  },
+  {
+    label: "YouTube",
+    href: "https://www.youtube.com/@FIFA",
+    icon: YouTubeIcon,
+    hover: "hover:border-red-400/40 hover:text-red-400",
+  },
+  {
+    label: "Instagram",
+    href: "https://www.instagram.com/fifa",
+    icon: InstagramIcon,
+    hover: "hover:border-pink-400/40 hover:text-pink-400",
+  },
 ];
 
 export default function SocialBar() {
@@ -43,7 +61,9 @@ export default function SocialBar() {
             <WhatsAppIcon className="h-7 w-7" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-extrabold text-white">התראות ב-WhatsApp</p>
+            <p className="text-sm font-extrabold text-white">
+              קבוצת WhatsApp · {WHATSAPP_GROUP_NAME}
+            </p>
             <p className="mt-1 text-xs leading-relaxed text-zinc-400">
               שערים, VAR ועדכונים חיים — ישירות לקבוצה
             </p>
@@ -54,8 +74,11 @@ export default function SocialBar() {
               className="relative z-10 mt-3 inline-flex items-center gap-2 rounded-full bg-whatsapp px-4 py-2 text-xs font-black text-white shadow-[0_8px_24px_rgba(37,211,102,0.35)] transition-transform hover:scale-[1.03] hover:bg-[#20bd5a]"
             >
               <WhatsAppIcon className="h-3.5 w-3.5" />
-              הרשמו עכשיו
+              הצטרפו לקבוצה
             </a>
+            <p className="mt-2 text-[11px] font-semibold text-whatsapp/80">
+              {WHATSAPP_GROUP_CAPTION}
+            </p>
           </div>
         </div>
       </DashboardCard>
