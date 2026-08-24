@@ -21,10 +21,10 @@ export default async function MatchPage({ params }: PageProps) {
       <Header />
       <main className="mx-auto max-w-[900px] px-4 py-8 md:px-8">
         <Link
-          href="/"
+          href="/today"
           className="mb-6 inline-block text-sm text-zinc-400 transition-colors hover:text-gold"
         >
-          ← חזרה לדף הבית
+          ← חזרה למשחקי היום
         </Link>
         <LiveMatchCenter initial={match} />
       </main>

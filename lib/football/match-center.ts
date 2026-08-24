@@ -67,6 +67,11 @@ export interface LiveMatchCenterView {
   status: "live" | "upcoming" | "finished";
   statusLabel: string;
   minute: string;
+  kickoffAt: string;
+  venue: {
+    name: string;
+    capacity: number | null;
+  } | null;
   events: MatchEventView[];
   lastEvent: MatchEventView | null;
   lineups: {
@@ -240,6 +245,11 @@ export async function fetchMatchCenter(
   const events = parseEvents(rawEvents, home, away, players);
   const lastEvent = events.length > 0 ? events[events.length - 1] : null;
 
+  const venueRaw = asRecord(game.venue);
+  const venueName = venueRaw ? String(venueRaw.name ?? "").trim() : "";
+  const venueCapacity =
+    venueRaw?.capacity != null ? Number(venueRaw.capacity) : null;
+
   return {
     id: String(game.id ?? gameId),
     leagueSlug: league.slug,
@@ -268,6 +278,16 @@ export async function fetchMatchCenter(
     status: mapped.status,
     statusLabel: mapped.label,
     minute,
+    kickoffAt: String(game.startTime ?? ""),
+    venue: venueName
+      ? {
+          name: venueName,
+          capacity:
+            Number.isFinite(venueCapacity) && (venueCapacity as number) > 0
+              ? Math.trunc(venueCapacity as number)
+              : null,
+        }
+      : null,
     events,
     lastEvent,
     lineups,
