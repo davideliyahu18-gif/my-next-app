@@ -67,6 +67,7 @@ export const IMAGES = {
 export const NAV_LINKS: NavLinkView[] = [
   { href: "#home", label: "ראשי" },
   { href: "/today", label: "משחקי היום" },
+  { href: "/widget", label: "ווידג׳ט" },
   { href: "#matches", label: "משחקים" },
   { href: "#standings", label: "טבלאות" },
   { href: "#ucl", label: "ליגת האלופות" },

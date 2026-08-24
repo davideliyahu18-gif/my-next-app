@@ -9,6 +9,7 @@ import type {
 } from "@/lib/football/leagues-data";
 import MatchCountdown from "./MatchCountdown";
 import EnablePushNotifications from "./EnablePushNotifications";
+import InstallHomeWidget from "./InstallHomeWidget";
 import TeamCrest from "./TeamCrest";
 
 const FAVORITES_KEY = "football-favorite-leagues-v1";
@@ -120,7 +121,6 @@ export default function TodayFootballHub({
 }) {
   const [favorites, setFavorites] = useState<string[]>([]);
   const [ready, setReady] = useState(false);
-  const [installTip, setInstallTip] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -310,32 +310,7 @@ export default function TodayFootballHub({
 
           <div className="mt-6 space-y-3">
             <EnablePushNotifications />
-
-            <div className="flex flex-col gap-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.06] p-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm font-bold text-emerald-300">אתר עכשיו · אפליקציה בהמשך</p>
-              <p className="mt-1 text-xs text-zinc-400">
-                שמור במסך הבית וקבל חוויית אפליקציה כבר עכשיו. בהמשך — התראות חכמות לפי הליגות שלך.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                const isIos = /iphone|ipad|ipod/i.test(window.navigator.userAgent);
-                setInstallTip(
-                  isIos
-                    ? "באייפון: שתף → הוסף למסך הבית"
-                    : "באנדרואיד/כרום: תפריט ⋮ → התקן אפליקציה / הוסף למסך הבית",
-                );
-              }}
-              className="shrink-0 rounded-full bg-emerald-400 px-5 py-2.5 text-xs font-black text-black transition-transform hover:scale-[1.03]"
-            >
-              הוסף למסך הבית
-            </button>
-          </div>
-          {installTip && (
-            <p className="mt-3 text-xs font-semibold text-emerald-300/90">{installTip}</p>
-          )}
+            <InstallHomeWidget />
           </div>
         </div>
       </div>

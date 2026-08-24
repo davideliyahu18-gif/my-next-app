@@ -45,6 +45,25 @@ export interface MatchSquadPlayer {
   number: number | null;
 }
 
+export interface PitchPlayerView {
+  id: string;
+  name: string;
+  shortName: string;
+  number: number | null;
+  side: "home" | "away";
+  /** 0 = own goal line, 100 = attacking end */
+  fieldLine: number;
+  /** 0 = left touchline, 100 = right */
+  fieldSide: number;
+  positionName: string | null;
+}
+
+export interface PitchFormationView {
+  homeFormation: string | null;
+  awayFormation: string | null;
+  players: PitchPlayerView[];
+}
+
 export interface LiveMatchCenterView {
   id: string;
   leagueSlug: string;
@@ -78,6 +97,7 @@ export interface LiveMatchCenterView {
     home: MatchSquadPlayer[];
     away: MatchSquadPlayer[];
   };
+  pitch: PitchFormationView;
   fetchedAt: string;
 }
 
@@ -128,6 +148,55 @@ function mapStatus(
     return { status: "finished", label: text || "הסתיים" };
   }
   return { status: "upcoming", label: text || "טרם החל" };
+}
+
+function parsePitchSide(
+  competitor: Scores365Json,
+  side: "home" | "away",
+  rosterById: Map<
+    number,
+    { name: string; shortName: string; number: number | null }
+  >,
+): { formation: string | null; players: PitchPlayerView[] } {
+  const lineups = asRecord(competitor.lineups) ?? {};
+  const formation = lineups.formation ? String(lineups.formation) : null;
+  const members = Array.isArray(lineups.members)
+    ? (lineups.members as Scores365Json[])
+    : [];
+
+  const players: PitchPlayerView[] = [];
+  for (const member of members) {
+    const status = Number(member.status ?? 0);
+    // 1 = starting XI
+    if (status !== 1) continue;
+
+    const yard = asRecord(member.yardFormation) ?? {};
+    if (yard.fieldLine == null || yard.fieldSide == null) continue;
+
+    const fieldLine = Number(yard.fieldLine);
+    const fieldSide = Number(yard.fieldSide);
+    if (!Number.isFinite(fieldLine) || !Number.isFinite(fieldSide)) continue;
+
+    const id = Number(member.id ?? 0);
+    const roster = id > 0 ? rosterById.get(id) : undefined;
+    const position = asRecord(member.position) ?? asRecord(member.formation) ?? {};
+    const fallbackName = String(position.name ?? position.shortName ?? "").trim();
+
+    players.push({
+      id: `${side}-${id || players.length}`,
+      name: roster?.name || fallbackName || "שחקן",
+      shortName:
+        roster?.shortName ||
+        String(position.shortName ?? fallbackName ?? "שחקן"),
+      number: roster?.number ?? null,
+      side,
+      fieldLine: Math.min(100, Math.max(0, fieldLine)),
+      fieldSide: Math.min(100, Math.max(0, fieldSide)),
+      positionName: position.name ? String(position.name) : null,
+    });
+  }
+
+  return { formation, players };
 }
 
 function addDays(base: Date, days: number): Date {
@@ -212,6 +281,10 @@ export async function fetchMatchCenter(
     ? (game.members as Scores365Json[])
     : [];
   const players = new Map<number, string>();
+  const rosterById = new Map<
+    number,
+    { name: string; shortName: string; number: number | null }
+  >();
   const lineups: LiveMatchCenterView["lineups"] = { home: [], away: [] };
   const homeId = Number(home.id ?? 0);
   const awayId = Number(away.id ?? 0);
@@ -220,16 +293,21 @@ export async function fetchMatchCenter(
     const athleteId = Number(member.athleteId ?? member.id ?? 0);
     const memberId = Number(member.id ?? 0);
     const name = String(member.name ?? "").trim();
+    const shortName = String(member.shortName ?? name).trim();
+    const number =
+      member.jerseyNumber != null ? Number(member.jerseyNumber) : null;
     if (name) {
       if (athleteId > 0) players.set(athleteId, name);
       if (memberId > 0) players.set(memberId, name);
     }
+    const roster = { name: name || shortName, shortName: shortName || name, number };
+    if (athleteId > 0) rosterById.set(athleteId, roster);
+    if (memberId > 0) rosterById.set(memberId, roster);
 
     const squadPlayer: MatchSquadPlayer = {
-      name,
-      shortName: String(member.shortName ?? name),
-      number:
-        member.jerseyNumber != null ? Number(member.jerseyNumber) : null,
+      name: roster.name,
+      shortName: roster.shortName,
+      number,
     };
     const competitorId = Number(member.competitorId ?? 0);
     if (competitorId === homeId) lineups.home.push(squadPlayer);
@@ -238,6 +316,14 @@ export async function fetchMatchCenter(
 
   lineups.home.sort((a, b) => (a.number ?? 99) - (b.number ?? 99));
   lineups.away.sort((a, b) => (a.number ?? 99) - (b.number ?? 99));
+
+  const homePitch = parsePitchSide(home, "home", rosterById);
+  const awayPitch = parsePitchSide(away, "away", rosterById);
+  const pitch: PitchFormationView = {
+    homeFormation: homePitch.formation,
+    awayFormation: awayPitch.formation,
+    players: [...homePitch.players, ...awayPitch.players],
+  };
 
   const rawEvents = Array.isArray(game.events)
     ? (game.events as Scores365Json[])
@@ -291,6 +377,7 @@ export async function fetchMatchCenter(
     events,
     lastEvent,
     lineups,
+    pitch,
     fetchedAt: new Date().toISOString(),
   };
 }
