@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=1080, height=1920" />
+  <title>סטורי 2 — קישור</title>
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@700;800;900&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 1080px; height: 1920px; overflow: hidden;
+      font-family: "Heebo", sans-serif;
+      background: #050505; color: #fff;
+    }
+    .story {
+      width: 1080px; height: 1920px; position: relative;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 80px;
+      background:
+        radial-gradient(circle at 50% 20%, rgba(212,175,55,0.25), transparent 50%),
+        radial-gradient(circle at 80% 80%, rgba(239,68,68,0.12), transparent 40%),
+        #050505;
+    }
+    .ball {
+      font-size: 180px;
+      filter: drop-shadow(0 20px 60px rgba(212,175,55,0.4));
+      margin-bottom: 48px;
+    }
+    h1 {
+      font-size: 96px; font-weight: 900; text-align: center; line-height: 1.05;
+      background: linear-gradient(135deg, #fff 0%, #d4af37 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .lines {
+      margin-top: 40px; text-align: center;
+    }
+    .line {
+      font-size: 44px; font-weight: 800; margin: 16px 0;
+    }
+    .line.gold { color: #d4af37; }
+    .line.dim { color: #a1a1aa; font-size: 32px; font-weight: 700; }
+    .cta {
+      margin-top: 80px;
+      padding: 32px 56px;
+      border-radius: 999px;
+      background: #d4af37;
+      color: #000;
+      font-size: 36px;
+      font-weight: 900;
+      box-shadow: 0 20px 60px rgba(212,175,55,0.5);
+    }
+    .hint {
+      margin-top: 40px;
+      font-size: 26px;
+      color: #71717a;
+      font-weight: 700;
+    }
+    .leagues {
+      margin-top: 64px;
+      display: flex; flex-wrap: wrap; gap: 16px; justify-content: center;
+    }
+    .league {
+      padding: 14px 24px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.05);
+      font-size: 24px;
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+  <div class="story">
+    <div class="ball">⚽</div>
+    <h1>כדורגל<br/>בזמן אמת</h1>
+    <div class="lines">
+      <p class="line gold">האתר החדש שלך לכדורגל</p>
+      <p class="line">תוצאות חיות · טבלאות · גולים</p>
+      <p class="line dim">חינם · בעברית · מהטלפון</p>
+    </div>
+    <div class="leagues">
+      <span class="league">🇪🇸 ספרד</span>
+      <span class="league">🏴󠁧󠁢󠁥󠁮󠁧󠁿 אנגליה</span>
+      <span class="league">🇩🇪 גרמניה</span>
+      <span class="league">🇮🇱 ישראל</span>
+      <span class="league">🏆 UCL</span>
+    </div>
+    <div class="cta">לחצו בלינק בביו 👆</div>
+    <p class="hint">my-next-app-5jte.vercel.app</p>
+  </div>
+</body>
+</html>

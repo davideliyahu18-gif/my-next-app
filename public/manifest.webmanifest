@@ -21,5 +21,21 @@
       "type": "image/png",
       "purpose": "any maskable"
     }
+  ],
+  "shortcuts": [
+    {
+      "name": "ווידג׳ט חי",
+      "short_name": "ווידג׳ט",
+      "description": "משחקי היום במסך קומפקטי",
+      "url": "/widget",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "משחקי היום",
+      "short_name": "היום",
+      "description": "כל משחקי היום",
+      "url": "/today",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    }
   ]
 }

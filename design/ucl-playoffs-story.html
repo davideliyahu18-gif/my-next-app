@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=1080, height=1920" />
+  <title>מוקדמות ליגת האלופות — סטורי</title>
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@600;700;800;900&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 1080px; height: 1920px; overflow: hidden;
+      font-family: "Heebo", sans-serif; background: #050505; color: #fff;
+    }
+    .story {
+      width: 1080px; height: 1920px; position: relative; overflow: hidden;
+      background:
+        radial-gradient(ellipse 90% 50% at 50% -5%, rgba(212,175,55,0.28), transparent 55%),
+        radial-gradient(ellipse 60% 40% at 0% 70%, rgba(0,80,160,0.18), transparent 50%),
+        radial-gradient(ellipse 50% 35% at 100% 80%, rgba(239,68,68,0.12), transparent 45%),
+        #050505;
+    }
+    .bg {
+      position: absolute; inset: 0;
+      background:
+        linear-gradient(to bottom, rgba(5,5,5,0.25) 0%, rgba(5,5,5,0.88) 55%, #050505 100%),
+        url("https://images.unsplash.com/photo-1522778119026-d647f0596c20?w=1200&q=85") center 20%/cover;
+      opacity: 0.5;
+    }
+    .content {
+      position: relative; z-index: 2; height: 100%;
+      display: flex; flex-direction: column;
+      padding: 72px 56px 80px;
+    }
+    .top {
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .pill {
+      display: inline-flex; align-items: center; gap: 10px;
+      padding: 12px 22px; border-radius: 999px;
+      border: 1.5px solid rgba(212,175,55,0.45);
+      background: rgba(212,175,55,0.12);
+      font-size: 22px; font-weight: 800; color: #d4af37;
+      letter-spacing: 0.08em;
+    }
+    .brand {
+      font-size: 20px; font-weight: 700; letter-spacing: 0.16em; color: rgba(212,175,55,0.85);
+    }
+    .headline {
+      margin-top: 40px;
+    }
+    .eyebrow {
+      font-size: 26px; font-weight: 800; color: #fca5a5; letter-spacing: 0.06em;
+    }
+    h1 {
+      margin-top: 12px;
+      font-size: 72px; font-weight: 900; line-height: 1.05;
+      background: linear-gradient(135deg, #fff 0%, #d4af37 55%, #f5e6a8 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .sub {
+      margin-top: 18px; font-size: 32px; font-weight: 700; color: #d4d4d8; line-height: 1.35;
+    }
+    .sub strong { color: #d4af37; }
+
+    .matches {
+      margin-top: 48px;
+      display: flex; flex-direction: column; gap: 22px;
+    }
+    .card {
+      padding: 28px 32px;
+      border-radius: 28px;
+      border: 1.5px solid rgba(255,255,255,0.1);
+      background: linear-gradient(145deg, rgba(26,26,26,0.95), rgba(8,8,8,0.9));
+      box-shadow: 0 16px 48px rgba(0,0,0,0.45);
+    }
+    .card.il {
+      border-color: rgba(212,175,55,0.45);
+      background: linear-gradient(145deg, rgba(40,32,10,0.95), rgba(8,8,8,0.92));
+    }
+    .meta {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 14px;
+    }
+    .time {
+      font-size: 26px; font-weight: 900; color: #d4af37;
+    }
+    .agg {
+      font-size: 20px; font-weight: 700; color: #a1a1aa;
+    }
+    .teams {
+      font-size: 36px; font-weight: 900; line-height: 1.2; color: #fff;
+    }
+    .vs { color: #d4af37; font-size: 28px; margin: 0 8px; }
+    .tag {
+      margin-top: 10px; font-size: 20px; font-weight: 700; color: #93c5fd;
+    }
+    .card.il .tag { color: #fde68a; }
+
+    .footer {
+      margin-top: auto; text-align: center;
+    }
+    .cta-label {
+      font-size: 28px; font-weight: 800; color: #e4e4e7; margin-bottom: 20px;
+    }
+    .url {
+      display: inline-block;
+      padding: 22px 40px; border-radius: 999px;
+      background: linear-gradient(135deg, #d4af37, #c9a227);
+      color: #000; font-size: 28px; font-weight: 900;
+      box-shadow: 0 16px 48px rgba(212,175,55,0.45);
+    }
+    .site {
+      margin-top: 22px; font-size: 24px; font-weight: 800; color: #d4af37;
+    }
+    .hint {
+      margin-top: 14px; font-size: 22px; font-weight: 700; color: #71717a;
+    }
+  </style>
+</head>
+<body>
+  <div class="story">
+    <div class="bg"></div>
+    <div class="content">
+      <div class="top">
+        <span class="pill">🏆 UCL PLAYOFFS</span>
+        <span class="brand">REAL-TIME FOOTBALL</span>
+      </div>
+
+      <div class="headline">
+        <p class="eyebrow">מחרתיים · שלושה משחקים מטורפים</p>
+        <h1>מוקדמות<br/>ליגת האלופות</h1>
+        <p class="sub">גמר מוקדמות · כרטיס לבתים<br/><strong>כולל הפועל באר שבע!</strong></p>
+      </div>
+
+      <div class="matches">
+        <div class="card il">
+          <div class="meta">
+            <span class="time">19:45</span>
+            <span class="agg">מצטבר 1–2</span>
+          </div>
+          <div class="teams">סבאח <span class="vs">VS</span> הפועל באר שבע</div>
+          <div class="tag">🇮🇱 ישראל באירופה · משחק מכריע</div>
+        </div>
+
+        <div class="card">
+          <div class="meta">
+            <span class="time">22:00</span>
+            <span class="agg">מצטבר 3–1</span>
+          </div>
+          <div class="teams">בודו/גלימט <span class="vs">VS</span> NEC ניימכן</div>
+          <div class="tag">🇳🇴 מול 🇳🇱 · דרמה במוקדמות</div>
+        </div>
+
+        <div class="card">
+          <div class="meta">
+            <span class="time">22:00</span>
+            <span class="agg">מצטבר 0–3</span>
+          </div>
+          <div class="teams">לאסק <span class="vs">VS</span> סלטיק</div>
+          <div class="tag">🇦🇹 מול 🏴󠁧󠁢󠁳󠁣󠁴󠁿 · סלטיק בדרך?</div>
+        </div>
+      </div>
+
+      <div class="footer">
+        <p class="cta-label">עקבו בזמן אמת · תוצאות · הרכבים</p>
+        <div class="url">my-next-app-5jte.vercel.app</div>
+        <p class="site">כדורגל בזמן אמת ⚽</p>
+        <p class="hint">לינק בביו · משחקי היום באתר</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

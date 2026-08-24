@@ -171,6 +171,15 @@ export default function LiveMatchCenter({
             <MatchPitch
               isLive={data.status === "live"}
               minute={data.minute}
+              pitch={
+                data.pitch ?? {
+                  homeFormation: null,
+                  awayFormation: null,
+                  players: [],
+                }
+              }
+              homeName={data.home.name}
+              awayName={data.away.name}
               lastEventLabel={
                 data.lastEvent
                   ? `${data.lastEvent.label}${data.lastEvent.playerName ? ` · ${data.lastEvent.playerName}` : ""}`
