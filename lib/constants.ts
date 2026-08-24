@@ -71,8 +71,6 @@ export const NAV_LINKS: NavLinkView[] = [
   { href: "#standings", label: "טבלאות" },
   { href: "#ucl", label: "ליגת האלופות" },
   { href: "/watch", label: "איפה לצפות" },
-  { href: "/flights", label: "נתב״ג חי" },
-  { href: "/rockets", label: "חמ״ל לייב" },
   { href: "#news", label: "חדשות" },
 ];
 
