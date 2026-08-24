@@ -477,3 +477,68 @@ export async function fetchLeagueSchedule(
     fetchedAt: new Date().toISOString(),
   };
 }
+
+/** Jerusalem calendar day key (YYYY-MM-DD). */
+export function jerusalemDayKey(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-CA", {
+    timeZone: "Asia/Jerusalem",
+  });
+}
+
+export function todayJerusalemKey(): string {
+  return new Date().toLocaleDateString("en-CA", {
+    timeZone: "Asia/Jerusalem",
+  });
+}
+
+export interface TodaysMatchesView {
+  dayKey: string;
+  dayLabel: string;
+  leagues: FootballLeague[];
+  matches: LeagueMatchView[];
+  liveCount: number;
+  fetchedAt: string;
+}
+
+/** All matches on today's Jerusalem calendar day from configured leagues + UCL. */
+export async function fetchTodaysMatches(
+  fresh = false,
+): Promise<TodaysMatchesView> {
+  const dayKey = todayJerusalemKey();
+  const now = new Date();
+  const start = addDays(now, -1);
+  const end = addDays(now, 1);
+
+  const gamesPayload = await getScores365Games({
+    competitionIds: getDomesticAndUclIdsCsv(),
+    startDate: start,
+    endDate: end,
+    fresh,
+  });
+
+  const games = Array.isArray(gamesPayload.games)
+    ? (gamesPayload.games as Scores365Json[])
+    : [];
+
+  const matches = parseMatchesFromGames(games)
+    .filter((match) => jerusalemDayKey(match.kickoffAt) === dayKey)
+    .sort(
+      (a, b) => new Date(a.kickoffAt).getTime() - new Date(b.kickoffAt).getTime(),
+    );
+
+  const dayLabel = new Date().toLocaleDateString("he-IL", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    timeZone: "Asia/Jerusalem",
+  });
+
+  return {
+    dayKey,
+    dayLabel,
+    leagues: ALL_FOOTBALL_COMPETITIONS,
+    matches,
+    liveCount: matches.filter((match) => match.status === "live").length,
+    fetchedAt: new Date().toISOString(),
+  };
+}

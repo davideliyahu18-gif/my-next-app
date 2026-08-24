@@ -288,12 +288,12 @@ export default function TodayFootballHub({
                   : "אין משחקים להיום כרגע"}
               </p>
             </div>
-            <a
-              href="#matches"
+            <Link
+              href="/today"
               className="text-xs font-bold text-gold transition-colors hover:text-white"
             >
-              לכל הליגות ←
-            </a>
+              כל משחקי היום ←
+            </Link>
           </div>
 
           {sortedToday.length > 0 ? (

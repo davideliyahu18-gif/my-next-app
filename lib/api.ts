@@ -3,7 +3,9 @@ import { LIVE_DATA_REVALIDATE_SECONDS } from "./constants";
 import {
   fetchLeagueSchedule,
   fetchLeaguesDashboard,
+  fetchTodaysMatches,
   type LeaguesDashboardView,
+  type TodaysMatchesView,
 } from "./football/leagues-data";
 import {
   fetchFifaDashboard,
@@ -145,6 +147,33 @@ export function getLeagueSchedule(): Promise<LeaguesDashboardView> {
     "league_schedule",
     () => fetchLeagueSchedule(false),
     emptyLeaguesDashboard(),
+  );
+}
+
+const emptyTodaysMatches = (): TodaysMatchesView => ({
+  dayKey: "",
+  dayLabel: "",
+  leagues: [],
+  matches: [],
+  liveCount: 0,
+  fetchedAt: new Date().toISOString(),
+});
+
+/** Cached today's matches for SSR. */
+export function getTodaysMatches(): Promise<TodaysMatchesView> {
+  return cachedFetch(
+    "todays_matches",
+    () => fetchTodaysMatches(false),
+    emptyTodaysMatches(),
+  );
+}
+
+/** Fresh today's matches for client polling. */
+export function getTodaysMatchesLive(): Promise<TodaysMatchesView> {
+  return safeFetch(
+    "todays_matches_live",
+    () => fetchTodaysMatches(true),
+    emptyTodaysMatches(),
   );
 }
 

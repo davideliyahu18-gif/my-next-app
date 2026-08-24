@@ -125,9 +125,29 @@ export default function LiveMatchCenter({
             {data.status === "live" && (
               <p className="mt-1 text-sm font-bold text-zinc-400">{data.minute}</p>
             )}
+            {data.status === "upcoming" && data.kickoffAt ? (
+              <p className="mt-1 text-sm font-bold text-zinc-400">
+                {new Date(data.kickoffAt).toLocaleTimeString("he-IL", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  timeZone: "Asia/Jerusalem",
+                })}
+              </p>
+            ) : null}
           </div>
           <TeamBlock team={data.away} align="away" />
         </div>
+
+        {data.venue ? (
+          <p className="mt-4 text-center text-sm text-zinc-400">
+            <span className="text-gold">אצטדיון</span>
+            {" · "}
+            {data.venue.name}
+            {data.venue.capacity
+              ? ` · ${data.venue.capacity.toLocaleString("he-IL")} מקומות`
+              : ""}
+          </p>
+        ) : null}
 
         <div className="mt-5 flex gap-1 overflow-x-auto scrollbar-hide">
           {tabs.map((item) => (
