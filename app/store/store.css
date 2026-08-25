@@ -1,17 +1,15 @@
-/* VOLT gaming store — scoped under .volt-store */
+/* VOLT v2 — signal retail look */
 
 .volt-store {
-  --volt-bg: #0a0c10;
-  --volt-bg-elevated: #12151c;
-  --volt-fg: #f2f4f7;
-  --volt-muted: #9aa3b2;
-  --volt-line: rgba(242, 244, 247, 0.1);
-  --volt-accent: #c6ff3d;
-  --volt-accent-ink: #0a0c10;
-  --volt-copper: #e8a87c;
-  --volt-danger: #ff5c5c;
-  --volt-radius: 0;
-  --font-display: var(--font-space-grotesk), var(--font-rubik), sans-serif;
+  --volt-bg: #0e0f0c;
+  --volt-bg-elevated: #171912;
+  --volt-fg: #f4f6f0;
+  --volt-muted: #9ba194;
+  --volt-line: rgba(244, 246, 240, 0.12);
+  --volt-accent: #ff5a1f;
+  --volt-accent-ink: #0e0f0c;
+  --volt-mint: #9dff6a;
+  --font-display: var(--font-archivo), var(--font-rubik), sans-serif;
   --font-body: var(--font-rubik), var(--font-heebo), sans-serif;
 
   background: var(--volt-bg);
@@ -20,9 +18,14 @@
   min-height: 100vh;
   isolation: isolate;
   background-image:
-    radial-gradient(ellipse 90% 55% at 80% -10%, rgba(198, 255, 61, 0.12), transparent 55%),
-    radial-gradient(ellipse 70% 45% at 0% 40%, rgba(232, 168, 124, 0.07), transparent 50%),
-    linear-gradient(180deg, #0a0c10 0%, #0d1016 50%, #0a0c10 100%);
+    linear-gradient(135deg, rgba(255, 90, 31, 0.08) 0%, transparent 42%),
+    repeating-linear-gradient(
+      -18deg,
+      transparent,
+      transparent 48px,
+      rgba(244, 246, 240, 0.015) 48px,
+      rgba(244, 246, 240, 0.015) 49px
+    );
 }
 
 .volt-store * {
@@ -51,26 +54,24 @@
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.85rem 1.25rem;
+  padding: 1rem 1.25rem;
   transition: background 0.35s ease, border-color 0.35s ease, backdrop-filter 0.35s ease;
   border-bottom: 1px solid transparent;
 }
 
 .volt-nav.is-scrolled {
-  background: rgba(10, 12, 16, 0.82);
-  backdrop-filter: blur(16px);
+  background: rgba(14, 15, 12, 0.88);
+  backdrop-filter: blur(18px);
   border-bottom-color: var(--volt-line);
 }
 
 .volt-brand {
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: clamp(1.55rem, 3vw, 1.9rem);
-  letter-spacing: 0.08em;
+  font-size: clamp(1.65rem, 3.2vw, 2.05rem);
+  letter-spacing: -0.03em;
   line-height: 1;
-  display: inline-flex;
-  align-items: baseline;
-  gap: 0.35rem;
+  text-transform: uppercase;
 }
 
 .volt-brand span {
@@ -100,27 +101,29 @@
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
-  padding: 0.55rem 0.9rem;
-  border: 1px solid var(--volt-line);
-  background: rgba(255, 255, 255, 0.03);
-  transition: border-color 0.25s ease, background 0.25s ease, transform 0.25s ease;
+  padding: 0.6rem 1rem;
+  background: var(--volt-fg);
+  color: var(--volt-accent-ink);
+  font-weight: 700;
+  font-size: 0.88rem;
+  transition: transform 0.2s ease, background 0.2s ease;
 }
 
 .volt-cart-btn:hover {
-  border-color: rgba(198, 255, 61, 0.45);
-  background: rgba(198, 255, 61, 0.06);
+  background: var(--volt-accent);
+  color: #fff;
 }
 
 .volt-cart-count {
-  min-width: 1.25rem;
-  height: 1.25rem;
-  padding: 0 0.3rem;
+  min-width: 1.2rem;
+  height: 1.2rem;
+  padding: 0 0.28rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   background: var(--volt-accent);
-  color: var(--volt-accent-ink);
-  font-size: 0.72rem;
+  color: #fff;
+  font-size: 0.7rem;
   font-weight: 700;
   animation: volt-pop 0.35s ease;
 }
@@ -140,7 +143,7 @@
 /* ——— Hero ——— */
 .volt-hero {
   position: relative;
-  min-height: min(100svh, 920px);
+  min-height: 100svh;
   display: grid;
   align-items: end;
   overflow: hidden;
@@ -154,16 +157,16 @@
 
 .volt-hero-media img {
   object-fit: cover;
-  object-position: center 35%;
-  animation: volt-ken 18s ease-in-out infinite alternate;
+  object-position: center 30%;
+  animation: volt-ken 20s ease-in-out infinite alternate;
 }
 
 @keyframes volt-ken {
   from {
-    transform: scale(1);
+    transform: scale(1) translate3d(0, 0, 0);
   }
   to {
-    transform: scale(1.06);
+    transform: scale(1.08) translate3d(1.5%, -1%, 0);
   }
 }
 
@@ -172,29 +175,30 @@
   inset: 0;
   z-index: 1;
   background:
-    linear-gradient(90deg, rgba(10, 12, 16, 0.92) 0%, rgba(10, 12, 16, 0.55) 48%, rgba(10, 12, 16, 0.35) 100%),
-    linear-gradient(0deg, rgba(10, 12, 16, 0.95) 0%, rgba(10, 12, 16, 0.2) 42%, transparent 70%);
+    linear-gradient(105deg, rgba(14, 15, 12, 0.94) 0%, rgba(14, 15, 12, 0.62) 46%, rgba(14, 15, 12, 0.28) 100%),
+    linear-gradient(0deg, rgba(14, 15, 12, 0.98) 0%, rgba(14, 15, 12, 0.15) 38%, transparent 62%);
 }
 
 .volt-hero-content {
   position: relative;
   z-index: 2;
-  width: min(1120px, 100%);
+  width: min(1180px, 100%);
   margin-inline: auto;
-  padding: 6.5rem 1.25rem 4.5rem;
+  padding: 7rem 1.25rem 5rem;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 1.15rem;
+  gap: 1.1rem;
 }
 
 .volt-hero-brand {
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: clamp(3.4rem, 12vw, 7.5rem);
-  letter-spacing: 0.06em;
-  line-height: 0.9;
-  animation: volt-rise 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+  font-size: clamp(4.2rem, 16vw, 9.5rem);
+  letter-spacing: -0.05em;
+  line-height: 0.82;
+  text-transform: uppercase;
+  animation: volt-rise 0.95s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .volt-hero-brand em {
@@ -203,33 +207,33 @@
 }
 
 .volt-hero-title {
-  max-width: 18ch;
-  font-size: clamp(1.35rem, 3.2vw, 2rem);
+  max-width: 16ch;
+  font-size: clamp(1.4rem, 3.4vw, 2.15rem);
   font-weight: 600;
-  line-height: 1.25;
-  animation: volt-rise 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.12s both;
+  line-height: 1.22;
+  animation: volt-rise 0.95s cubic-bezier(0.22, 1, 0.36, 1) 0.1s both;
 }
 
 .volt-hero-copy {
-  max-width: 34ch;
+  max-width: 32ch;
   color: var(--volt-muted);
   font-size: 1.05rem;
   line-height: 1.55;
-  animation: volt-rise 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.22s both;
+  animation: volt-rise 0.95s cubic-bezier(0.22, 1, 0.36, 1) 0.2s both;
 }
 
 .volt-hero-ctas {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
-  margin-top: 0.5rem;
-  animation: volt-rise 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.32s both;
+  margin-top: 0.65rem;
+  animation: volt-rise 0.95s cubic-bezier(0.22, 1, 0.36, 1) 0.3s both;
 }
 
 @keyframes volt-rise {
   from {
     opacity: 0;
-    transform: translateY(22px);
+    transform: translateY(28px);
   }
   to {
     opacity: 1;
@@ -242,9 +246,9 @@
   align-items: center;
   justify-content: center;
   gap: 0.4rem;
-  min-height: 3rem;
-  padding: 0.75rem 1.35rem;
-  font-weight: 600;
+  min-height: 3.15rem;
+  padding: 0.8rem 1.5rem;
+  font-weight: 700;
   font-size: 0.95rem;
   transition: transform 0.2s ease, background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
 }
@@ -255,45 +259,48 @@
 
 .volt-btn-primary {
   background: var(--volt-accent);
-  color: var(--volt-accent-ink);
+  color: #fff;
 }
 
 .volt-btn-primary:hover {
-  filter: brightness(1.05);
+  filter: brightness(1.08);
 }
 
 .volt-btn-ghost {
   border: 1px solid var(--volt-line);
   color: var(--volt-fg);
-  background: rgba(255, 255, 255, 0.03);
+  background: transparent;
 }
 
 .volt-btn-ghost:hover {
-  border-color: rgba(242, 244, 247, 0.28);
-  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(244, 246, 240, 0.35);
+  background: rgba(244, 246, 240, 0.05);
 }
 
 /* ——— Sections ——— */
 .volt-section {
-  width: min(1120px, 100%);
+  width: min(1180px, 100%);
   margin-inline: auto;
-  padding: 4.5rem 1.25rem;
+  padding: 5rem 1.25rem;
 }
 
 .volt-section-head {
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
-  margin-bottom: 2rem;
+  margin-bottom: 2.25rem;
   max-width: 36rem;
+  border-inline-start: 3px solid var(--volt-accent);
+  padding-inline-start: 1rem;
 }
 
 .volt-section-head h2 {
   font-family: var(--font-display);
-  font-size: clamp(1.75rem, 4vw, 2.55rem);
+  font-size: clamp(2rem, 4.5vw, 3rem);
   font-weight: 700;
-  letter-spacing: 0.02em;
-  line-height: 1.1;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  text-transform: uppercase;
 }
 
 .volt-section-head p {
@@ -306,40 +313,101 @@
 .volt-filters {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-bottom: 1.75rem;
+  gap: 0.4rem;
+  margin-bottom: 2rem;
 }
 
 .volt-filter {
-  padding: 0.5rem 0.95rem;
-  border: 1px solid var(--volt-line);
+  padding: 0.55rem 1rem;
+  border-bottom: 2px solid transparent;
   color: var(--volt-muted);
   font-size: 0.9rem;
-  transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+  font-weight: 600;
+  transition: color 0.2s ease, border-color 0.2s ease;
 }
 
 .volt-filter:hover {
   color: var(--volt-fg);
-  border-color: rgba(242, 244, 247, 0.25);
 }
 
 .volt-filter.is-active {
-  color: var(--volt-accent-ink);
-  background: var(--volt-accent);
-  border-color: var(--volt-accent);
+  color: var(--volt-accent);
+  border-bottom-color: var(--volt-accent);
+}
+
+/* ——— Featured ——— */
+.volt-featured {
+  display: grid;
+  gap: 1.25rem;
+  margin-bottom: 2.5rem;
+  background: var(--volt-bg-elevated);
+  border: 1px solid var(--volt-line);
+}
+
+.volt-featured-media {
+  position: relative;
+  aspect-ratio: 16 / 11;
+  overflow: hidden;
+}
+
+.volt-featured-media img {
+  object-fit: cover;
+  transition: transform 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.volt-featured:hover .volt-featured-media img {
+  transform: scale(1.04);
+}
+
+.volt-featured-body {
+  padding: 1.35rem 1.25rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.volt-featured-kicker {
+  color: var(--volt-mint);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.volt-featured-body h3 {
+  font-family: var(--font-display);
+  font-size: clamp(1.6rem, 3vw, 2.2rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  text-transform: uppercase;
+  line-height: 1.05;
+}
+
+.volt-featured-body p {
+  color: var(--volt-muted);
+  line-height: 1.5;
+  max-width: 40ch;
+}
+
+.volt-featured-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.85rem;
+  margin-top: 0.65rem;
 }
 
 /* ——— Products ——— */
 .volt-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 1.5rem;
+  gap: 1.75rem;
 }
 
 .volt-product {
   display: flex;
   flex-direction: column;
-  gap: 0.85rem;
+  gap: 0.9rem;
   opacity: 0;
   animation: volt-rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
@@ -371,9 +439,10 @@
 
 .volt-product-media {
   position: relative;
-  aspect-ratio: 4 / 3;
+  aspect-ratio: 5 / 4;
   overflow: hidden;
   background: var(--volt-bg-elevated);
+  clip-path: polygon(0 0, 100% 0, 100% 92%, 92% 100%, 0 100%);
 }
 
 .volt-product-media img {
@@ -382,7 +451,7 @@
 }
 
 .volt-product:hover .volt-product-media img {
-  transform: scale(1.05);
+  transform: scale(1.06);
 }
 
 .volt-product-badge {
@@ -390,12 +459,13 @@
   top: 0.75rem;
   inset-inline-start: 0.75rem;
   z-index: 1;
-  padding: 0.28rem 0.55rem;
+  padding: 0.3rem 0.55rem;
   background: var(--volt-accent);
-  color: var(--volt-accent-ink);
-  font-size: 0.72rem;
+  color: #fff;
+  font-size: 0.7rem;
   font-weight: 700;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .volt-product-body {
@@ -407,9 +477,10 @@
 
 .volt-product-body h3 {
   font-family: var(--font-display);
-  font-size: 1.2rem;
+  font-size: 1.25rem;
   font-weight: 700;
-  letter-spacing: 0.02em;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
 }
 
 .volt-product-body p {
@@ -424,7 +495,7 @@
   justify-content: space-between;
   gap: 0.75rem;
   margin-top: auto;
-  padding-top: 0.65rem;
+  padding-top: 0.7rem;
 }
 
 .volt-price {
@@ -432,7 +503,7 @@
   align-items: baseline;
   gap: 0.45rem;
   font-weight: 700;
-  font-size: 1.1rem;
+  font-size: 1.12rem;
 }
 
 .volt-price s {
@@ -442,34 +513,34 @@
 }
 
 .volt-add {
-  padding: 0.55rem 0.9rem;
+  padding: 0.55rem 0.95rem;
   background: transparent;
   border: 1px solid var(--volt-accent);
   color: var(--volt-accent);
   font-size: 0.85rem;
-  font-weight: 600;
+  font-weight: 700;
   transition: background 0.2s ease, color 0.2s ease;
 }
 
 .volt-add:hover {
   background: var(--volt-accent);
-  color: var(--volt-accent-ink);
+  color: #fff;
 }
 
 /* ——— Drop ——— */
 .volt-drop {
-  width: min(1120px, 100%);
+  width: min(1180px, 100%);
   margin: 0 auto 1rem;
-  padding: 0 1.25rem 4.5rem;
+  padding: 0 1.25rem 5rem;
 }
 
 .volt-drop-panel {
   position: relative;
-  min-height: 320px;
+  min-height: 340px;
   display: grid;
   align-items: end;
   overflow: hidden;
-  background: var(--volt-bg-elevated);
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 0 92%);
 }
 
 .volt-drop-panel img {
@@ -481,18 +552,18 @@
   position: absolute;
   inset: 0;
   background: linear-gradient(
-    90deg,
-    rgba(10, 12, 16, 0.92) 0%,
-    rgba(10, 12, 16, 0.55) 55%,
-    rgba(10, 12, 16, 0.25) 100%
+    100deg,
+    rgba(14, 15, 12, 0.94) 0%,
+    rgba(14, 15, 12, 0.5) 55%,
+    rgba(14, 15, 12, 0.2) 100%
   );
 }
 
 .volt-drop-copy {
   position: relative;
   z-index: 1;
-  padding: 2.5rem 1.5rem;
-  max-width: 28rem;
+  padding: 2.75rem 1.5rem;
+  max-width: 30rem;
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
@@ -500,9 +571,11 @@
 
 .volt-drop-copy h2 {
   font-family: var(--font-display);
-  font-size: clamp(1.6rem, 3.5vw, 2.3rem);
+  font-size: clamp(1.75rem, 3.8vw, 2.55rem);
   font-weight: 700;
-  line-height: 1.15;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  text-transform: uppercase;
 }
 
 .volt-drop-copy p {
@@ -511,18 +584,18 @@
 }
 
 .volt-drop-kicker {
-  color: var(--volt-copper);
-  font-size: 0.85rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
+  color: var(--volt-accent);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
 /* ——— Footer ——— */
 .volt-footer {
   border-top: 1px solid var(--volt-line);
-  padding: 2.5rem 1.25rem 3rem;
-  width: min(1120px, 100%);
+  padding: 2.75rem 1.25rem 3.25rem;
+  width: min(1180px, 100%);
   margin-inline: auto;
   display: flex;
   flex-direction: column;
@@ -531,9 +604,10 @@
 
 .volt-footer-brand {
   font-family: var(--font-display);
-  font-size: 1.5rem;
+  font-size: 1.75rem;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: -0.03em;
+  text-transform: uppercase;
 }
 
 .volt-footer-brand span {
@@ -563,7 +637,7 @@
   position: fixed;
   inset: 0;
   z-index: 50;
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(0, 0, 0, 0.6);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.3s ease;
@@ -581,7 +655,7 @@
   z-index: 60;
   width: min(100%, 400px);
   height: 100%;
-  background: #10131a;
+  background: #14160f;
   border-inline-start: 1px solid var(--volt-line);
   display: flex;
   flex-direction: column;
@@ -607,8 +681,10 @@
 
 .volt-cart-head h2 {
   font-family: var(--font-display);
-  font-size: 1.2rem;
+  font-size: 1.25rem;
   font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: -0.02em;
 }
 
 .volt-cart-close {
@@ -657,7 +733,7 @@
 
 .volt-cart-item h3 {
   font-size: 0.95rem;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .volt-cart-item p {
@@ -732,24 +808,39 @@
     padding-inline: 2rem;
   }
 
+  .volt-featured {
+    grid-template-columns: 1.15fr 1fr;
+    align-items: stretch;
+  }
+
+  .volt-featured-media {
+    aspect-ratio: auto;
+    min-height: 100%;
+  }
+
+  .volt-featured-body {
+    padding: 2rem 1.75rem;
+    justify-content: center;
+  }
+
   .volt-grid {
     grid-template-columns: repeat(2, 1fr);
-    gap: 1.75rem;
+    gap: 2rem;
   }
 
   .volt-drop-copy {
-    padding: 3rem 2.25rem;
+    padding: 3.25rem 2.25rem;
   }
 }
 
 @media (min-width: 960px) {
   .volt-grid {
     grid-template-columns: repeat(3, 1fr);
-    gap: 2rem;
+    gap: 2.15rem;
   }
 
   .volt-drop-panel {
-    min-height: 380px;
+    min-height: 400px;
   }
 }
 
@@ -768,7 +859,8 @@
     opacity: 1;
   }
 
-  .volt-product:hover .volt-product-media img {
+  .volt-product:hover .volt-product-media img,
+  .volt-featured:hover .volt-featured-media img {
     transform: none;
   }
 }

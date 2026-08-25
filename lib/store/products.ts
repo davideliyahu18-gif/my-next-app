@@ -15,7 +15,7 @@ export type StoreProduct = {
 export const STORE_BRAND = {
   name: "VOLT",
   nameHe: "וולט",
-  tagline: "ציוד גיימינג שמורגש בכל פריים",
+  tagline: "ה־setup שמנצח בשבילך",
   description:
     "VOLT — חנות ציוד גיימינג פרימיום: מקלדות, אוזניות, מסכים וכסאות. משלוח מהיר לכל הארץ.",
 } as const;
@@ -123,7 +123,9 @@ export const STORE_PRODUCTS: StoreProduct[] = [
 ];
 
 export const HERO_IMAGE =
-  "https://images.unsplash.com/photo-1542751371-adc38448a05e?w=2400&q=90";
+  "https://images.unsplash.com/photo-1593305841991-05c297ba4575?w=2400&q=85";
+
+export const FEATURED_PRODUCT_ID = "volt-horizon-27";
 
 export function formatIls(amount: number): string {
   return new Intl.NumberFormat("he-IL", {
