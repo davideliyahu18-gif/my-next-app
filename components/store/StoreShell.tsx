@@ -90,8 +90,8 @@ export default function StoreShell() {
     <div className="volt-store" dir="rtl">
       <header className={`volt-nav${scrolled ? " is-scrolled" : ""}`}>
         <Link href="/store" className="volt-brand" aria-label={STORE_BRAND.name}>
-          {STORE_BRAND.name}
-          <span>.</span>
+          {STORE_BRAND.shortName}
+          <span> בע״מ</span>
         </Link>
 
         <nav className="volt-nav-links" aria-label="ניווט ראשי">
@@ -130,10 +130,7 @@ export default function StoreShell() {
         </div>
         <div className="volt-hero-shade" aria-hidden />
         <div className="volt-hero-content">
-          <p className="volt-hero-brand">
-            {STORE_BRAND.name}
-            <em>.</em>
-          </p>
+          <p className="volt-hero-brand">{STORE_BRAND.name}</p>
           <h1 className="volt-hero-title">{STORE_BRAND.tagline}</h1>
           <p className="volt-hero-copy">
             ציוד מדויק לסשנים ארוכים — נשלח עד הבית תוך 48 שעות.
@@ -264,10 +261,7 @@ export default function StoreShell() {
 
       <footer id="about" className="volt-footer">
         <div>
-          <p className="volt-footer-brand">
-            {STORE_BRAND.name}
-            <span>.</span>
-          </p>
+          <p className="volt-footer-brand">{STORE_BRAND.name}</p>
           <p>{STORE_BRAND.description}</p>
         </div>
         <div className="volt-footer-meta">

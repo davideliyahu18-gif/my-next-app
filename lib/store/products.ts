@@ -13,11 +13,12 @@ export type StoreProduct = {
 };
 
 export const STORE_BRAND = {
-  name: "VOLT",
-  nameHe: "וולט",
+  name: "מוצרי גיימינג בע״מ",
+  nameHe: "מוצרי גיימינג בע״מ",
+  shortName: "מוצרי גיימינג",
   tagline: "ה־setup שמנצח בשבילך",
   description:
-    "VOLT — חנות ציוד גיימינג פרימיום: מקלדות, אוזניות, מסכים וכסאות. משלוח מהיר לכל הארץ.",
+    "מוצרי גיימינג בע״מ — חנות ציוד גיימינג פרימיום: מקלדות, אוזניות, מסכים וכסאות. משלוח מהיר לכל הארץ.",
 } as const;
 
 export const STORE_CATEGORIES: {
