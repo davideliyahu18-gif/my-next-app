@@ -88,7 +88,7 @@ export default function HomeScreenWidget({
   return (
     <div
       dir="rtl"
-      className="mx-auto min-h-screen max-w-md bg-background px-3 py-4 text-foreground"
+      className="mx-auto min-h-screen max-w-md bg-transparent px-3 py-4 text-foreground"
     >
       <div className="mb-3 flex items-center justify-between gap-2">
         <div>

@@ -3,7 +3,7 @@ import RocketTrackingMap from "@/components/rockets/RocketTrackingMap";
 
 export default function RocketsPage() {
   return (
-    <div dir="rtl" className="min-h-screen bg-[#eef1f5]">
+    <div dir="rtl" className="min-h-screen bg-transparent">
       {/* Server-rendered so the menu is visible even before JS loads */}
       <div className="border-b border-blue-800 bg-[#1e4fd6] px-3 py-2 text-center text-white">
         <p className="text-sm font-black tracking-tight">

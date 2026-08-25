@@ -294,7 +294,7 @@ export default function RocketTrackingMap() {
       : (selectedTrack?.alertAreas ?? []);
 
   return (
-    <div dir="rtl" className="min-h-screen bg-[#eef1f5] text-slate-900">
+    <div dir="rtl" className="min-h-screen bg-transparent text-slate-100">
       <header className="sticky top-0 z-40 bg-[#2f6fed] text-white shadow-sm">
         <div className="mx-auto flex max-w-lg items-center justify-between px-4 py-3">
           <Link href="/" className="text-xs font-medium text-white/80">

@@ -17,7 +17,7 @@ export default async function MatchPage({ params }: PageProps) {
   if (!match) notFound();
 
   return (
-    <div dir="rtl" className="min-h-screen bg-background font-sans text-foreground">
+    <div dir="rtl" className="min-h-screen bg-transparent font-sans text-foreground">
       <Header />
       <main className="mx-auto max-w-[900px] px-4 py-8 md:px-8">
         <Link

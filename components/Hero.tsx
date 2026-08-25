@@ -1,6 +1,5 @@
 import Link from "next/link";
 import {
-  IMAGES,
   SITE_BRAND,
   WHATSAPP_GROUP_CAPTION,
   WHATSAPP_INVITE_LINK,
@@ -15,7 +14,8 @@ export default function Hero() {
         <div
           className="absolute inset-0 bg-cover bg-center"
           style={{
-            backgroundImage: `linear-gradient(to bottom, rgba(5,5,5,0.35), rgba(5,5,5,0.92)), url('${IMAGES.stadium}')`,
+            backgroundImage:
+              "linear-gradient(to bottom, rgba(3,6,12,0.45), rgba(3,6,12,0.88)), url('/images/ops-desk-bg.png')",
           }}
         />
         <div className="absolute inset-0 bg-gradient-to-l from-black/60 via-transparent to-black/40" />

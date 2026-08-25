@@ -40,7 +40,7 @@ const CHANNELS = [
 
 export default function WatchPage() {
   return (
-    <div dir="rtl" className="min-h-screen bg-background font-sans text-foreground">
+    <div dir="rtl" className="min-h-screen bg-transparent font-sans text-foreground">
       <Header />
       <main className="mx-auto max-w-3xl px-4 py-10 md:px-8">
         <Link

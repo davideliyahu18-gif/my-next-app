@@ -71,7 +71,7 @@ export default async function HighlightPage({
       : "VS";
 
   return (
-    <div dir="rtl" className="min-h-screen bg-black font-sans text-white">
+    <div dir="rtl" className="min-h-screen bg-transparent font-sans text-white">
       <header className="border-b border-white/[0.06] bg-black/90 px-4 py-4 md:px-8">
         <div className="mx-auto flex max-w-3xl items-center justify-between gap-4">
           <Link

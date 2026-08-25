@@ -41,7 +41,7 @@ export default async function TeamsIndexPage() {
   );
 
   return (
-    <div dir="rtl" className="min-h-screen bg-background font-sans text-foreground">
+    <div dir="rtl" className="min-h-screen bg-transparent font-sans text-foreground">
       <Header />
       <main className="mx-auto max-w-[1440px] px-4 py-10 md:px-8">
         <Link
