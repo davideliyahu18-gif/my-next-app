@@ -10,7 +10,7 @@ export default async function Home() {
   const dashboard = await getLeaguesDashboard();
 
   return (
-    <div dir="rtl" className="min-h-screen bg-background font-sans text-foreground">
+    <div dir="rtl" className="min-h-screen bg-transparent font-sans text-foreground">
       <Header />
       <Hero />
 

@@ -115,7 +115,7 @@ export default async function TeamPage({ params }: PageProps) {
       : null;
 
   return (
-    <div dir="rtl" className="min-h-screen bg-background font-sans text-foreground">
+    <div dir="rtl" className="min-h-screen bg-transparent font-sans text-foreground">
       <Header />
       <main className="mx-auto max-w-[1440px] px-4 py-10 md:px-8">
         <div className="mb-6 flex flex-wrap items-center gap-3 text-sm text-zinc-400">

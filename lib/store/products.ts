@@ -123,8 +123,7 @@ export const STORE_PRODUCTS: StoreProduct[] = [
   },
 ];
 
-export const HERO_IMAGE =
-  "https://images.unsplash.com/photo-1593305841991-05c297ba4575?w=2400&q=85";
+export const HERO_IMAGE = "/images/ops-desk-bg.png";
 
 export const FEATURED_PRODUCT_ID = "volt-horizon-27";
 
