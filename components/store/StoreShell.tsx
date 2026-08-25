@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
+  FEATURED_PRODUCT_ID,
   formatIls,
   HERO_IMAGE,
   STORE_BRAND,
@@ -44,11 +45,14 @@ export default function StoreShell() {
     };
   }, [cartOpen]);
 
+  const featured = STORE_PRODUCTS.find((p) => p.id === FEATURED_PRODUCT_ID);
+
   const products = useMemo(
     () =>
-      category === "all"
+      (category === "all"
         ? STORE_PRODUCTS
-        : STORE_PRODUCTS.filter((p) => p.category === category),
+        : STORE_PRODUCTS.filter((p) => p.category === category)
+      ).filter((p) => p.id !== FEATURED_PRODUCT_ID || category !== "all"),
     [category],
   );
 
@@ -118,7 +122,7 @@ export default function StoreShell() {
         <div className="volt-hero-media">
           <Image
             src={HERO_IMAGE}
-            alt="תחנת גיימינג מוארת עם מסך ומקלדת"
+            alt="קונסולת משחקים ושולחן גיימינג מואר"
             fill
             priority
             sizes="100vw"
@@ -132,11 +136,11 @@ export default function StoreShell() {
           </p>
           <h1 className="volt-hero-title">{STORE_BRAND.tagline}</h1>
           <p className="volt-hero-copy">
-            ציוד פרימיום לשחקנים שדורשים דיוק, נוחות ומהירות — נשלח עד הבית.
+            ציוד מדויק לסשנים ארוכים — נשלח עד הבית תוך 48 שעות.
           </p>
           <div className="volt-hero-ctas">
             <a className="volt-btn volt-btn-primary" href="#catalog">
-              לקטלוג
+              כניסה לקטלוג
             </a>
             <a className="volt-btn volt-btn-ghost" href="#drop">
               דרופ השבוע
@@ -148,8 +152,39 @@ export default function StoreShell() {
       <section id="catalog" className="volt-section" aria-labelledby="catalog-title">
         <div className="volt-section-head">
           <h2 id="catalog-title">הקטלוג</h2>
-          <p>פריפריה, מסכים, אודיו וכיסאות — נבחר בקפידה לסשנים ארוכים.</p>
+          <p>פריפריה, מסכים, אודיו וכיסאות — נבחרים לסשנים שלא נגמרים.</p>
         </div>
+
+        {featured && category === "all" && (
+          <article className="volt-featured">
+            <div className="volt-featured-media">
+              <Image
+                src={featured.image}
+                alt={featured.imageAlt}
+                fill
+                sizes="(max-width: 640px) 100vw, 55vw"
+              />
+            </div>
+            <div className="volt-featured-body">
+              <p className="volt-featured-kicker">בחירת העורך</p>
+              <h3>{featured.name}</h3>
+              <p>{featured.tagline}</p>
+              <div className="volt-featured-row">
+                <div className="volt-price">
+                  <span>{formatIls(featured.price)}</span>
+                  {featured.compareAt && <s>{formatIls(featured.compareAt)}</s>}
+                </div>
+                <button
+                  type="button"
+                  className="volt-btn volt-btn-primary"
+                  onClick={() => addToCart(featured)}
+                >
+                  הוסף לסל
+                </button>
+              </div>
+            </div>
+          </article>
+        )}
 
         <div className="volt-filters" role="tablist" aria-label="סינון קטגוריות">
           {STORE_CATEGORIES.map((cat) => (

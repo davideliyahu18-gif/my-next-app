@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
-import { Rubik, Space_Grotesk } from "next/font/google";
+import { Archivo, Rubik } from "next/font/google";
 import { STORE_BRAND } from "@/lib/store/products";
 import "./store.css";
 
-const spaceGrotesk = Space_Grotesk({
-  variable: "--font-space-grotesk",
+const archivo = Archivo({
+  variable: "--font-archivo",
   subsets: ["latin"],
-  weight: ["500", "600", "700"],
+  weight: ["600", "700", "800"],
 });
 
 const rubik = Rubik({
@@ -26,8 +26,6 @@ export default function StoreLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <div className={`${spaceGrotesk.variable} ${rubik.variable}`}>
-      {children}
-    </div>
+    <div className={`${archivo.variable} ${rubik.variable}`}>{children}</div>
   );
 }
