@@ -66,12 +66,13 @@
 }
 
 .volt-brand {
-  font-family: var(--font-display);
-  font-weight: 700;
-  font-size: clamp(1.65rem, 3.2vw, 2.05rem);
-  letter-spacing: -0.03em;
-  line-height: 1;
-  text-transform: uppercase;
+  font-family: var(--font-body);
+  font-weight: 800;
+  font-size: clamp(0.95rem, 2.2vw, 1.15rem);
+  letter-spacing: 0;
+  line-height: 1.15;
+  text-transform: none;
+  max-width: 12rem;
 }
 
 .volt-brand span {
@@ -192,18 +193,15 @@
 }
 
 .volt-hero-brand {
-  font-family: var(--font-display);
-  font-weight: 700;
-  font-size: clamp(4.2rem, 16vw, 9.5rem);
-  letter-spacing: -0.05em;
-  line-height: 0.82;
-  text-transform: uppercase;
+  font-family: var(--font-body);
+  font-weight: 800;
+  font-size: clamp(2.35rem, 8.5vw, 5.2rem);
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  text-transform: none;
+  max-width: 12ch;
+  color: var(--volt-fg);
   animation: volt-rise 0.95s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-.volt-hero-brand em {
-  font-style: normal;
-  color: var(--volt-accent);
 }
 
 .volt-hero-title {
@@ -603,15 +601,11 @@
 }
 
 .volt-footer-brand {
-  font-family: var(--font-display);
-  font-size: 1.75rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  text-transform: uppercase;
-}
-
-.volt-footer-brand span {
-  color: var(--volt-accent);
+  font-family: var(--font-body);
+  font-size: clamp(1.35rem, 3vw, 1.75rem);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  text-transform: none;
 }
 
 .volt-footer p {
