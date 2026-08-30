@@ -46,3 +46,8 @@ ios/DerivedData
 *.tsbuildinfo
 next-env.d.ts
 design/
+
+# whatsapp flights bot connector (standalone script, run outside Vercel)
+scripts/whatsapp-flights-bot/node_modules
+scripts/whatsapp-flights-bot/auth
+scripts/whatsapp-flights-bot/.env
