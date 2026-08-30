@@ -5,7 +5,14 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HOTELS_DEFAULT_CITY, HOTELS_DEFAULT_RADIUS_KM } from "@/lib/hotels/constants";
 import type { HotelKind, HotelRecord, HotelsSnapshot } from "@/lib/hotels/types";
-import { HOTEL_KIND_LABEL, formatDistance, matchesHotelQuery, starsLabel } from "@/lib/hotels/utils";
+import {
+  HOTEL_KIND_LABEL,
+  buildBookingSearchUrl,
+  defaultBookingDates,
+  formatDistance,
+  matchesHotelQuery,
+  starsLabel,
+} from "@/lib/hotels/utils";
 
 const HotelsMap = dynamic(() => import("@/components/hotels/HotelsMap"), {
   ssr: false,
@@ -65,11 +72,23 @@ function HotelCard({
   hotel,
   selected,
   onSelect,
+  cityLabel,
+  checkIn,
+  checkOut,
 }: {
   hotel: HotelRecord;
   selected: boolean;
   onSelect: (id: string) => void;
+  cityLabel: string;
+  checkIn: string;
+  checkOut: string;
 }) {
+  const bookingUrl = buildBookingSearchUrl({
+    query: `${hotel.name} ${cityLabel}`.trim(),
+    checkIn,
+    checkOut,
+  });
+
   return (
     <button
       type="button"
@@ -93,7 +112,16 @@ function HotelCard({
       {hotel.address ? (
         <p className="mt-2 truncate text-xs text-[#8a6d3b]">📍 {hotel.address}</p>
       ) : null}
-      <div className="mt-2 flex flex-wrap gap-3 text-xs">
+      <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
+        <a
+          href={bookingUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(event) => event.stopPropagation()}
+          className="rounded-lg bg-[#003580] px-3 py-1.5 font-black text-white transition hover:bg-[#00224f]"
+        >
+          מחיר ב-Booking.com
+        </a>
         {hotel.website ? (
           <a
             href={hotel.website}
@@ -119,6 +147,7 @@ export function HotelsDashboard() {
   const [query, setQuery] = useState("");
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [{ checkIn, checkOut }, setDates] = useState(defaultBookingDates());
   const requestIdRef = useRef(0);
 
   const loadHotels = useCallback(async (city: string, force = false) => {
@@ -165,6 +194,8 @@ export function HotelsDashboard() {
   }, [snapshot.hotels, kindFilter, query]);
 
   const selectedHotel = visibleHotels.find((hotel) => hotel.id === selectedId) ?? null;
+  const cityLabel = snapshot.cityLabel || activeCity;
+  const cityBookingUrl = buildBookingSearchUrl({ query: cityLabel, checkIn, checkOut });
 
   return (
     <div dir="rtl" className="hotels-page relative min-h-screen font-sans">
@@ -214,6 +245,36 @@ export function HotelsDashboard() {
               {loading ? "מחפש..." : "חיפוש"}
             </button>
           </form>
+
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-xs text-[#8a6d3b]">
+              צ&apos;ק-אין
+              <input
+                type="date"
+                value={checkIn}
+                onChange={(event) => setDates((d) => ({ ...d, checkIn: event.target.value }))}
+                className="rounded-lg border border-[#eadcc2] bg-white px-2 py-1.5 text-xs text-[#3b2410] outline-none focus:border-[#b45309]"
+              />
+            </label>
+            <label className="flex items-center gap-2 text-xs text-[#8a6d3b]">
+              צ&apos;ק-אאוט
+              <input
+                type="date"
+                value={checkOut}
+                onChange={(event) => setDates((d) => ({ ...d, checkOut: event.target.value }))}
+                className="rounded-lg border border-[#eadcc2] bg-white px-2 py-1.5 text-xs text-[#3b2410] outline-none focus:border-[#b45309]"
+              />
+            </label>
+            <a
+              href={cityBookingUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mr-auto rounded-lg bg-[#003580] px-4 py-2 text-xs font-black text-white transition hover:bg-[#00224f]"
+            >
+              חפש את כל {cityLabel.split(",")[0]} ב-Booking.com
+            </a>
+          </div>
+
           {snapshot.cityLabel ? (
             <p className="mt-3 text-xs text-[#8a6d3b]">📍 {snapshot.cityLabel}</p>
           ) : null}
@@ -307,6 +368,9 @@ export function HotelsDashboard() {
                 hotel={hotel}
                 selected={hotel.id === selectedHotel?.id}
                 onSelect={setSelectedId}
+                cityLabel={cityLabel}
+                checkIn={checkIn}
+                checkOut={checkOut}
               />
             ))
           )}
@@ -326,6 +390,8 @@ export function HotelsDashboard() {
           </p>
           <p className="mt-2">
             הנתונים מגיעים ממאגר קהילתי חופשי — ייתכן שחלק מהמלונות חסרים או לא מעודכנים.
+            כפתורי &quot;Booking.com&quot; מובילים לחיפוש באתר שלהם — מחיר וזמינות אמיתיים,
+            בלי חשבון API.
           </p>
         </footer>
       </main>

@@ -53,3 +53,35 @@ export function sortHotelsByDistance(hotels: HotelRecord[]): HotelRecord[] {
     return a.distanceKm - b.distanceKm;
   });
 }
+
+/**
+ * Booking.com has no free public API — this builds a plain search-results
+ * deep link (no key/partnership needed) so real prices are one click away.
+ */
+export function buildBookingSearchUrl(params: {
+  query: string;
+  checkIn?: string | null;
+  checkOut?: string | null;
+  adults?: number;
+}): string {
+  const url = new URL("https://www.booking.com/searchresults.html");
+  url.searchParams.set("ss", params.query);
+  if (params.checkIn) url.searchParams.set("checkin", params.checkIn);
+  if (params.checkOut) url.searchParams.set("checkout", params.checkOut);
+  url.searchParams.set("group_adults", String(params.adults ?? 2));
+  url.searchParams.set("no_rooms", "1");
+  url.searchParams.set("group_children", "0");
+  return url.toString();
+}
+
+function isoDate(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+export function defaultBookingDates(): { checkIn: string; checkOut: string } {
+  const checkIn = new Date();
+  checkIn.setDate(checkIn.getDate() + 7);
+  const checkOut = new Date(checkIn);
+  checkOut.setDate(checkOut.getDate() + 2);
+  return { checkIn: isoDate(checkIn), checkOut: isoDate(checkOut) };
+}
