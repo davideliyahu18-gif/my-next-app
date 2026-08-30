@@ -48,9 +48,11 @@ async function formatResultsReply(input: {
         returnDate: input.returnDate,
       });
       if (offers && offers.length > 0) {
+        // Real prices found — that's the answer, skip the search-page links.
         lines.push("💰 מחירים אמיתיים:");
         for (const offer of offers) lines.push(formatOfferLine(offer));
-        lines.push("");
+        lines.push("", "לחיפוש נוסף כתבו 'טיסה' שוב.");
+        return lines.join("\n");
       }
     } catch {
       // real-price lookup failed — fall back to the deep links below
