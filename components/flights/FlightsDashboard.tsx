@@ -507,6 +507,12 @@ export function FlightsDashboard() {
               {connected ? `עדכון · ${secondsSinceUpdate}ש׳` : "..."}
             </span>
             <Link
+              href="/hotels"
+              className="hidden rounded-lg border border-[#d6e4f0] bg-white px-4 py-2 text-xs font-bold text-slate-600 transition hover:border-[#1565c0]/40 hover:text-[#0b2d52] sm:inline-flex"
+            >
+              🏨 מלונות
+            </Link>
+            <Link
               href="/"
               className="hidden rounded-lg border border-[#d6e4f0] bg-white px-4 py-2 text-xs font-bold text-slate-600 transition hover:border-[#1565c0]/40 hover:text-[#0b2d52] sm:inline-flex"
             >
