@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { HotelPriceOffer } from "@/lib/amadeus/types";
 import { HOTELS_DEFAULT_CITY, HOTELS_DEFAULT_RADIUS_KM } from "@/lib/hotels/constants";
 import type { HotelKind, HotelRecord, HotelsSnapshot } from "@/lib/hotels/types";
 import {
@@ -148,7 +149,10 @@ export function HotelsDashboard() {
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [{ checkIn, checkOut }, setDates] = useState(defaultBookingDates());
+  const [priceOffers, setPriceOffers] = useState<HotelPriceOffer[] | null>(null);
+  const [pricesLoading, setPricesLoading] = useState(false);
   const requestIdRef = useRef(0);
+  const priceRequestIdRef = useRef(0);
 
   const loadHotels = useCallback(async (city: string, force = false) => {
     setLoading(true);
@@ -175,6 +179,26 @@ export function HotelsDashboard() {
   useEffect(() => {
     void loadHotels(activeCity);
   }, [activeCity, loadHotels]);
+
+  useEffect(() => {
+    const requestId = (priceRequestIdRef.current += 1);
+    setPricesLoading(true);
+    void fetch(
+      `/api/hotels/prices?city=${encodeURIComponent(activeCity)}&checkIn=${checkIn}&checkOut=${checkOut}`,
+      { cache: "no-store" },
+    )
+      .then((response) => response.json())
+      .then((data: { ok?: boolean; offers?: HotelPriceOffer[] | null }) => {
+        if (requestId !== priceRequestIdRef.current) return;
+        setPriceOffers(data.ok && data.offers ? data.offers : null);
+      })
+      .catch(() => {
+        if (requestId === priceRequestIdRef.current) setPriceOffers(null);
+      })
+      .finally(() => {
+        if (requestId === priceRequestIdRef.current) setPricesLoading(false);
+      });
+  }, [activeCity, checkIn, checkOut]);
 
   const handleSearch = (event: React.FormEvent) => {
     event.preventDefault();
@@ -284,6 +308,41 @@ export function HotelsDashboard() {
             </p>
           ) : null}
         </section>
+
+        {pricesLoading || (priceOffers && priceOffers.length > 0) ? (
+          <section className="hotels-glass mt-5 rounded-2xl p-5 md:p-6">
+            <h2 className="text-lg font-black text-[#3b2410]">💰 מחירים אמיתיים</h2>
+            <p className="mt-1 text-sm text-[#8a6d3b]">
+              {checkIn} – {checkOut} · מקור: Amadeus
+            </p>
+            {pricesLoading ? (
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                {Array.from({ length: 4 }).map((_, index) => (
+                  <div key={index} className="hotels-skeleton h-16 rounded-lg" />
+                ))}
+              </div>
+            ) : (
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                {priceOffers!.slice(0, 8).map((offer) => (
+                  <div
+                    key={offer.hotelId}
+                    className="flex items-center justify-between gap-3 rounded-lg border border-[#eadcc2] bg-white px-4 py-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-bold text-[#3b2410]">{offer.name}</p>
+                      {offer.rating ? (
+                        <p className="text-xs text-[#8a6d3b]">{starsLabel(Number(offer.rating))}</p>
+                      ) : null}
+                    </div>
+                    <span className="shrink-0 rounded-full bg-[#fdf4e3] px-3 py-1 text-sm font-black text-[#b45309]">
+                      {offer.currency} {Math.round(Number(offer.priceTotal))}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        ) : null}
 
         <section className="mt-5 grid gap-4 sm:grid-cols-3">
           <StatCard label="מלונות באזור" value={snapshot.stats.total} icon="🏨" />
