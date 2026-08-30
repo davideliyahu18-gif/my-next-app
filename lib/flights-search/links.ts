@@ -1,9 +1,5 @@
-import { CITY_IATA } from "./constants";
+import { resolveIata } from "./constants";
 import type { FlightSearchLinks } from "./types";
-
-function resolveIata(place: string): string | null {
-  return CITY_IATA[place.trim().toLowerCase()] ?? null;
-}
 
 /** yyMMdd, the path segment format Skyscanner's search-results URL expects. */
 function toSkyscannerDateSegment(isoDate: string): string {

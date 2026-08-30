@@ -1,25 +1,63 @@
+import { isAmadeusConfigured } from "@/lib/amadeus/auth";
+import { searchFlightPrices } from "@/lib/amadeus/flights";
+import type { FlightPriceOffer } from "@/lib/amadeus/types";
 import { buildFlightLinks } from "./links";
 import { formatDateHe, isCancel, isOneWayAnswer, isTrigger, parseDateHe } from "./parser";
 import { clearConversation, getConversation, setConversation } from "./state";
 import type { ConversationState } from "./types";
 
-function formatResultsReply(input: {
+function formatClockTime(iso: string): string {
+  const match = iso.match(/T(\d{2}:\d{2})/);
+  return match ? match[1] : iso;
+}
+
+function formatStops(count: number): string {
+  return count === 0 ? "ישירה" : `${count} החלפות`;
+}
+
+function formatLeg(leg: FlightPriceOffer["outbound"]): string {
+  return `${formatClockTime(leg.departAt)}-${formatClockTime(leg.arriveAt)} ${leg.carrier} (${formatStops(leg.stops)})`;
+}
+
+function formatOfferLine(offer: FlightPriceOffer): string {
+  const price = `${offer.currency} ${Math.round(Number(offer.priceTotal))}`;
+  const outbound = formatLeg(offer.outbound);
+  const inbound = offer.inbound ? ` | חזרה: ${formatLeg(offer.inbound)}` : "";
+  return `• ${price} — ${outbound}${inbound}`;
+}
+
+async function formatResultsReply(input: {
   origin: string;
   destination: string;
   departDate: string;
   returnDate: string | null;
-}): string {
+}): Promise<string> {
   const { googleFlightsUrl, skyscannerUrl } = buildFlightLinks(input);
   const dates = input.returnDate
     ? `${formatDateHe(input.departDate)} – ${formatDateHe(input.returnDate)}`
     : `${formatDateHe(input.departDate)} (חד-כיווני)`;
 
-  const lines = [
-    `✈️ ${input.origin} ← ${input.destination}`,
-    dates,
-    "",
-    `Google Flights: ${googleFlightsUrl}`,
-  ];
+  const lines = [`✈️ ${input.origin} ← ${input.destination}`, dates, ""];
+
+  if (isAmadeusConfigured()) {
+    try {
+      const offers = await searchFlightPrices({
+        origin: input.origin,
+        destination: input.destination,
+        departDate: input.departDate,
+        returnDate: input.returnDate,
+      });
+      if (offers && offers.length > 0) {
+        lines.push("💰 מחירים אמיתיים:");
+        for (const offer of offers) lines.push(formatOfferLine(offer));
+        lines.push("");
+      }
+    } catch {
+      // real-price lookup failed — fall back to the deep links below
+    }
+  }
+
+  lines.push(`Google Flights: ${googleFlightsUrl}`);
   if (skyscannerUrl) {
     lines.push(`Skyscanner: ${skyscannerUrl}`);
   }
@@ -106,7 +144,7 @@ async function advanceConversation(
         }
       }
 
-      const reply = formatResultsReply({
+      const reply = await formatResultsReply({
         origin: state.origin!,
         destination: state.destination!,
         departDate: state.departDate!,

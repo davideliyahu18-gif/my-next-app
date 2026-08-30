@@ -61,3 +61,7 @@ export const CITY_IATA: Record<string, string> = {
   "בקו": "BAK",
   "baku": "BAK",
 };
+
+export function resolveIata(place: string): string | null {
+  return CITY_IATA[place.trim().toLowerCase()] ?? null;
+}
