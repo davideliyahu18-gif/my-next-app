@@ -97,6 +97,22 @@ export const REASON_LABELS_HE: Record<string, string> = {
   "unusual-route": "מסלול שונה מהרגיל",
 };
 
+/** Well-known, publicly documented airfields shown as neutral reference
+ * points on the map (name + location only — no radius/coverage overlays). */
+export const REFERENCE_AIRFIELDS: { name: string; lat: number; lon: number }[] = [
+  { name: "בסיס תבריז", lat: 38.13, lon: 46.24 },
+  { name: "בסיס המדאן", lat: 34.87, lon: 48.55 },
+  { name: "בסיס דיזפול", lat: 32.43, lon: 48.38 },
+  { name: "בסיס בנדר עבאס", lat: 27.22, lon: 56.38 },
+  { name: "בסיס אספהאן", lat: 32.75, lon: 51.86 },
+  { name: "בסיס אל עודיד", lat: 25.12, lon: 51.32 },
+  { name: "בסיס אל דפרה", lat: 24.25, lon: 54.55 },
+  { name: "בסיס אינג'ירליק", lat: 37.0, lon: 35.43 },
+];
+
+export const ALERT_FEED_MAX = 60;
+export const TIMELINE_HISTORY_MAX = 90;
+
 export const DEFAULT_FILTERS: AircraftFilters = {
   showAircraft: true,
   showTrails: true,

@@ -41,6 +41,14 @@ export function headingDelta(a: number, b: number): number {
   return diff > 180 ? 360 - diff : diff;
 }
 
+const COMPASS_LABELS_HE = ["צפון", "צפון מזרח", "מזרח", "דרום מזרח", "דרום", "דרום מערב", "מערב", "צפון מערב"];
+
+/** 8-point Hebrew compass label for a bearing in degrees (0-360). */
+export function compassLabelHe(bearingDeg: number): string {
+  const index = Math.round(((bearingDeg % 360) + 360) % 360 / 45) % 8;
+  return COMPASS_LABELS_HE[index];
+}
+
 export function isWithinBounds(point: LatLng, bounds: MapBounds = REGION_BOUNDS): boolean {
   return (
     point.lat <= bounds.north &&

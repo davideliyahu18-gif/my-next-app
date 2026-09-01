@@ -53,8 +53,20 @@
 }
 
 /* Defined here (rather than relying on Tailwind's `fixed`/`z-[500]`/`sm:hidden`
-   utilities) so the bottom sheet's positioning always loads with this file,
-   independent of per-route CSS chunk splitting. */
+   utilities) so positioning always loads with this file, independent of
+   per-route CSS chunk splitting (see MobileBottomSheet / Modal). */
+.iran-airspace-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 600;
+}
+
+.iran-airspace-clickcatch {
+  position: fixed;
+  inset: 0;
+  z-index: 15;
+}
+
 .iran-airspace-sheet {
   position: fixed;
   inset: 0;

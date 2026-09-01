@@ -2,23 +2,32 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Header from "./Header";
+import Header, { type MapLayerId } from "./Header";
 import SystemStatus from "./SystemStatus";
 import FiltersPanel from "./FiltersPanel";
 import SearchBar from "./SearchBar";
 import MobileBottomSheet from "./MobileBottomSheet";
 import InterestingMovements from "./InterestingMovements";
+import ActiveAlerts, { type AlertEntry } from "./ActiveAlerts";
 import AircraftDetails from "./AircraftDetails";
+import TimelineBar from "./TimelineBar";
 import {
+  ALERT_FEED_MAX,
+  CATEGORY_LABELS_HE,
   DEFAULT_FILTERS,
+  REASON_LABELS_HE,
   REFRESH_INTERVAL_MS,
+  REGION_CENTER,
+  TIMELINE_HISTORY_MAX,
   TRAIL_MAX_POINTS,
 } from "@/lib/iran-airspace/constants";
+import { bearing, compassLabelHe } from "@/lib/iran-airspace/geo";
 import type {
   Aircraft,
   AircraftFilters,
   AircraftSnapshot,
   ConnectionState,
+  InterestingMovement,
   ProviderName,
   SystemStatus as SystemStatusT,
   TrailPoint,
@@ -34,6 +43,7 @@ const LiveMap = dynamic(() => import("./LiveMap"), {
 });
 
 const FETCH_TIMEOUT_MS = 8_000;
+const REGION_CENTER_LATLNG = { lat: REGION_CENTER[0], lon: REGION_CENTER[1] };
 
 function matchesFilters(aircraft: Aircraft, filters: AircraftFilters): boolean {
   if (!filters.showAircraft) return false;
@@ -76,7 +86,47 @@ function matchesFilters(aircraft: Aircraft, filters: AircraftFilters): boolean {
   return true;
 }
 
+const ALERT_PHRASES: Record<string, string> = {
+  "new-in-range": "נכנס לטווח המעקב",
+  "altitude-change": "ביצע שינוי גובה משמעותי",
+  "heading-change": "ביצע שינוי כיוון משמעותי",
+  "high-speed": "טס במהירות גבוהה יחסית",
+  "re-entered-area": "נראה שוב באזור",
+  "holding-pattern": "בדפוס המתנה (Holding)",
+  "unusual-route": "טס במסלול שונה מהרגיל",
+};
+
+function buildAlertEntries(snapshot: AircraftSnapshot): AlertEntry[] {
+  const aircraftByHex = new Map(snapshot.aircraft.map((a) => [a.hex, a] as const));
+  const entries: AlertEntry[] = [];
+
+  for (const movement of snapshot.interesting) {
+    const aircraft = aircraftByHex.get(movement.hex);
+    if (!aircraft) continue;
+    const reason = movement.reasons[0] ?? "new-in-range";
+    const phrase = ALERT_PHRASES[reason] ?? REASON_LABELS_HE[reason] ?? "מסומן כמעניין";
+    const direction = compassLabelHe(bearing(REGION_CENTER_LATLNG, { lat: aircraft.lat, lon: aircraft.lon }));
+    const label = aircraft.callsign || aircraft.hex.toUpperCase();
+
+    entries.push({
+      id: `${movement.hex}-${movement.detectedAt}-${reason}`,
+      hex: movement.hex,
+      category: aircraft.category,
+      text: `מטוס ${CATEGORY_LABELS_HE[aircraft.category]} (${label}) ${phrase} · כיוון ${direction} מהמרכז`,
+      time: new Intl.DateTimeFormat("he-IL", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      }).format(new Date(movement.detectedAt)),
+    });
+  }
+
+  return entries;
+}
+
 type MobilePanel = "status" | "movements" | "filters" | null;
+type HistoryEntry = { t: number; snapshot: AircraftSnapshot };
 
 export default function AirspaceDashboard() {
   const [snapshot, setSnapshot] = useState<AircraftSnapshot | null>(null);
@@ -89,6 +139,11 @@ export default function AirspaceDashboard() {
   const [toast, setToast] = useState<string | null>(null);
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>(null);
   const [mobileDetailsOpen, setMobileDetailsOpen] = useState(false);
+  const [layerId, setLayerId] = useState<MapLayerId>("dark");
+  const [alerts, setAlerts] = useState<AlertEntry[]>([]);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [isLive, setIsLive] = useState(true);
+  const [scrubIndex, setScrubIndex] = useState(0);
 
   const inFlightRef = useRef(false);
   const lastSourceRef = useRef<ProviderName | null>(null);
@@ -114,6 +169,15 @@ export default function AirspaceDashboard() {
         });
         const data = (await response.json()) as AircraftSnapshot;
         setSnapshot(data);
+        setHistory((prev) => {
+          const next = [...prev, { t: Date.now(), snapshot: data }];
+          return next.length > TIMELINE_HISTORY_MAX ? next.slice(next.length - TIMELINE_HISTORY_MAX) : next;
+        });
+
+        const newAlerts = buildAlertEntries(data);
+        if (newAlerts.length > 0) {
+          setAlerts((prev) => [...newAlerts.reverse(), ...prev].slice(0, ALERT_FEED_MAX));
+        }
 
         if (data.aircraft.length === 0) {
           showToast("אין כרגע נתוני ADS-B זמינים באזור");
@@ -170,14 +234,16 @@ export default function AirspaceDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const displaySnapshot = isLive ? snapshot : history[Math.min(scrubIndex, history.length - 1)]?.snapshot ?? snapshot;
+
   const filteredAircraft = useMemo(
-    () => (snapshot ? snapshot.aircraft.filter((a) => matchesFilters(a, filters)) : []),
-    [snapshot, filters],
+    () => (displaySnapshot ? displaySnapshot.aircraft.filter((a) => matchesFilters(a, filters)) : []),
+    [displaySnapshot, filters],
   );
 
   const aircraftByHex = useMemo(
-    () => new Map((snapshot?.aircraft ?? []).map((a) => [a.hex, a] as const)),
-    [snapshot],
+    () => new Map((displaySnapshot?.aircraft ?? []).map((a) => [a.hex, a] as const)),
+    [displaySnapshot],
   );
 
   const selectedAircraft = selectedHex ? aircraftByHex.get(selectedHex) ?? null : null;
@@ -200,34 +266,77 @@ export default function AirspaceDashboard() {
     setFilters((prev) => ({ ...prev, ...next }));
   }, []);
 
+  const handleToggleCategory = useCallback(
+    (key: "showCivil" | "showMilitary" | "showTanker" | "showIntel") => {
+      setFilters((prev) => ({ ...prev, [key]: !prev[key] }));
+    },
+    [],
+  );
+
+  const handleScrub = useCallback((index: number) => {
+    setIsLive(false);
+    setScrubIndex(index);
+  }, []);
+
+  const handleGoLive = useCallback(() => {
+    // Toggling from live to paused freezes on the current latest point;
+    // toggling from paused to live jumps back to the latest point.
+    setScrubIndex(history.length - 1);
+    setIsLive((prev) => !prev);
+  }, [history.length]);
+
+  const categoryFilters = useMemo(
+    () => ({
+      showCivil: filters.showCivil,
+      showMilitary: filters.showMilitary,
+      showTanker: filters.showTanker,
+      showIntel: filters.showIntel,
+    }),
+    [filters.showCivil, filters.showMilitary, filters.showTanker, filters.showIntel],
+  );
+
+  const displayInteresting: InterestingMovement[] = displaySnapshot?.interesting ?? [];
+
   return (
     <div dir="rtl" className="flex h-[100dvh] min-h-screen flex-col overflow-hidden font-sans text-slate-100">
-      <Header connection={connection} lastUpdate={snapshot?.timestamp ?? null} />
+      <Header
+        connection={connection}
+        lastUpdate={snapshot?.timestamp ?? null}
+        alerts={alerts}
+        onViewAllAlerts={() => setMobilePanel("movements")}
+        layerId={layerId}
+        onLayerChange={setLayerId}
+      />
 
       <div className="relative flex min-h-0 flex-1 gap-3 overflow-hidden p-0 sm:gap-3 sm:p-3">
         <aside className="hidden w-72 shrink-0 flex-col gap-3 overflow-y-auto pb-2 sm:flex iran-airspace-scroll">
-          <SystemStatus snapshot={snapshot} visibleCount={filteredAircraft.length} connection={connection} />
+          <SystemStatus snapshot={displaySnapshot} visibleCount={filteredAircraft.length} connection={connection} />
+          <ActiveAlerts alerts={alerts} onSelect={handleSelect} />
           <FiltersPanel filters={filters} onChange={handleFilterChange} />
         </aside>
 
         <main className="relative min-h-0 flex-1">
           <div className="absolute inset-x-2 top-2 z-30 flex justify-center sm:inset-x-3 sm:top-3 sm:justify-start">
-            <SearchBar aircraft={snapshot?.aircraft ?? []} onSelect={handleSelect} />
+            <SearchBar aircraft={displaySnapshot?.aircraft ?? []} onSelect={handleSelect} />
           </div>
 
           <LiveMap
             aircraft={filteredAircraft}
             selectedHex={selectedHex}
             onSelectAircraft={handleSelect}
-            trail={selectedTrail}
+            trails={trails}
             showTrails={filters.showTrails}
             showLabels={filters.showLabels}
             focusRequest={focusRequest}
+            categoryFilters={categoryFilters}
+            onToggleCategory={handleToggleCategory}
+            layerId={layerId}
+            onLayerChange={setLayerId}
           />
 
           <div className="pointer-events-none absolute bottom-2 right-2 z-20 sm:bottom-3 sm:right-3">
             <span className="rounded-md border border-white/10 bg-[#0a1220]/85 px-2.5 py-1 text-[10px] font-mono text-slate-400 backdrop-blur-xl sm:text-xs">
-              עדכון הבא בעוד {countdown} שניות
+              {isLive ? `עדכון הבא בעוד ${countdown} שניות` : "מציג נקודת זמן היסטורית"}
             </span>
           </div>
 
@@ -247,12 +356,21 @@ export default function AirspaceDashboard() {
         </main>
 
         <aside className="hidden w-80 shrink-0 flex-col gap-3 overflow-hidden pb-2 sm:flex">
-          <InterestingMovements
-            movements={snapshot?.interesting ?? []}
-            aircraftByHex={aircraftByHex}
-            onSelect={handleSelect}
-          />
+          <InterestingMovements movements={displayInteresting} aircraftByHex={aircraftByHex} onSelect={handleSelect} />
         </aside>
+      </div>
+
+      <div className="hidden sm:block">
+        <TimelineBar
+          history={history}
+          currentIndex={isLive ? history.length - 1 : scrubIndex}
+          isLive={isLive}
+          onScrub={handleScrub}
+          onGoLive={handleGoLive}
+        />
+        <div className="border-t border-white/5 bg-[#050b14] px-4 py-1 text-center text-[10px] text-slate-600">
+          מקור נתונים: {snapshot?.source ?? "—"} (ADS-B ציבורי, חינמי) · עדכון כל {REFRESH_INTERVAL_MS / 1000} שניות
+        </div>
       </div>
 
       <nav className="relative z-[510] flex shrink-0 items-stretch gap-1 border-t border-white/5 bg-[#050b14]/95 p-1.5 backdrop-blur-xl sm:hidden" style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 0.375rem)" }}>
@@ -275,17 +393,26 @@ export default function AirspaceDashboard() {
       </nav>
 
       <MobileBottomSheet open={mobilePanel === "status"} onClose={() => setMobilePanel(null)} title="סטטוס מערכת">
-        <SystemStatus snapshot={snapshot} visibleCount={filteredAircraft.length} connection={connection} />
+        <SystemStatus snapshot={displaySnapshot} visibleCount={filteredAircraft.length} connection={connection} />
       </MobileBottomSheet>
-      <MobileBottomSheet open={mobilePanel === "movements"} onClose={() => setMobilePanel(null)} title="תנועות מעניינות">
-        <InterestingMovements
-          movements={snapshot?.interesting ?? []}
-          aircraftByHex={aircraftByHex}
-          onSelect={(hex) => {
-            handleSelect(hex);
-            setMobilePanel(null);
-          }}
-        />
+      <MobileBottomSheet open={mobilePanel === "movements"} onClose={() => setMobilePanel(null)} title="תנועות והתראות">
+        <div className="space-y-3">
+          <ActiveAlerts
+            alerts={alerts}
+            onSelect={(hex) => {
+              handleSelect(hex);
+              setMobilePanel(null);
+            }}
+          />
+          <InterestingMovements
+            movements={displayInteresting}
+            aircraftByHex={aircraftByHex}
+            onSelect={(hex) => {
+              handleSelect(hex);
+              setMobilePanel(null);
+            }}
+          />
+        </div>
       </MobileBottomSheet>
       <MobileBottomSheet open={mobilePanel === "filters"} onClose={() => setMobilePanel(null)} title="פילטרים">
         <FiltersPanel filters={filters} onChange={handleFilterChange} />

@@ -6,8 +6,56 @@ import "leaflet/dist/leaflet.css";
 import { createAircraftIcon, markerTooltipHtml } from "./AircraftMarker";
 import { buildTrailPolyline } from "./AircraftTrail";
 import MapControls from "./MapControls";
-import { REGION_CENTER, REGION_DEFAULT_ZOOM } from "@/lib/iran-airspace/constants";
-import type { Aircraft, TrailPoint } from "@/lib/iran-airspace/types";
+import type { MapLayerId } from "./Header";
+import {
+  CATEGORY_COLORS,
+  CATEGORY_LABELS_HE,
+  REFERENCE_AIRFIELDS,
+  REGION_CENTER,
+  REGION_DEFAULT_ZOOM,
+} from "@/lib/iran-airspace/constants";
+import type { Aircraft, AircraftCategory, TrailPoint } from "@/lib/iran-airspace/types";
+
+const MINI_TRAIL_POINTS = 15;
+
+const LEGEND_CATEGORIES: { category: AircraftCategory; filterKey: "showCivil" | "showMilitary" | "showTanker" | "showIntel" }[] = [
+  { category: "civil", filterKey: "showCivil" },
+  { category: "tanker", filterKey: "showTanker" },
+  { category: "intel", filterKey: "showIntel" },
+  { category: "military", filterKey: "showMilitary" },
+];
+
+function LegendBar({
+  active,
+  onToggle,
+}: {
+  active: Record<"showCivil" | "showMilitary" | "showTanker" | "showIntel", boolean>;
+  onToggle: (key: "showCivil" | "showMilitary" | "showTanker" | "showIntel") => void;
+}) {
+  return (
+    <div className="pointer-events-auto absolute right-2 top-2 z-[420] flex flex-wrap justify-end gap-1.5 sm:right-3 sm:top-3">
+      {LEGEND_CATEGORIES.map(({ category, filterKey }) => {
+        const on = active[filterKey];
+        return (
+          <button
+            key={category}
+            type="button"
+            onClick={() => onToggle(filterKey)}
+            className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold shadow-lg backdrop-blur-xl transition-colors ${
+              on ? "border-white/15 bg-[#0a1220]/90 text-slate-200" : "border-white/5 bg-[#0a1220]/50 text-slate-600"
+            }`}
+          >
+            <span
+              className="h-2 w-2 rounded-full"
+              style={{ backgroundColor: on ? CATEGORY_COLORS[category] : "#334155" }}
+            />
+            {CATEGORY_LABELS_HE[category]}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 const HEBREW_LABELS: { name: string; lat: number; lon: number; kind: "country" | "sea" | "city" }[] = [
   { name: "איראן", lat: 32.4, lon: 53.7, kind: "country" },
@@ -32,18 +80,27 @@ const HEBREW_LABELS: { name: string; lat: number; lon: number; kind: "country" |
 ];
 
 function labelIcon(name: string, kind: string): L.DivIcon {
-  const cls = kind === "country" ? "text-[12px] font-bold text-slate-300/80" : kind === "sea" ? "text-[11px] italic text-sky-400/50" : "text-[10px] font-semibold text-slate-400/70";
+  const cls =
+    kind === "country"
+      ? "text-[12px] font-bold text-slate-300/80"
+      : kind === "sea"
+        ? "text-[11px] italic text-sky-400/50"
+        : kind === "site"
+          ? "text-[9px] font-medium text-slate-500/80"
+          : "text-[10px] font-semibold text-slate-400/70";
+  const dot =
+    kind === "site"
+      ? '<span style="display:inline-block;width:5px;height:5px;border-radius:999px;border:1px solid rgba(148,163,184,0.7);margin-inline-end:3px;vertical-align:middle"></span>'
+      : "";
   return L.divIcon({
     className: "iran-airspace-label-wrap",
-    html: `<span class="${cls}" style="white-space:nowrap;text-shadow:0 1px 3px rgba(0,0,0,0.9)">${name}</span>`,
+    html: `<span class="${cls}" style="white-space:nowrap;text-shadow:0 1px 3px rgba(0,0,0,0.9)">${dot}${name}</span>`,
     iconSize: [0, 0],
     iconAnchor: [0, 0],
   });
 }
 
-type LayerId = "dark" | "satellite";
-
-const LAYERS: Record<LayerId, { url: string; attribution: string; maxZoom: number }> = {
+const LAYERS: Record<MapLayerId, { url: string; attribution: string; maxZoom: number }> = {
   dark: {
     url: "https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png",
     attribution: '&copy; <a href="https://carto.com/attributions">CARTO</a> &copy; OpenStreetMap',
@@ -58,22 +115,32 @@ const LAYERS: Record<LayerId, { url: string; attribution: string; maxZoom: numbe
 
 type MarkerEntry = { marker: L.Marker; aircraft: Aircraft };
 
+type CategoryFilterFlags = Record<"showCivil" | "showMilitary" | "showTanker" | "showIntel", boolean>;
+
 export default function LiveMap({
   aircraft,
   selectedHex,
   onSelectAircraft,
-  trail,
+  trails,
   showTrails,
   showLabels,
   focusRequest,
+  categoryFilters,
+  onToggleCategory,
+  layerId,
+  onLayerChange,
 }: {
   aircraft: Aircraft[];
   selectedHex: string | null;
   onSelectAircraft: (hex: string | null) => void;
-  trail: TrailPoint[];
+  trails: Map<string, TrailPoint[]>;
   showTrails: boolean;
   showLabels: boolean;
   focusRequest: { hex: string; token: number } | null;
+  categoryFilters: CategoryFilterFlags;
+  onToggleCategory: (key: keyof CategoryFilterFlags) => void;
+  layerId: MapLayerId;
+  onLayerChange: (id: MapLayerId) => void;
 }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -81,10 +148,9 @@ export default function LiveMap({
   const markerLayerRef = useRef<L.LayerGroup | null>(null);
   const labelLayerRef = useRef<L.LayerGroup | null>(null);
   const tileLayerRef = useRef<L.TileLayer | null>(null);
-  const trailLayerRef = useRef<L.Polyline | null>(null);
+  const trailLayerRef = useRef<L.LayerGroup | null>(null);
   const markersRef = useRef<Map<string, MarkerEntry>>(new Map());
   const onSelectRef = useRef(onSelectAircraft);
-  const [layerId, setLayerId] = useState<LayerId>("dark");
   const [isFullscreen, setIsFullscreen] = useState(false);
   const lastFocusToken = useRef<number>(-1);
 
@@ -118,6 +184,13 @@ export default function LiveMap({
     for (const place of HEBREW_LABELS) {
       L.marker([place.lat, place.lon], {
         icon: labelIcon(place.name, place.kind),
+        interactive: false,
+        keyboard: false,
+      }).addTo(labelLayer);
+    }
+    for (const field of REFERENCE_AIRFIELDS) {
+      L.marker([field.lat, field.lon], {
+        icon: labelIcon(field.name, "site"),
         interactive: false,
         keyboard: false,
       }).addTo(labelLayer);
@@ -197,7 +270,8 @@ export default function LiveMap({
     }
   }, [aircraft, selectedHex, showLabels]);
 
-  // Trail for the selected aircraft.
+  // Observed trails: a short one behind every visible aircraft, a longer
+  // emphasized one behind the selected aircraft.
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -205,14 +279,20 @@ export default function LiveMap({
       map.removeLayer(trailLayerRef.current);
       trailLayerRef.current = null;
     }
-    if (!showTrails || !selectedHex || trail.length < 2) return;
-    const selectedAircraft = markersRef.current.get(selectedHex)?.aircraft;
-    const polyline = buildTrailPolyline(trail, selectedAircraft?.category ?? "civil");
-    if (polyline) {
-      polyline.addTo(map);
-      trailLayerRef.current = polyline;
+    if (!showTrails) return;
+
+    const group = L.layerGroup();
+    for (const ac of aircraft) {
+      const points = trails.get(ac.hex);
+      if (!points || points.length < 2) continue;
+      const isSelected = ac.hex === selectedHex;
+      const slice = isSelected ? points : points.slice(-MINI_TRAIL_POINTS);
+      const polyline = buildTrailPolyline(slice, ac.category, isSelected);
+      if (polyline) polyline.addTo(group);
     }
-  }, [trail, showTrails, selectedHex]);
+    group.addTo(map);
+    trailLayerRef.current = group;
+  }, [aircraft, trails, showTrails, selectedHex]);
 
   // Focus requests (from search / interesting-movements list).
   useEffect(() => {
@@ -267,8 +347,9 @@ export default function LiveMap({
           const bounds = L.latLngBounds(aircraft.map((a) => [a.lat, a.lon] as L.LatLngExpression));
           if (bounds.isValid()) map.fitBounds(bounds.pad(0.2), { animate: true, maxZoom: 9 });
         }}
-        onToggleLayer={() => setLayerId((prev) => (prev === "dark" ? "satellite" : "dark"))}
+        onToggleLayer={() => onLayerChange(layerId === "dark" ? "satellite" : "dark")}
       />
+      <LegendBar active={categoryFilters} onToggle={onToggleCategory} />
     </div>
   );
 }
