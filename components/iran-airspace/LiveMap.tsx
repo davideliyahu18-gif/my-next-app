@@ -100,11 +100,14 @@ function labelIcon(name: string, kind: string): L.DivIcon {
   });
 }
 
+// Esri's ArcGIS Online basemap tile services (no API key required for
+// standard, low-volume public use) — used instead of CARTO's anonymous
+// basemaps.cartocdn.com endpoint, which now requires a paid API key.
 const LAYERS: Record<MapLayerId, { url: string; attribution: string; maxZoom: number }> = {
   dark: {
-    url: "https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png",
-    attribution: '&copy; <a href="https://carto.com/attributions">CARTO</a> &copy; OpenStreetMap',
-    maxZoom: 19,
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Tiles &copy; Esri",
+    maxZoom: 16,
   },
   satellite: {
     url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
@@ -176,7 +179,6 @@ export default function LiveMap({
     const tiles = L.tileLayer(LAYERS.dark.url, {
       attribution: LAYERS.dark.attribution,
       maxZoom: LAYERS.dark.maxZoom,
-      subdomains: "abcd",
     }).addTo(map);
     tileLayerRef.current = tiles;
 
@@ -311,7 +313,7 @@ export default function LiveMap({
     if (!map || !tileLayerRef.current) return;
     map.removeLayer(tileLayerRef.current);
     const def = LAYERS[layerId];
-    const tiles = L.tileLayer(def.url, { attribution: def.attribution, maxZoom: def.maxZoom, subdomains: "abcd" });
+    const tiles = L.tileLayer(def.url, { attribution: def.attribution, maxZoom: def.maxZoom });
     tiles.addTo(map);
     tiles.bringToBack();
     tileLayerRef.current = tiles;

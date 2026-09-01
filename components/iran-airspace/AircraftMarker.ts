@@ -2,11 +2,12 @@ import L from "leaflet";
 import { CATEGORY_COLORS } from "@/lib/iran-airspace/constants";
 import type { Aircraft } from "@/lib/iran-airspace/types";
 
-/** A small delta-wing glyph, rotated to heading and tinted by category. */
+/** A top-down airplane silhouette, nose pointing north by default, rotated
+ * to heading and tinted by category. */
 function planeSvg(color: string, size: number, dim: boolean): string {
   return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" style="filter:drop-shadow(0 0 3px ${color}${dim ? "55" : "aa"})">
-    <path d="M12 1.5 14.1 8.6 21.5 12 14.1 13.6 13 22 12 19.5 11 22 9.9 13.6 2.5 12 9.9 8.6 12 1.5Z"
-      fill="${color}" opacity="${dim ? 0.55 : 1}" stroke="#04070d" stroke-width="0.6" />
+    <path d="M21,16V14L13,9V3.5C13,2.67 12.33,2 11.5,2C10.67,2 10,2.67 10,3.5V9L2,14V16L10,13.5V19L7.5,20.5V22L11.5,21L15.5,22V20.5L13,19V13.5L21,16Z"
+      fill="${color}" opacity="${dim ? 0.55 : 1}" stroke="#04070d" stroke-width="0.5" />
   </svg>`;
 }
 
