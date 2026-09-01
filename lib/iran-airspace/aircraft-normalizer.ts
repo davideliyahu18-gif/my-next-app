@@ -95,6 +95,7 @@ export function normalizeAircraft(
     aircraftType,
     typeDescription,
     category: classify(typeDescription, aircraftType, isMilitary),
+    dbFlags: raw.dbFlags ?? 0,
     lat: raw.lat,
     lon: raw.lon,
     altitude,

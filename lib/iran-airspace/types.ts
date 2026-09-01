@@ -19,6 +19,9 @@ export type Aircraft = {
   aircraftType: string | null;
   typeDescription: string | null;
   category: AircraftCategory;
+  /** Raw military/PIA/LADD bitmask from the source feed, kept for diagnosing
+   * classification (see aircraft-normalizer.ts). Not shown in the UI. */
+  dbFlags: number;
   lat: number;
   lon: number;
   altitude: number | null;
