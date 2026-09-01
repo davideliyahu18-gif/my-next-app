@@ -1,4 +1,4 @@
-import { INTEL_KEYWORDS, TANKER_KEYWORDS } from "./constants";
+import { INTEL_KEYWORDS, INTEL_TYPE_CODES, TANKER_KEYWORDS, TANKER_TYPE_CODES } from "./constants";
 import type { Aircraft, AircraftCategory, ProviderName } from "./types";
 import { isWithinBounds } from "./geo";
 
@@ -29,8 +29,12 @@ export type RawAdsbAircraft = {
 
 const MILITARY_DB_FLAG = 1;
 
-function classify(desc: string | null, isMilitary: boolean): AircraftCategory {
+function classify(desc: string | null, typeCode: string | null, isMilitary: boolean): AircraftCategory {
   if (!isMilitary) return "civil";
+  if (typeCode) {
+    if (TANKER_TYPE_CODES.includes(typeCode)) return "tanker";
+    if (INTEL_TYPE_CODES.includes(typeCode)) return "intel";
+  }
   const haystack = (desc ?? "").toUpperCase();
   if (TANKER_KEYWORDS.some((k) => haystack.includes(k))) return "tanker";
   if (INTEL_KEYWORDS.some((k) => haystack.includes(k))) return "intel";
@@ -81,15 +85,16 @@ export function normalizeAircraft(
 
   const isMilitary = (raw.dbFlags ?? 0) & MILITARY_DB_FLAG ? true : false;
   const typeDescription = raw.desc?.trim() || null;
+  const aircraftType = raw.t?.trim().toUpperCase() || null;
   const registration = raw.r?.trim().toUpperCase() || null;
 
   return {
     hex,
     callsign: raw.flight?.trim() || null,
     registration,
-    aircraftType: raw.t?.trim().toUpperCase() || null,
+    aircraftType,
     typeDescription,
-    category: classify(typeDescription, isMilitary),
+    category: classify(typeDescription, aircraftType, isMilitary),
     lat: raw.lat,
     lon: raw.lon,
     altitude,

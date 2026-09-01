@@ -87,6 +87,48 @@ export const INTEL_KEYWORDS = [
   "GUARDRAIL",
 ];
 
+/** Exact ICAO type-designator ("t" field) matches — a more reliable signal
+ * than the free-text description, which many feeds leave empty even for
+ * aircraft already flagged military. Only consulted once dbFlags already
+ * marks the aircraft military, so overlap with civilian-only designators
+ * (e.g. A332 also being a plain Airbus A330) is not a false-positive risk. */
+export const TANKER_TYPE_CODES = [
+  "K35R",
+  "K35T",
+  "K35E",
+  "K35A",
+  "KC10",
+  "K10A",
+  "KC46",
+  "B462",
+  "B463",
+  "A332",
+  "A333",
+  "A330",
+];
+
+export const INTEL_TYPE_CODES = [
+  "E3",
+  "E3CF",
+  "E3TF",
+  "E3TS",
+  "E2",
+  "E2C",
+  "E2D",
+  "R135",
+  "RC135",
+  "P8",
+  "P8A",
+  "RQ4",
+  "GLOB",
+  "MQ9",
+  "MQ4",
+  "MQ4C",
+  "MQ1",
+  "E8",
+  "JSTR",
+];
+
 export const REASON_LABELS_HE: Record<string, string> = {
   "new-in-range": "נכנס עכשיו לטווח המפה",
   "altitude-change": "שינוי גובה משמעותי",
