@@ -33,7 +33,7 @@ function LegendBar({
   onToggle: (key: "showCivil" | "showMilitary" | "showTanker" | "showIntel") => void;
 }) {
   return (
-    <div className="pointer-events-auto absolute right-2 top-2 z-[420] flex flex-wrap justify-end gap-1.5 sm:right-3 sm:top-3">
+    <div className="pointer-events-auto absolute left-14 right-2 top-14 z-[410] flex flex-wrap justify-end gap-1 sm:left-auto sm:right-3 sm:top-3 sm:gap-1.5">
       {LEGEND_CATEGORIES.map(({ category, filterKey }) => {
         const on = active[filterKey];
         return (
@@ -41,12 +41,12 @@ function LegendBar({
             key={category}
             type="button"
             onClick={() => onToggle(filterKey)}
-            className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold shadow-lg backdrop-blur-xl transition-colors ${
+            className={`flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-semibold shadow-lg backdrop-blur-xl transition-colors sm:gap-1.5 sm:px-2.5 sm:text-[11px] ${
               on ? "border-white/15 bg-[#0a1220]/90 text-slate-200" : "border-white/5 bg-[#0a1220]/50 text-slate-600"
             }`}
           >
             <span
-              className="h-2 w-2 rounded-full"
+              className="h-2 w-2 shrink-0 rounded-full"
               style={{ backgroundColor: on ? CATEGORY_COLORS[category] : "#334155" }}
             />
             {CATEGORY_LABELS_HE[category]}

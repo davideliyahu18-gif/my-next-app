@@ -78,16 +78,16 @@ export default function Header({
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   return (
-    <header className="relative z-20 flex items-center justify-between gap-2 border-b border-sky-400/10 bg-[#050b14]/95 px-3 py-2.5 backdrop-blur-xl sm:gap-3 sm:px-5 sm:py-3">
-      <div className="flex min-w-0 flex-1 items-center gap-2 sm:flex-none sm:gap-2.5">
+    <header className="relative z-20 flex items-center justify-between gap-1.5 border-b border-sky-400/10 bg-[#050b14]/95 px-2 py-2 backdrop-blur-xl sm:gap-3 sm:px-5 sm:py-3">
+      <div className="flex shrink-0 items-center gap-1.5 sm:gap-2.5">
         <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${DOT_COLOR[connection]} ${connection === "connected" ? "animate-pulse" : ""}`} />
-        <span className="text-xs font-bold tracking-widest text-slate-200 sm:text-sm">
+        <span className="text-[11px] font-bold tracking-widest text-slate-200 sm:text-sm">
           {LABEL[connection]}
         </span>
       </div>
 
-      <div className="min-w-0 flex-1 text-center sm:flex-none">
-        <h1 className="truncate text-[15px] font-extrabold tracking-tight text-slate-50 sm:text-2xl">
+      <div className="min-w-0 flex-1 text-center">
+        <h1 className="truncate text-[13px] font-extrabold tracking-tight text-slate-50 sm:text-2xl">
           <span aria-hidden>🇮🇷</span> {SITE_TITLE_HE}
         </h1>
         <p className="mt-0.5 hidden text-[11px] text-slate-400 sm:block sm:text-xs">
@@ -95,7 +95,7 @@ export default function Header({
         </p>
       </div>
 
-      <div className="flex flex-1 items-center justify-end gap-0.5 sm:flex-none sm:gap-1">
+      <div className="flex shrink-0 items-center gap-0 sm:gap-1">
         <span className="hidden rounded-md border border-white/10 bg-white/[0.03] px-2 py-1 font-mono text-[10px] text-slate-400 sm:mx-1 sm:block sm:text-xs">
           עדכון אחרון: {formatClock(lastUpdate)}
         </span>

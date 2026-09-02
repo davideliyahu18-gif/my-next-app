@@ -158,7 +158,7 @@ export const TIMELINE_HISTORY_MAX = 90;
 export const DEFAULT_FILTERS: AircraftFilters = {
   showAircraft: true,
   showTrails: true,
-  showLabels: true,
+  showLabels: false,
   showNoCallsign: true,
   showCivil: true,
   showMilitary: true,

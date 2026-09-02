@@ -298,7 +298,7 @@ export default function AirspaceDashboard() {
   const displayInteresting: InterestingMovement[] = displaySnapshot?.interesting ?? [];
 
   return (
-    <div dir="rtl" className="flex h-[100dvh] min-h-screen flex-col overflow-hidden font-sans text-slate-100">
+    <div dir="rtl" className="flex h-[100svh] flex-col overflow-hidden font-sans text-slate-100">
       <Header
         connection={connection}
         lastUpdate={snapshot?.timestamp ?? null}
