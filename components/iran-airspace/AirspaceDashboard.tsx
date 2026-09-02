@@ -360,17 +360,15 @@ export default function AirspaceDashboard() {
         </aside>
       </div>
 
-      <div className="hidden sm:block">
-        <TimelineBar
-          history={history}
-          currentIndex={isLive ? history.length - 1 : scrubIndex}
-          isLive={isLive}
-          onScrub={handleScrub}
-          onGoLive={handleGoLive}
-        />
-        <div className="border-t border-white/5 bg-[#050b14] px-4 py-1 text-center text-[10px] text-slate-600">
-          מקור נתונים: {snapshot?.source ?? "—"} (ADS-B ציבורי, חינמי) · עדכון כל {REFRESH_INTERVAL_MS / 1000} שניות
-        </div>
+      <TimelineBar
+        history={history}
+        currentIndex={isLive ? history.length - 1 : scrubIndex}
+        isLive={isLive}
+        onScrub={handleScrub}
+        onGoLive={handleGoLive}
+      />
+      <div className="hidden border-t border-white/5 bg-[#050b14] px-4 py-1 text-center text-[10px] text-slate-600 sm:block">
+        מקור נתונים: {snapshot?.source ?? "—"} (ADS-B ציבורי, חינמי) · עדכון כל {REFRESH_INTERVAL_MS / 1000} שניות
       </div>
 
       <nav className="relative z-[510] flex shrink-0 items-stretch gap-1 border-t border-white/5 bg-[#050b14]/95 p-1.5 backdrop-blur-xl sm:hidden" style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 0.375rem)" }}>
