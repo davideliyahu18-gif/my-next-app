@@ -5,6 +5,12 @@ import "./iran-airspace.css";
 export const metadata: Metadata = {
   title: SITE_TITLE_HE,
   description: SITE_SUBTITLE_HE,
+  manifest: "/manifest-iran-airspace.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: SITE_TITLE_HE,
+  },
 };
 
 export const viewport: Viewport = {

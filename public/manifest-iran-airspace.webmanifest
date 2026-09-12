@@ -1,0 +1,26 @@
+{
+  "name": "מערכת מעקב אווירי סביב איראן",
+  "short_name": "מעקב אווירי",
+  "description": "מעקב אחר תנועות אוויריות ממקורות ADS-B ציבוריים",
+  "start_url": "/iran-airspace",
+  "scope": "/iran-airspace",
+  "display": "standalone",
+  "background_color": "#050b14",
+  "theme_color": "#050b14",
+  "lang": "he",
+  "dir": "rtl",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
