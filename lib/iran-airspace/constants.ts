@@ -14,6 +14,16 @@ export const REGION_BOUNDS: MapBounds = {
 export const REGION_CENTER: [number, number] = [29, 51];
 export const REGION_DEFAULT_ZOOM = 5;
 
+/** Rough bounding rectangle around Iran, used only to flag when a tracked
+ * aircraft's position crosses in/out of it (a factual position check —
+ * no inference about the flight's purpose). */
+export const IRAN_BOUNDS: MapBounds = {
+  north: 39.8,
+  south: 25.0,
+  west: 44.0,
+  east: 63.3,
+};
+
 /** Query grid: circle centers (nm radius 250, the max the providers allow). */
 export const QUERY_GRID: { lat: number; lon: number; radiusNm: number }[] = [
   { lat: 34.0, lon: 51.0, radiusNm: 250 }, // Tehran / north Iran / Caspian
@@ -137,6 +147,8 @@ export const REASON_LABELS_HE: Record<string, string> = {
   "re-entered-area": "נראה שוב באזור",
   "holding-pattern": "דפוס המתנה (Holding)",
   "unusual-route": "מסלול שונה מהרגיל",
+  "exited-iran-airspace": "יצא ממרחב האוויר האיראני",
+  "entered-iran-airspace": "נכנס למרחב האוויר האיראני",
 };
 
 /** Well-known, publicly documented airfields shown as neutral reference

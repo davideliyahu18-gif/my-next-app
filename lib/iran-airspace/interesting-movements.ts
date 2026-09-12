@@ -1,5 +1,5 @@
-import { REASON_LABELS_HE } from "./constants";
-import { headingDelta } from "./geo";
+import { IRAN_BOUNDS, REASON_LABELS_HE } from "./constants";
+import { headingDelta, isWithinBounds } from "./geo";
 import type { Aircraft, InterestingMovement, InterestingReason } from "./types";
 
 type Sample = {
@@ -16,6 +16,7 @@ type HexTrack = {
   firstSeenAt: number;
   lastSeenAt: number;
   recent: Sample[];
+  inIran: boolean;
 };
 
 const RECENT_CAP = 60; // ~10 min at a 10s refresh cadence
@@ -50,12 +51,19 @@ export class MovementTracker {
         reasons.push("re-entered-area");
       }
 
+      const nowInIran = isWithinBounds({ lat: ac.lat, lon: ac.lon }, IRAN_BOUNDS);
+      if (existing && existing.inIran !== nowInIran) {
+        reasons.push(nowInIran ? "entered-iran-airspace" : "exited-iran-airspace");
+      }
+
       const track: HexTrack = existing ?? {
         hex: ac.hex,
         firstSeenAt: now,
         lastSeenAt: now,
         recent: [],
+        inIran: nowInIran,
       };
+      track.inIran = nowInIran;
 
       if (!ac.onGround) {
         const shortBaseline = track.recent[track.recent.length - SHORT_WINDOW];

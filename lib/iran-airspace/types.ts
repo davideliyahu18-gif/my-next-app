@@ -50,7 +50,9 @@ export type InterestingReason =
   | "high-speed"
   | "re-entered-area"
   | "holding-pattern"
-  | "unusual-route";
+  | "unusual-route"
+  | "exited-iran-airspace"
+  | "entered-iran-airspace";
 
 export type InterestingMovement = {
   hex: string;
