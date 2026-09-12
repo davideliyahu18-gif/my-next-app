@@ -46,7 +46,7 @@ function IconButton({
       title={label}
       aria-label={label}
       onClick={onClick}
-      className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-300 transition-colors hover:bg-white/10 hover:text-slate-100"
+      className="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-300 transition-colors hover:bg-white/10 hover:text-slate-100 sm:h-8 sm:w-8"
     >
       {children}
       {Boolean(badge) && (
@@ -78,7 +78,10 @@ export default function Header({
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   return (
-    <header className="relative z-20 flex items-center justify-between gap-1.5 border-b border-sky-400/10 bg-[#050b14]/95 px-2 py-2 backdrop-blur-xl sm:gap-3 sm:px-5 sm:py-3">
+    <header
+      className="relative z-20 flex items-center justify-between gap-1.5 border-b border-sky-400/10 bg-[#050b14]/95 px-2 py-2 backdrop-blur-xl sm:gap-3 sm:px-5 sm:py-3"
+      style={{ paddingTop: "calc(env(safe-area-inset-top) + 0.5rem)" }}
+    >
       <div className="flex shrink-0 items-center gap-1.5 sm:gap-2.5">
         <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${DOT_COLOR[connection]} ${connection === "connected" ? "animate-pulse" : ""}`} />
         <span className="text-[11px] font-bold tracking-widest text-slate-200 sm:text-sm">
@@ -102,7 +105,7 @@ export default function Header({
 
         <div className="relative">
           <IconButton label="התראות" badge={alerts.length} onClick={() => setAlertsOpen((v) => !v)}>
-            <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg viewBox="0 0 24 24" className="h-4 w-4 sm:h-4.5 sm:w-4.5" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </IconButton>
@@ -140,14 +143,14 @@ export default function Header({
         </div>
 
         <IconButton label="אודות" onClick={() => setAboutOpen(true)}>
-          <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" fill="none" stroke="currentColor" strokeWidth="2">
+          <svg viewBox="0 0 24 24" className="h-4 w-4 sm:h-4.5 sm:w-4.5" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="12" cy="12" r="9" />
             <path d="M12 16v-5M12 8h.01" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </IconButton>
 
         <IconButton label="הגדרות" onClick={() => setSettingsOpen(true)}>
-          <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" fill="none" stroke="currentColor" strokeWidth="2">
+          <svg viewBox="0 0 24 24" className="h-4 w-4 sm:h-4.5 sm:w-4.5" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="12" cy="12" r="3" />
             <path
               d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"
