@@ -11,6 +11,13 @@ export const metadata: Metadata = {
     statusBarStyle: "black-translucent",
     title: SITE_TITLE_HE,
   },
+  icons: {
+    icon: [
+      { url: "/icon-iran-airspace-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-iran-airspace-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/icon-iran-airspace-apple-touch.png", sizes: "180x180", type: "image/png" }],
+  },
 };
 
 export const viewport: Viewport = {
