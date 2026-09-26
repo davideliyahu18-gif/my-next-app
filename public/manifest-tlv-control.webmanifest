@@ -1,0 +1,26 @@
+{
+  "name": "מרכז בקרה אווירי – נתב\"ג",
+  "short_name": "נתב\"ג Control",
+  "description": "מטוסים חיים, המראות ונחיתות, מזג אוויר והתרעות סביב נמל התעופה בן גוריון",
+  "start_url": "/tlv-control",
+  "scope": "/tlv-control",
+  "display": "standalone",
+  "background_color": "#050b14",
+  "theme_color": "#050b14",
+  "lang": "he",
+  "dir": "rtl",
+  "icons": [
+    {
+      "src": "/icon-iran-airspace-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-iran-airspace-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
