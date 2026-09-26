@@ -3,7 +3,13 @@ import { getAircraftSnapshot } from "@/lib/tlv-control/providers/aircraft-provid
 import { DEFAULT_RADIUS_NM, RADIUS_OPTIONS_NM } from "@/lib/tlv-control/utils/geo";
 
 export const dynamic = "force-dynamic";
-export const runtime = "nodejs";
+// Edge, not Node.js: the ADS-B providers work fine from a normal browser/
+// residential connection (verified directly) but were failing from this
+// project's Node.js serverless functions — most likely Cloudflare bot
+// mitigation against that IP range. Vercel's Edge Network egresses through a
+// different network path, which may avoid that block. All of this route's
+// dependencies (fetch, AbortController, globalThis) are Edge-compatible.
+export const runtime = "edge";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
