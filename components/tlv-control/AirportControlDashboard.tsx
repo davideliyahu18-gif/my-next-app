@@ -153,7 +153,9 @@ export default function AirportControlDashboard() {
           ? "degraded"
           : "down";
     const weatherState = !weatherSnap ? "down" : weatherSnap.ok ? "connected" : "down";
-    const alertsState = !alertsSnap ? "off" : alertsSnap.state === "connected" ? "connected" : "off";
+    // Oref is now a live, actively-attempted source (not a permanent design
+    // gap), so a failure here is a real "down", same as any other source.
+    const alertsState = !alertsSnap ? "down" : alertsSnap.state === "connected" ? "connected" : "down";
     return { aircraft: aircraftState, bgn: bgnState, weather: weatherState, alerts: alertsState };
   }, [aircraftSnap, aircraft.length, flightsSnap, weatherSnap, alertsSnap]);
 
@@ -248,7 +250,7 @@ export default function AirportControlDashboard() {
       </div>
 
       <div className="hidden border-t border-white/5 bg-[#050b14] px-4 py-1 text-center text-[10px] text-slate-600 sm:block">
-        מקורות: ADSB.fi / ADSB.lol / OpenSky · Open-Meteo · Aviation Weather Center · data.gov.il (רשות שדות התעופה) · פיקוד העורף: לא זמין (אין API רשמי)
+        מקורות: ADSB.fi / ADSB.lol / OpenSky · Open-Meteo · Aviation Weather Center · data.gov.il (רשות שדות התעופה) · פיקוד העורף (מקור לא רשמי)
       </div>
     </div>
   );

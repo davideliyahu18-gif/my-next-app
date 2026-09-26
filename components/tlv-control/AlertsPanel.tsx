@@ -11,6 +11,9 @@ export default function AlertsPanel({ alerts }: { alerts: AlertsSnapshot | null 
   return (
     <Panel className="flex min-h-0 flex-1 flex-col">
       <PanelHeading>🔔 התרעות פיקוד העורף</PanelHeading>
+      <p className="border-b border-white/5 px-4 py-2 text-[10px] leading-relaxed text-slate-500">
+        מקור לא רשמי (endpoint לא מתועד של פיקוד העורף) — למקרה חירום יש לפעול לפי האפליקציה הרשמית, לא לפי מסך זה בלבד.
+      </p>
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {!alerts || alerts.state === "unavailable" ? (
           <div className="rounded-lg border border-amber-400/20 bg-amber-500/5 p-4">
