@@ -1,4 +1,5 @@
 import { BGN_COORDS, bboxAroundNm } from "../utils/geo";
+import { ADSB_FETCH_HEADERS } from "../utils/http";
 import type { Aircraft } from "../types";
 
 const OPENSKY_URL = "https://opensky-network.org/api/states/all";
@@ -65,7 +66,7 @@ export async function fetchOpenSky(radiusNm: number): Promise<Aircraft[]> {
     const url = `${OPENSKY_URL}?lamin=${box.minLat}&lomin=${box.minLon}&lamax=${box.maxLat}&lomax=${box.maxLon}`;
     const response = await fetch(url, {
       signal: controller.signal,
-      headers: { Accept: "application/json" },
+      headers: ADSB_FETCH_HEADERS,
       cache: "no-store",
     });
     if (!response.ok) {

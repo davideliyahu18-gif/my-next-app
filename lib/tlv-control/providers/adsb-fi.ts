@@ -2,10 +2,11 @@ import { BGN_COORDS } from "../utils/geo";
 import { ADSB_FETCH_HEADERS } from "../utils/http";
 import type { Aircraft } from "../types";
 
-const ADSB_LOL_BASE = "https://api.adsb.lol/v2";
+const ADSB_FI_BASE = "https://opendata.adsb.fi/api/v3";
 const FETCH_TIMEOUT_MS = 8_000;
 
-/** Raw shape returned by adsb.lol (tar1090-style aircraft.json schema). */
+/** Raw shape returned by adsb.fi (tar1090-style v3 aircraft.json schema) —
+ * same field set as adsb.lol's v2 API. */
 type RawAircraft = {
   hex?: string;
   flight?: string;
@@ -62,23 +63,23 @@ function normalize(raw: RawAircraft, nowIso: string): Aircraft | null {
     squawk: raw.squawk?.trim() || null,
     aircraftType: raw.t?.trim().toUpperCase() || null,
     lastSeen: nowIso,
-    source: "adsb.lol",
+    source: "adsb.fi",
   };
 }
 
-export async function fetchAdsbLol(radiusNm: number): Promise<Aircraft[]> {
+export async function fetchAdsbFi(radiusNm: number): Promise<Aircraft[]> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
   try {
-    const url = `${ADSB_LOL_BASE}/lat/${BGN_COORDS.lat}/lon/${BGN_COORDS.lon}/dist/${radiusNm}`;
+    const url = `${ADSB_FI_BASE}/lat/${BGN_COORDS.lat}/lon/${BGN_COORDS.lon}/dist/${radiusNm}`;
     const response = await fetch(url, {
       signal: controller.signal,
       headers: ADSB_FETCH_HEADERS,
       cache: "no-store",
     });
     if (!response.ok) {
-      throw new Error(`adsb.lol HTTP ${response.status}`);
+      throw new Error(`adsb.fi HTTP ${response.status}`);
     }
     const payload = (await response.json()) as { ac?: RawAircraft[] };
     const nowIso = new Date().toISOString();

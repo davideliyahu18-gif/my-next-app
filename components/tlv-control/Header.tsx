@@ -1,24 +1,35 @@
 "use client";
 
-import type { ConnectionState } from "./types";
+import type { ConnectionState, SourceConnections } from "./types";
 
 const DOT_COLOR: Record<ConnectionState, string> = {
   connected: "bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.8)]",
   degraded: "bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.8)]",
   down: "bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.8)]",
+  off: "bg-slate-600",
 };
 
-const LABEL: Record<ConnectionState, string> = {
+const SHORT_LABEL: Record<ConnectionState, string> = {
   connected: "LIVE",
-  degraded: "LIVE (חלקי)",
+  degraded: "חלקי",
   down: "לא זמין",
+  off: "לא מחובר",
 };
+
+type SourceBadge = { key: keyof SourceConnections; emoji: string; label: string };
+
+const BADGES: SourceBadge[] = [
+  { key: "aircraft", emoji: "🛩️", label: "מטוסים" },
+  { key: "bgn", emoji: "✈️", label: "נתב״ג" },
+  { key: "weather", emoji: "🌦️", label: "מזג אוויר" },
+  { key: "alerts", emoji: "🚨", label: "התרעות" },
+];
 
 export default function Header({
-  connection,
+  sources,
   emergencyActive,
 }: {
-  connection: ConnectionState;
+  sources: SourceConnections;
   emergencyActive: boolean;
 }) {
   return (
@@ -28,9 +39,21 @@ export default function Header({
       }`}
       style={{ paddingTop: "calc(env(safe-area-inset-top) + 0.625rem)" }}
     >
-      <div className="flex shrink-0 items-center gap-1.5 sm:gap-2.5">
-        <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${DOT_COLOR[connection]} ${connection === "connected" ? "animate-pulse" : ""}`} />
-        <span className="text-[11px] font-bold tracking-widest text-slate-200 sm:text-sm">{LABEL[connection]}</span>
+      <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
+        {BADGES.map((badge) => {
+          const state = sources[badge.key];
+          return (
+            <div key={badge.key} className="flex items-center gap-1" title={`${badge.label}: ${SHORT_LABEL[state]}`}>
+              <span
+                className={`h-2 w-2 shrink-0 rounded-full ${DOT_COLOR[state]} ${state === "connected" ? "animate-pulse" : ""}`}
+              />
+              <span aria-hidden className="text-[11px] sm:text-xs">
+                {badge.emoji}
+              </span>
+              <span className="hidden text-[10px] font-bold tracking-wide text-slate-300 sm:inline">{badge.label}</span>
+            </div>
+          );
+        })}
       </div>
 
       <div className="min-w-0 flex-1 text-center">

@@ -1,6 +1,7 @@
 import type { SourceHealthEntry, SourceHealthStatus, SourceKey } from "../types";
 
 const SOURCE_LABELS: Record<SourceKey, string> = {
+  "adsb.fi": "ADSB.fi",
   "adsb.lol": "ADSB.lol",
   opensky: "OpenSky Network",
   "bgn-flights": "מידע טיסות נתב״ג (data.gov.il)",
@@ -71,7 +72,7 @@ function statusFor(entry: MutableEntry): SourceHealthStatus {
 }
 
 export function getHealthSnapshot(): SourceHealthEntry[] {
-  const keys: SourceKey[] = ["adsb.lol", "opensky", "bgn-flights", "open-meteo", "aviation-weather", "oref"];
+  const keys: SourceKey[] = ["adsb.fi", "adsb.lol", "opensky", "bgn-flights", "open-meteo", "aviation-weather", "oref"];
   return keys.map((key) => {
     const entry = getOrInit(key);
     return {

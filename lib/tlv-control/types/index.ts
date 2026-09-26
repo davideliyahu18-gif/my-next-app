@@ -1,6 +1,6 @@
 // ── Aircraft ────────────────────────────────────────────────────────────
 
-export type AircraftSource = "adsb.lol" | "opensky";
+export type AircraftSource = "adsb.fi" | "adsb.lol" | "opensky";
 
 /** Unified aircraft shape — UI code never talks to a provider directly. */
 export type Aircraft = {
@@ -131,6 +131,7 @@ export type AlertsSnapshot = {
 export type SourceHealthStatus = "connected" | "stale" | "unavailable";
 
 export type SourceKey =
+  | "adsb.fi"
   | "adsb.lol"
   | "opensky"
   | "bgn-flights"

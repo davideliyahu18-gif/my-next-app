@@ -14,7 +14,7 @@ import WeatherCard from "./WeatherCard";
 import AviationWeatherCard from "./AviationWeatherCard";
 import AlertsPanel from "./AlertsPanel";
 import SourceHealthPanel from "./SourceHealthPanel";
-import type { NavSection } from "./types";
+import type { NavSection, SourceConnections } from "./types";
 import type {
   AircraftSnapshot,
   AlertsSnapshot,
@@ -134,7 +134,28 @@ export default function AirportControlDashboard() {
   const selectedAircraft = selectedId ? aircraft.find((a) => a.id === selectedId) ?? null : null;
   const activeAlert = alertsSnap?.active[0] ?? null;
 
-  const connection = aircraftSnap?.ok ? "connected" : aircraft.length > 0 ? "degraded" : "down";
+  // Each data source gets its own status — a failure in one (e.g. the
+  // aircraft feed) must never be reported as the whole system being down
+  // when other sources (flights, weather) are working fine.
+  const sourceConnections: SourceConnections = useMemo(() => {
+    const aircraftState = !aircraftSnap
+      ? "down"
+      : aircraftSnap.ok
+        ? "connected"
+        : aircraft.length > 0
+          ? "degraded"
+          : "down";
+    const bgnState = !flightsSnap
+      ? "down"
+      : flightsSnap.ok
+        ? "connected"
+        : (flightsSnap.flights?.length ?? 0) > 0
+          ? "degraded"
+          : "down";
+    const weatherState = !weatherSnap ? "down" : weatherSnap.ok ? "connected" : "down";
+    const alertsState = !alertsSnap ? "off" : alertsSnap.state === "connected" ? "connected" : "off";
+    return { aircraft: aircraftState, bgn: bgnState, weather: weatherState, alerts: alertsState };
+  }, [aircraftSnap, aircraft.length, flightsSnap, weatherSnap, alertsSnap]);
 
   const todayDepartures = useMemo(() => (flightsSnap?.departures ?? []).filter((f) => isToday(f.scheduledAt)), [flightsSnap]);
   const todayArrivals = useMemo(() => (flightsSnap?.arrivals ?? []).filter((f) => isToday(f.scheduledAt)), [flightsSnap]);
@@ -142,7 +163,7 @@ export default function AirportControlDashboard() {
 
   return (
     <div dir="rtl" className="flex h-[100svh] flex-col overflow-hidden font-sans text-slate-100">
-      <Header connection={connection} emergencyActive={Boolean(activeAlert)} />
+      <Header sources={sourceConnections} emergencyActive={Boolean(activeAlert)} />
       {activeAlert && <EmergencyBanner alert={activeAlert} />}
 
       <div className="flex min-h-0 flex-1 flex-col sm:flex-row-reverse">
@@ -227,7 +248,7 @@ export default function AirportControlDashboard() {
       </div>
 
       <div className="hidden border-t border-white/5 bg-[#050b14] px-4 py-1 text-center text-[10px] text-slate-600 sm:block">
-        מקורות: ADSB.lol / OpenSky · Open-Meteo · Aviation Weather Center · data.gov.il (רשות שדות התעופה) · פיקוד העורף: לא זמין (אין API רשמי)
+        מקורות: ADSB.fi / ADSB.lol / OpenSky · Open-Meteo · Aviation Weather Center · data.gov.il (רשות שדות התעופה) · פיקוד העורף: לא זמין (אין API רשמי)
       </div>
     </div>
   );

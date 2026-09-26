@@ -1,3 +1,4 @@
+import { fetchAdsbFi } from "./adsb-fi";
 import { fetchAdsbLol } from "./adsb-lol";
 import { fetchOpenSky } from "./opensky";
 import { trackSource } from "../utils/source-health";
@@ -8,22 +9,40 @@ import type { Aircraft, AircraftSnapshot, AircraftSource } from "../types";
 const CACHE_TTL_MS = 9_000;
 
 /** AircraftProvider abstraction: the UI/API layer only ever calls
- * getAircraftSnapshot() and never talks to adsb.lol/OpenSky directly, so a
- * future provider can be swapped in without touching callers. */
+ * getAircraftSnapshot() and never talks to a specific ADS-B source directly,
+ * so providers can be reordered/swapped without touching callers.
+ *
+ * Order: adsb.fi -> adsb.lol -> OpenSky. adsb.fi is tried first because it is
+ * the source already confirmed working from this project's Vercel deployment
+ * (it powers the iran-airspace map in production); adsb.lol has been observed
+ * to fail from Vercel (likely Cloudflare bot-mitigation against datacenter
+ * IPs), so it is kept only as a fallback; OpenSky's anonymous public API is
+ * free but rate-limited, so it is the last resort. */
 async function fetchWithFallback(radiusNm: number): Promise<{ aircraft: Aircraft[]; source: AircraftSource; fellBack: boolean }> {
+  const errors: string[] = [];
+
+  try {
+    const aircraft = await trackSource("adsb.fi", () => fetchAdsbFi(radiusNm));
+    return { aircraft, source: "adsb.fi", fellBack: false };
+  } catch (error) {
+    errors.push(`adsb.fi: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
   try {
     const aircraft = await trackSource("adsb.lol", () => fetchAdsbLol(radiusNm));
-    return { aircraft, source: "adsb.lol", fellBack: false };
-  } catch (primaryError) {
-    try {
-      const aircraft = await trackSource("opensky", () => fetchOpenSky(radiusNm));
-      return { aircraft, source: "opensky", fellBack: true };
-    } catch (fallbackError) {
-      const primaryMessage = primaryError instanceof Error ? primaryError.message : String(primaryError);
-      const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-      throw new Error(`both aircraft providers failed — adsb.lol: ${primaryMessage}; OpenSky: ${fallbackMessage}`);
-    }
+    return { aircraft, source: "adsb.lol", fellBack: true };
+  } catch (error) {
+    errors.push(`adsb.lol: ${error instanceof Error ? error.message : String(error)}`);
   }
+
+  try {
+    const aircraft = await trackSource("opensky", () => fetchOpenSky(radiusNm));
+    return { aircraft, source: "opensky", fellBack: true };
+  } catch (error) {
+    errors.push(`OpenSky: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  throw new Error(`all aircraft providers failed — ${errors.join("; ")}`);
 }
 
 export async function getAircraftSnapshot(

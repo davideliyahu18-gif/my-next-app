@@ -1,4 +1,14 @@
-export type ConnectionState = "connected" | "degraded" | "down";
+/** "off" = source intentionally has no live backend (e.g. Oref, for which no
+ * official public API exists) — distinct from "down", a real failure of a
+ * source that should otherwise be working. */
+export type ConnectionState = "connected" | "degraded" | "down" | "off";
+
+export type SourceConnections = {
+  aircraft: ConnectionState;
+  bgn: ConnectionState;
+  weather: ConnectionState;
+  alerts: ConnectionState;
+};
 
 export type NavSection =
   | "map"
