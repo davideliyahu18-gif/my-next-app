@@ -3,7 +3,7 @@ export const BGN_COORDS = { lat: 32.0114, lon: 34.8867 };
 export const BGN_ICAO = "LLBG";
 export const BGN_IATA = "TLV";
 
-export const DEFAULT_RADIUS_NM = 50;
+export const DEFAULT_RADIUS_NM = 150;
 export const RADIUS_OPTIONS_NM = [25, 50, 100, 150] as const;
 
 const EARTH_RADIUS_NM = 3440.065;
