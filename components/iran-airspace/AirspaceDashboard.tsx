@@ -96,6 +96,17 @@ const ALERT_PHRASES: Record<string, string> = {
   "unusual-route": "טס במסלול שונה מהרגיל",
 };
 
+// Severity is derived only from the aircraft's already-public category
+// classification (military dbFlags bit, sub-typed as tanker/intel) — never
+// from behavior alone, and never applied to a civilian/named airline
+// flight. This keeps the chip system from the mockups without implying an
+// unfounded accusation against any real, identifiable civil flight.
+function severityForCategory(category: AlertEntry["category"]): AlertEntry["severity"] {
+  if (category === "military") return "critical";
+  if (category === "tanker" || category === "intel") return "notable";
+  return "info";
+}
+
 function buildAlertEntries(snapshot: AircraftSnapshot): AlertEntry[] {
   const aircraftByHex = new Map(snapshot.aircraft.map((a) => [a.hex, a] as const));
   const entries: AlertEntry[] = [];
@@ -112,6 +123,7 @@ function buildAlertEntries(snapshot: AircraftSnapshot): AlertEntry[] {
       id: `${movement.hex}-${movement.detectedAt}-${reason}`,
       hex: movement.hex,
       category: aircraft.category,
+      severity: severityForCategory(aircraft.category),
       text: `מטוס ${CATEGORY_LABELS_HE[aircraft.category]} (${label}) ${phrase} · כיוון ${direction} מהמרכז`,
       time: new Intl.DateTimeFormat("he-IL", {
         hour: "2-digit",
@@ -396,11 +408,16 @@ export default function AirspaceDashboard() {
             key={id}
             type="button"
             onClick={() => setMobilePanel(id === "map" ? null : id)}
-            className={`flex-1 rounded-lg py-2 text-xs font-bold active:bg-white/10 ${
+            className={`relative flex-1 rounded-lg py-2 text-xs font-bold active:bg-white/10 ${
               (id === "map" ? mobilePanel === null : mobilePanel === id) ? "text-[#19c8ff]" : "text-slate-400"
             }`}
           >
             {label}
+            {id === "alerts" && alerts.length > 0 && (
+              <span className="absolute left-1/2 top-0.5 flex h-4 min-w-4 translate-x-3 items-center justify-center rounded-full bg-[#ff2d3d] px-1 text-[9px] font-bold text-white">
+                {alerts.length}
+              </span>
+            )}
           </button>
         ))}
       </nav>

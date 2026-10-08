@@ -5,7 +5,10 @@ import type { Aircraft } from "@/lib/iran-airspace/types";
 /** A top-down airplane silhouette, nose pointing north by default, rotated
  * to heading and tinted by category. */
 function planeSvg(color: string, size: number, dim: boolean): string {
-  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" style="filter:drop-shadow(0 0 3px ${color}${dim ? "55" : "aa"})">
+  const glow = dim
+    ? `drop-shadow(0 0 2px ${color}88)`
+    : `drop-shadow(0 0 3px ${color}) drop-shadow(0 0 7px ${color}99)`;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" style="filter:${glow}">
     <path d="M21,16V14L13,9V3.5C13,2.67 12.33,2 11.5,2C10.67,2 10,2.67 10,3.5V9L2,14V16L10,13.5V19L7.5,20.5V22L11.5,21L15.5,22V20.5L13,19V13.5L21,16Z"
       fill="${color}" opacity="${dim ? 0.55 : 1}" stroke="#04070d" stroke-width="0.5" />
   </svg>`;

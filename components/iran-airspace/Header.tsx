@@ -16,19 +16,39 @@ function formatClock(iso: string | null): string {
   }).format(new Date(iso));
 }
 
-function useTickingClock(): string {
+function useTickingClock(): { time: string; date: string } {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(id);
   }, []);
-  return new Intl.DateTimeFormat("he-IL", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-    timeZone: "Asia/Jerusalem",
-  }).format(now);
+  return {
+    time: new Intl.DateTimeFormat("he-IL", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+      timeZone: "Asia/Jerusalem",
+    }).format(now),
+    date: new Intl.DateTimeFormat("he-IL", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      timeZone: "Asia/Jerusalem",
+    }).format(now),
+  };
+}
+
+function RadarLogo() {
+  return (
+    <span className="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#19c8ff]/35 bg-[#19c8ff]/5" aria-hidden>
+      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="#19c8ff" strokeWidth="1.5">
+        <circle cx="12" cy="12" r="8" opacity="0.5" />
+        <circle cx="12" cy="12" r="4.5" opacity="0.5" />
+        <path d="M12 12 L12 4" strokeLinecap="round" />
+      </svg>
+    </span>
+  );
 }
 
 const DOT_COLOR: Record<ConnectionState, string> = {
@@ -47,11 +67,11 @@ export type MapLayerId = "dark" | "satellite";
 
 type CategoryFilterFlags = Record<"showCivil" | "showMilitary" | "showTanker" | "showIntel", boolean>;
 
-const FILTER_CHIPS: { key: keyof CategoryFilterFlags; label: string; tone: "cyan" | "amber" }[] = [
-  { key: "showCivil", label: "אזרחי", tone: "cyan" },
-  { key: "showMilitary", label: "צבאי", tone: "amber" },
-  { key: "showTanker", label: "תדלוק", tone: "amber" },
-  { key: "showIntel", label: "מודיעין", tone: "amber" },
+const FILTER_CHIPS: { key: keyof CategoryFilterFlags; label: string; icon: string; tone: "cyan" | "amber" }[] = [
+  { key: "showCivil", label: "אזרחי", icon: "✈️", tone: "cyan" },
+  { key: "showMilitary", label: "צבאי", icon: "🛩️", tone: "amber" },
+  { key: "showTanker", label: "תדלוק", icon: "⛽", tone: "amber" },
+  { key: "showIntel", label: "מודיעין", icon: "🛰️", tone: "amber" },
 ];
 
 function IconButton({
@@ -118,12 +138,16 @@ export default function Header({
         <span className="text-[11px] font-bold tracking-widest text-slate-200 sm:text-sm">
           {LABEL[connection]}
         </span>
-        <span className="hidden font-mono text-xs text-slate-500 sm:inline">{clock}</span>
+        <span className="hidden flex-col leading-tight font-mono text-slate-500 sm:flex">
+          <span className="text-xs">{clock.time}</span>
+          <span className="text-[9px]">{clock.date}</span>
+        </span>
       </div>
 
       <div className="min-w-0 flex-1 text-center">
-        <h1 className="truncate text-[13px] font-extrabold tracking-tight text-slate-50 sm:text-2xl">
-          <span aria-hidden>🇮🇷</span> {SITE_TITLE_HE}
+        <h1 className="flex items-center justify-center gap-1.5 truncate text-[13px] font-extrabold tracking-tight text-slate-50 sm:text-2xl">
+          <RadarLogo />
+          {SITE_TITLE_HE}
         </h1>
         <p className="mt-0.5 hidden text-[11px] text-slate-400 sm:block sm:text-xs">
           {SITE_SUBTITLE_HE}
@@ -204,6 +228,7 @@ export default function Header({
             data-tone={chip.tone === "amber" ? "amber" : undefined}
             onClick={() => onToggleCategory(chip.key)}
           >
+            <span aria-hidden>{chip.icon}</span>
             {chip.label}
           </button>
         ))}
@@ -214,6 +239,7 @@ export default function Header({
           data-tone="red"
           onClick={() => setAlertsOpen((v) => !v)}
         >
+          <span aria-hidden>🚨</span>
           התרעות
           {alerts.length > 0 && <span className="rounded-full bg-[#ff2d3d]/80 px-1.5 text-[10px] text-white">{alerts.length}</span>}
         </button>

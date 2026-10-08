@@ -5,13 +5,37 @@ import Panel, { PanelHeading } from "./Panel";
 import { CATEGORY_COLORS } from "@/lib/iran-airspace/constants";
 import type { AircraftCategory } from "@/lib/iran-airspace/types";
 
+export type AlertSeverity = "critical" | "notable" | "info";
+
 export type AlertEntry = {
   id: string;
   hex: string;
   category: AircraftCategory;
+  severity: AlertSeverity;
   text: string;
   time: string;
 };
+
+const SEVERITY_LABEL: Record<AlertSeverity, string> = {
+  critical: "קריטי",
+  notable: "לתשומת לב",
+  info: "מידע",
+};
+
+const SEVERITY_TONE: Record<AlertSeverity, string> = {
+  critical: "red",
+  notable: "amber",
+  info: undefined as unknown as string,
+};
+
+function SeverityChip({ severity }: { severity: AlertSeverity }) {
+  const tone = SEVERITY_TONE[severity];
+  return (
+    <span className="hamal-chip shrink-0 !py-0.5 !text-[9px]" data-active="true" data-tone={tone}>
+      {SEVERITY_LABEL[severity]}
+    </span>
+  );
+}
 
 function PlaneGlyph({ color }: { color: string }) {
   return (
@@ -55,7 +79,11 @@ export default function ActiveAlerts({
             >
               <PlaneGlyph color={CATEGORY_COLORS[a.category]} />
               <span className="min-w-0 flex-1 text-[12px] leading-snug text-slate-300">
-                <span className="font-mono text-slate-500">{a.time}</span> {a.text}
+                <span className="mb-0.5 flex items-center gap-1.5">
+                  <SeverityChip severity={a.severity} />
+                  <span className="font-mono text-slate-500">{a.time}</span>
+                </span>
+                {a.text}
               </span>
             </button>
           ))

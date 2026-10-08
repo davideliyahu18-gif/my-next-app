@@ -1,6 +1,7 @@
 "use client";
 
 import Panel, { PanelHeading } from "./Panel";
+import { CATEGORY_COLORS } from "@/lib/iran-airspace/constants";
 import type { AircraftSnapshot, ConnectionState } from "@/lib/iran-airspace/types";
 
 type StatsPoint = AircraftSnapshot["stats"];
@@ -23,6 +24,60 @@ function Sparkline({ values, color }: { values: number[]; color: string }) {
     <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden>
       <polyline points={points} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.9" />
     </svg>
+  );
+}
+
+/** Simple donut chart (stroke-dasharray trick) for the category breakdown —
+ * no charting library needed for 4 fixed segments. */
+function Donut({ segments }: { segments: { value: number; color: string; label: string }[] }) {
+  const total = segments.reduce((sum, s) => sum + s.value, 0);
+  const size = 76;
+  const r = 30;
+  const circumference = 2 * Math.PI * r;
+  let offset = 0;
+
+  return (
+    <div className="flex items-center gap-3">
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="9" />
+        {total > 0 &&
+          segments
+            .filter((s) => s.value > 0)
+            .map((s) => {
+              const frac = s.value / total;
+              const dash = frac * circumference;
+              const circle = (
+                <circle
+                  key={s.label}
+                  cx={size / 2}
+                  cy={size / 2}
+                  r={r}
+                  fill="none"
+                  stroke={s.color}
+                  strokeWidth="9"
+                  strokeDasharray={`${dash} ${circumference - dash}`}
+                  strokeDashoffset={-offset}
+                  transform={`rotate(-90 ${size / 2} ${size / 2})`}
+                  opacity="0.9"
+                />
+              );
+              offset += dash;
+              return circle;
+            })}
+        <text x="50%" y="50%" textAnchor="middle" dominantBaseline="central" className="fill-slate-100 text-[15px] font-extrabold">
+          {total}
+        </text>
+      </svg>
+      <div className="space-y-1">
+        {segments.map((s) => (
+          <div key={s.label} className="flex items-center gap-1.5 text-[10px] text-slate-400">
+            <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: s.color }} />
+            {s.label}
+            <span className="font-mono text-slate-300">{total > 0 ? Math.round((s.value / total) * 100) : 0}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -129,6 +184,20 @@ export default function SystemStatus({
         <StatCard label="עם Callsign" value={stats?.withCallsign ?? 0} />
         <StatCard label="עם Registration" value={stats?.withRegistration ?? 0} />
       </div>
+
+      {stats && stats.total > 0 && (
+        <div className="border-t border-white/5 px-3 py-2.5">
+          <div className="mb-2 text-[11px] font-bold text-slate-400">התפלגות לפי סוג</div>
+          <Donut
+            segments={[
+              { value: stats.civil, color: CATEGORY_COLORS.civil, label: "אזרחי" },
+              { value: stats.military, color: CATEGORY_COLORS.military, label: "צבאי" },
+              { value: stats.tanker, color: CATEGORY_COLORS.tanker, label: "תדלוק" },
+              { value: stats.intel, color: CATEGORY_COLORS.intel, label: "מודיעין" },
+            ]}
+          />
+        </div>
+      )}
 
       {h.length >= 2 && (
         <div className="space-y-0.5 border-t border-white/5 px-3 py-2.5">

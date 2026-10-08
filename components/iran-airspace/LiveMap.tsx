@@ -93,7 +93,9 @@ function labelIcon(name: string, kind: string): L.DivIcon {
   const dot =
     kind === "site"
       ? '<span style="display:inline-block;width:5px;height:5px;border-radius:999px;border:1px solid rgba(148,163,184,0.7);margin-inline-end:3px;vertical-align:middle"></span>'
-      : "";
+      : kind === "city"
+        ? '<span style="display:inline-block;width:5px;height:5px;border-radius:999px;background:#ffd27a;box-shadow:0 0 6px 2px rgba(255,210,122,0.8);margin-inline-end:3px;vertical-align:middle"></span>'
+        : "";
   return L.divIcon({
     className: "iran-airspace-label-wrap",
     html: `<span class="${cls}" style="white-space:nowrap;text-shadow:0 1px 3px rgba(0,0,0,0.9)">${dot}${name}</span>`,
@@ -105,11 +107,14 @@ function labelIcon(name: string, kind: string): L.DivIcon {
 // Esri's ArcGIS Online basemap tile services (no API key required for
 // standard, low-volume public use) — used instead of CARTO's anonymous
 // basemaps.cartocdn.com endpoint, which now requires a paid API key.
+// Both layers use the same real satellite imagery; "dark" applies a CSS
+// filter (see .hamal-night-tiles in iran-airspace.css) to read as a
+// night/ops-room map instead of switching to an unverified tile source.
 const LAYERS: Record<MapLayerId, { url: string; attribution: string; maxZoom: number }> = {
   dark: {
-    url: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     attribution: "Tiles &copy; Esri",
-    maxZoom: 16,
+    maxZoom: 18,
   },
   satellite: {
     url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
@@ -379,7 +384,10 @@ export default function LiveMap({
   }, []);
 
   return (
-    <div ref={wrapRef} className="relative h-full w-full overflow-hidden bg-[#050b14]">
+    <div
+      ref={wrapRef}
+      className={`relative h-full w-full overflow-hidden bg-[#050b14] ${layerId === "dark" ? "hamal-night-tiles" : ""}`}
+    >
       <div ref={containerRef} className="absolute inset-0 z-0 h-full w-full" />
       <MapControls
         isFullscreen={isFullscreen}
