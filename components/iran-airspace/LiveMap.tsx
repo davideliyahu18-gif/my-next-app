@@ -10,6 +10,8 @@ import type { MapLayerId } from "./Header";
 import {
   CATEGORY_COLORS,
   CATEGORY_LABELS_HE,
+  ISRAEL_CENTER,
+  RANGE_RINGS_KM,
   REFERENCE_AIRFIELDS,
   REGION_CENTER,
   REGION_DEFAULT_ZOOM,
@@ -132,6 +134,7 @@ export default function LiveMap({
   onToggleCategory,
   layerId,
   onLayerChange,
+  following = false,
 }: {
   aircraft: Aircraft[];
   selectedHex: string | null;
@@ -144,6 +147,7 @@ export default function LiveMap({
   onToggleCategory: (key: keyof CategoryFilterFlags) => void;
   layerId: MapLayerId;
   onLayerChange: (id: MapLayerId) => void;
+  following?: boolean;
 }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -197,6 +201,44 @@ export default function LiveMap({
         keyboard: false,
       }).addTo(labelLayer);
     }
+
+    // Dashed concentric range rings around Israel, purely a distance
+    // reference (not a threat radius) — matches the ops-room visual style.
+    const KM_PER_DEG_LAT = 111.32;
+    for (const km of RANGE_RINGS_KM) {
+      L.circle([ISRAEL_CENTER.lat, ISRAEL_CENTER.lon], {
+        radius: km * 1000,
+        color: "rgba(25,200,255,0.35)",
+        weight: 1,
+        dashArray: "4 6",
+        fill: false,
+        interactive: false,
+      }).addTo(labelLayer);
+      L.marker([ISRAEL_CENTER.lat + km / KM_PER_DEG_LAT, ISRAEL_CENTER.lon], {
+        icon: L.divIcon({
+          className: "iran-airspace-label-wrap",
+          html: `<span class="hamal-range-label">${km} ק"מ</span>`,
+          iconSize: [0, 0],
+          iconAnchor: [0, 0],
+        }),
+        interactive: false,
+        keyboard: false,
+      }).addTo(labelLayer);
+    }
+
+    // Decorative radar sweep, geo-anchored on Israel (rotates via CSS, see
+    // .hamal-radar-sweep in iran-airspace.css).
+    L.marker([ISRAEL_CENTER.lat, ISRAEL_CENTER.lon], {
+      icon: L.divIcon({
+        className: "iran-airspace-label-wrap",
+        html: '<div class="hamal-radar-sweep"></div>',
+        iconSize: [160, 160],
+        iconAnchor: [80, 80],
+      }),
+      interactive: false,
+      keyboard: false,
+    }).addTo(labelLayer);
+
     labelLayerRef.current = labelLayer;
 
     markerLayerRef.current = L.layerGroup().addTo(map);
@@ -271,6 +313,14 @@ export default function LiveMap({
       }
     }
   }, [aircraft, selectedHex, showLabels]);
+
+  // Keep the camera centered on the selected aircraft while "follow" is on.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !following || !selectedHex) return;
+    const entry = markersRef.current.get(selectedHex);
+    if (entry) map.panTo(entry.marker.getLatLng(), { animate: true, duration: 0.6 });
+  }, [aircraft, following, selectedHex]);
 
   // Observed trails: a short one behind every visible aircraft, a longer
   // emphasized one behind the selected aircraft.
@@ -352,6 +402,12 @@ export default function LiveMap({
         onToggleLayer={() => onLayerChange(layerId === "dark" ? "satellite" : "dark")}
       />
       <LegendBar active={categoryFilters} onToggle={onToggleCategory} />
+      <div className="hamal-compass pointer-events-none absolute bottom-2 left-2 z-[420] sm:bottom-3 sm:left-3" aria-hidden>
+        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="#7ee3ff" strokeWidth="1.5">
+          <path d="M12 2v3M12 19v3M2 12h3M19 12h3" strokeLinecap="round" />
+          <path d="M12 7 14 12 12 17 10 12Z" fill="#ff2d3d" stroke="none" />
+        </svg>
+      </div>
     </div>
   );
 }

@@ -3,6 +3,59 @@
 import Panel, { PanelHeading } from "./Panel";
 import type { AircraftSnapshot, ConnectionState } from "@/lib/iran-airspace/types";
 
+type StatsPoint = AircraftSnapshot["stats"];
+
+/** Minimal inline sparkline — no charting library needed for a 20-30 point trend. */
+function Sparkline({ values, color }: { values: number[]; color: string }) {
+  const width = 72;
+  const height = 22;
+  if (values.length < 2) {
+    return <svg width={width} height={height} aria-hidden />;
+  }
+  const max = Math.max(...values, 1);
+  const min = Math.min(...values, 0);
+  const span = Math.max(max - min, 1);
+  const step = width / (values.length - 1);
+  const points = values
+    .map((v, i) => `${(i * step).toFixed(1)},${(height - ((v - min) / span) * height).toFixed(1)}`)
+    .join(" ");
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden>
+      <polyline points={points} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.9" />
+    </svg>
+  );
+}
+
+function trendPct(values: number[]): number | null {
+  if (values.length < 2) return null;
+  const first = values[0];
+  const last = values[values.length - 1];
+  if (first === 0) return last === 0 ? 0 : null;
+  return Math.round(((last - first) / first) * 100);
+}
+
+function TrendRow({ label, values, color }: { label: string; values: number[]; color: string }) {
+  const pct = trendPct(values);
+  const latest = values[values.length - 1] ?? 0;
+  return (
+    <div className="flex items-center justify-between gap-2 py-1">
+      <div className="flex items-center gap-1.5">
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+        <span className="text-[11px] text-slate-400">{label}</span>
+        <span className="text-[11px] font-bold tabular-nums text-slate-200">{latest}</span>
+      </div>
+      <div className="flex items-center gap-1.5">
+        <Sparkline values={values} color={color} />
+        {pct != null && (
+          <span className={`text-[10px] font-bold tabular-nums ${pct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+            {pct >= 0 ? "▲" : "▼"} {Math.abs(pct)}%
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function formatClock(iso: string | null): string {
   if (!iso) return "--:--:--";
   return new Intl.DateTimeFormat("he-IL", {
@@ -48,12 +101,20 @@ export default function SystemStatus({
   snapshot,
   visibleCount,
   connection,
+  history,
 }: {
   snapshot: AircraftSnapshot | null;
   visibleCount: number;
   connection: ConnectionState;
+  history?: StatsPoint[];
 }) {
   const stats = snapshot?.stats;
+  const h = history ?? [];
+  const totalSeries = h.map((s) => s.total);
+  const civilSeries = h.map((s) => s.civil);
+  const militarySeries = h.map((s) => s.military);
+  const tankerSeries = h.map((s) => s.tanker);
+  const intelSeries = h.map((s) => s.intel);
 
   return (
     <Panel>
@@ -68,6 +129,17 @@ export default function SystemStatus({
         <StatCard label="עם Callsign" value={stats?.withCallsign ?? 0} />
         <StatCard label="עם Registration" value={stats?.withRegistration ?? 0} />
       </div>
+
+      {h.length >= 2 && (
+        <div className="space-y-0.5 border-t border-white/5 px-3 py-2.5">
+          <div className="mb-1 text-[11px] font-bold text-slate-400">מגמות פעילות (מאז פתיחת הדף)</div>
+          <TrendRow label="סה״כ" values={totalSeries} color="#19c8ff" />
+          <TrendRow label="אזרחי" values={civilSeries} color="#19c8ff" />
+          <TrendRow label="צבאי" values={militarySeries} color="#ffb020" />
+          <TrendRow label="תדלוק" values={tankerSeries} color="#ffb020" />
+          <TrendRow label="מודיעין" values={intelSeries} color="#ffb020" />
+        </div>
+      )}
 
       <div className="space-y-2 border-t border-white/5 p-3">
         <div className="flex items-center justify-between text-xs">

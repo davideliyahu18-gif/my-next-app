@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Modal from "./Modal";
 import { SITE_SUBTITLE_HE, SITE_TITLE_HE } from "@/lib/iran-airspace/constants";
 import type { ConnectionState } from "@/lib/iran-airspace/types";
@@ -12,13 +12,29 @@ function formatClock(iso: string | null): string {
     minute: "2-digit",
     second: "2-digit",
     hour12: false,
+    timeZone: "Asia/Jerusalem",
   }).format(new Date(iso));
 }
 
+function useTickingClock(): string {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return new Intl.DateTimeFormat("he-IL", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Jerusalem",
+  }).format(now);
+}
+
 const DOT_COLOR: Record<ConnectionState, string> = {
-  connected: "bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.8)]",
-  degraded: "bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.8)]",
-  down: "bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.8)]",
+  connected: "bg-[#19c8ff] shadow-[0_0_10px_rgba(25,200,255,0.9)]",
+  degraded: "bg-[#ffb020] shadow-[0_0_10px_rgba(255,176,32,0.9)]",
+  down: "bg-[#ff2d3d] shadow-[0_0_10px_rgba(255,45,61,0.9)]",
 };
 
 const LABEL: Record<ConnectionState, string> = {
@@ -28,6 +44,15 @@ const LABEL: Record<ConnectionState, string> = {
 };
 
 export type MapLayerId = "dark" | "satellite";
+
+type CategoryFilterFlags = Record<"showCivil" | "showMilitary" | "showTanker" | "showIntel", boolean>;
+
+const FILTER_CHIPS: { key: keyof CategoryFilterFlags; label: string; tone: "cyan" | "amber" }[] = [
+  { key: "showCivil", label: "אזרחי", tone: "cyan" },
+  { key: "showMilitary", label: "צבאי", tone: "amber" },
+  { key: "showTanker", label: "תדלוק", tone: "amber" },
+  { key: "showIntel", label: "מודיעין", tone: "amber" },
+];
 
 function IconButton({
   label,
@@ -65,6 +90,8 @@ export default function Header({
   onViewAllAlerts,
   layerId,
   onLayerChange,
+  categoryFilters,
+  onToggleCategory,
 }: {
   connection: ConnectionState;
   lastUpdate: string | null;
@@ -72,21 +99,26 @@ export default function Header({
   onViewAllAlerts: () => void;
   layerId: MapLayerId;
   onLayerChange: (id: MapLayerId) => void;
+  categoryFilters: CategoryFilterFlags;
+  onToggleCategory: (key: keyof CategoryFilterFlags) => void;
 }) {
   const [alertsOpen, setAlertsOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const clock = useTickingClock();
 
   return (
     <header
-      className="relative z-20 flex items-center justify-between gap-1.5 border-b border-sky-400/10 bg-[#050b14]/95 px-2 py-2 backdrop-blur-xl sm:gap-3 sm:px-5 sm:py-3"
+      className="relative z-20 flex flex-col gap-2 border-b border-sky-400/15 bg-[#060d1a]/95 px-2 py-2 backdrop-blur-xl sm:px-5 sm:py-3"
       style={{ paddingTop: "calc(env(safe-area-inset-top) + 0.5rem)" }}
     >
+      <div className="flex items-center justify-between gap-1.5 sm:gap-3">
       <div className="flex shrink-0 items-center gap-1.5 sm:gap-2.5">
         <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${DOT_COLOR[connection]} ${connection === "connected" ? "animate-pulse" : ""}`} />
         <span className="text-[11px] font-bold tracking-widest text-slate-200 sm:text-sm">
           {LABEL[connection]}
         </span>
+        <span className="hidden font-mono text-xs text-slate-500 sm:inline">{clock}</span>
       </div>
 
       <div className="min-w-0 flex-1 text-center">
@@ -159,6 +191,32 @@ export default function Header({
             />
           </svg>
         </IconButton>
+      </div>
+      </div>
+
+      <div className="iran-airspace-scroll flex items-center gap-1.5 overflow-x-auto sm:justify-center">
+        {FILTER_CHIPS.map((chip) => (
+          <button
+            key={chip.key}
+            type="button"
+            className="hamal-chip"
+            data-active={categoryFilters[chip.key]}
+            data-tone={chip.tone === "amber" ? "amber" : undefined}
+            onClick={() => onToggleCategory(chip.key)}
+          >
+            {chip.label}
+          </button>
+        ))}
+        <button
+          type="button"
+          className="hamal-chip"
+          data-active={alertsOpen}
+          data-tone="red"
+          onClick={() => setAlertsOpen((v) => !v)}
+        >
+          התרעות
+          {alerts.length > 0 && <span className="rounded-full bg-[#ff2d3d]/80 px-1.5 text-[10px] text-white">{alerts.length}</span>}
+        </button>
       </div>
 
       <Modal open={aboutOpen} onClose={() => setAboutOpen(false)} title="אודות המערכת">

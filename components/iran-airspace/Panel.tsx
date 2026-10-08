@@ -12,7 +12,7 @@ export default function Panel({
   return (
     <div
       style={style}
-      className={`rounded-xl border border-sky-400/10 bg-[#0a1220]/80 shadow-[0_8px_30px_rgba(0,0,0,0.5)] backdrop-blur-xl ${className}`}
+      className={`hamal-panel rounded-xl ${className}`}
     >
       {children}
     </div>

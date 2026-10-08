@@ -1,4 +1,4 @@
-import type { AircraftFilters, MapBounds } from "./types";
+import type { AircraftFilters, LatLng, MapBounds } from "./types";
 
 export const SITE_TITLE_HE = "מערכת מעקב אווירי סביב איראן";
 export const SITE_SUBTITLE_HE = "מעקב אחר תנועות אוויריות ממקורות ADS-B ציבוריים";
@@ -13,6 +13,10 @@ export const REGION_BOUNDS: MapBounds = {
 
 export const REGION_CENTER: [number, number] = [29, 51];
 export const REGION_DEFAULT_ZOOM = 5;
+
+/** Israel — center point for the map's range rings and radar-sweep decal. */
+export const ISRAEL_CENTER: LatLng = { lat: 32.0853, lon: 34.7818 };
+export const RANGE_RINGS_KM = [100, 250, 500] as const;
 
 /** Rough bounding rectangle around Iran, used only to flag when a tracked
  * aircraft's position crosses in/out of it (a factual position check —

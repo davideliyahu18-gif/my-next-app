@@ -125,7 +125,7 @@ function buildAlertEntries(snapshot: AircraftSnapshot): AlertEntry[] {
   return entries;
 }
 
-type MobilePanel = "status" | "movements" | "filters" | null;
+type MobilePanel = "alerts" | "stats" | "settings" | null;
 type HistoryEntry = { t: number; snapshot: AircraftSnapshot };
 
 export default function AirspaceDashboard() {
@@ -144,6 +144,7 @@ export default function AirspaceDashboard() {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [isLive, setIsLive] = useState(true);
   const [scrubIndex, setScrubIndex] = useState(0);
+  const [following, setFollowing] = useState(false);
 
   const inFlightRef = useRef(false);
   const lastSourceRef = useRef<ProviderName | null>(null);
@@ -253,6 +254,7 @@ export default function AirspaceDashboard() {
 
   const handleSelect = useCallback((hex: string | null) => {
     setSelectedHex(hex);
+    setFollowing(false);
     if (hex) {
       setFocusRequest({ hex, token: Date.now() });
       setMobileDetailsOpen(true);
@@ -296,6 +298,7 @@ export default function AirspaceDashboard() {
   );
 
   const displayInteresting: InterestingMovement[] = displaySnapshot?.interesting ?? [];
+  const statsHistory = useMemo(() => history.map((h) => h.snapshot.stats), [history]);
 
   return (
     <div dir="rtl" className="flex h-[100svh] flex-col overflow-hidden font-sans text-slate-100">
@@ -303,14 +306,16 @@ export default function AirspaceDashboard() {
         connection={connection}
         lastUpdate={snapshot?.timestamp ?? null}
         alerts={alerts}
-        onViewAllAlerts={() => setMobilePanel("movements")}
+        onViewAllAlerts={() => setMobilePanel("alerts")}
         layerId={layerId}
         onLayerChange={setLayerId}
+        categoryFilters={categoryFilters}
+        onToggleCategory={handleToggleCategory}
       />
 
       <div className="relative flex min-h-0 flex-1 gap-3 overflow-hidden p-0 sm:gap-3 sm:p-3">
         <aside className="hidden w-72 shrink-0 flex-col gap-3 overflow-y-auto pb-2 sm:flex iran-airspace-scroll">
-          <SystemStatus snapshot={displaySnapshot} visibleCount={filteredAircraft.length} connection={connection} />
+          <SystemStatus snapshot={displaySnapshot} visibleCount={filteredAircraft.length} connection={connection} history={statsHistory} />
           <ActiveAlerts alerts={alerts} onSelect={handleSelect} />
           <FiltersPanel filters={filters} onChange={handleFilterChange} />
         </aside>
@@ -332,6 +337,7 @@ export default function AirspaceDashboard() {
             onToggleCategory={handleToggleCategory}
             layerId={layerId}
             onLayerChange={setLayerId}
+            following={following}
           />
 
           <div className="pointer-events-none absolute bottom-2 right-2 z-20 sm:bottom-3 sm:right-3">
@@ -350,7 +356,13 @@ export default function AirspaceDashboard() {
 
           {selectedAircraft && (
             <div className="absolute bottom-2 left-2 z-30 hidden w-80 sm:block">
-              <AircraftDetails aircraft={selectedAircraft} trail={selectedTrail} onClose={() => handleSelect(null)} />
+              <AircraftDetails
+                aircraft={selectedAircraft}
+                trail={selectedTrail}
+                onClose={() => handleSelect(null)}
+                following={following}
+                onToggleFollow={() => setFollowing((v) => !v)}
+              />
             </div>
           )}
         </main>
@@ -374,26 +386,26 @@ export default function AirspaceDashboard() {
       <nav className="relative z-[510] flex shrink-0 items-stretch gap-1 border-t border-white/5 bg-[#050b14]/95 p-1.5 backdrop-blur-xl sm:hidden" style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 0.375rem)" }}>
         {(
           [
-            ["status", "סטטוס"],
-            ["movements", "תנועות"],
-            ["filters", "פילטרים"],
+            ["map", "מפה"],
+            ["alerts", "התראות"],
+            ["stats", "סטטיסטיקות"],
+            ["settings", "הגדרות"],
           ] as const
         ).map(([id, label]) => (
           <button
             key={id}
             type="button"
-            onClick={() => setMobilePanel(id)}
-            className="flex-1 rounded-lg py-2 text-xs font-bold text-slate-300 active:bg-white/10"
+            onClick={() => setMobilePanel(id === "map" ? null : id)}
+            className={`flex-1 rounded-lg py-2 text-xs font-bold active:bg-white/10 ${
+              (id === "map" ? mobilePanel === null : mobilePanel === id) ? "text-[#19c8ff]" : "text-slate-400"
+            }`}
           >
             {label}
           </button>
         ))}
       </nav>
 
-      <MobileBottomSheet open={mobilePanel === "status"} onClose={() => setMobilePanel(null)} title="סטטוס מערכת">
-        <SystemStatus snapshot={displaySnapshot} visibleCount={filteredAircraft.length} connection={connection} />
-      </MobileBottomSheet>
-      <MobileBottomSheet open={mobilePanel === "movements"} onClose={() => setMobilePanel(null)} title="תנועות והתראות">
+      <MobileBottomSheet open={mobilePanel === "alerts"} onClose={() => setMobilePanel(null)} title="התראות ותנועות">
         <div className="space-y-3">
           <ActiveAlerts
             alerts={alerts}
@@ -412,12 +424,46 @@ export default function AirspaceDashboard() {
           />
         </div>
       </MobileBottomSheet>
-      <MobileBottomSheet open={mobilePanel === "filters"} onClose={() => setMobilePanel(null)} title="פילטרים">
-        <FiltersPanel filters={filters} onChange={handleFilterChange} />
+      <MobileBottomSheet open={mobilePanel === "stats"} onClose={() => setMobilePanel(null)} title="סטטיסטיקות">
+        <SystemStatus snapshot={displaySnapshot} visibleCount={filteredAircraft.length} connection={connection} history={statsHistory} />
+      </MobileBottomSheet>
+      <MobileBottomSheet open={mobilePanel === "settings"} onClose={() => setMobilePanel(null)} title="הגדרות">
+        <div className="space-y-3">
+          <div>
+            <div className="mb-1.5 px-1 text-[11px] font-bold text-slate-400">שכבת מפה</div>
+            <div className="flex gap-2 px-1">
+              <button
+                type="button"
+                onClick={() => setLayerId("dark")}
+                className={`flex-1 rounded-md border px-3 py-1.5 text-xs font-semibold ${
+                  layerId === "dark" ? "border-[#19c8ff]/40 bg-[#19c8ff]/10 text-[#7ee3ff]" : "border-white/10 text-slate-400"
+                }`}
+              >
+                כהה
+              </button>
+              <button
+                type="button"
+                onClick={() => setLayerId("satellite")}
+                className={`flex-1 rounded-md border px-3 py-1.5 text-xs font-semibold ${
+                  layerId === "satellite" ? "border-[#19c8ff]/40 bg-[#19c8ff]/10 text-[#7ee3ff]" : "border-white/10 text-slate-400"
+                }`}
+              >
+                לוויין
+              </button>
+            </div>
+          </div>
+          <FiltersPanel filters={filters} onChange={handleFilterChange} />
+        </div>
       </MobileBottomSheet>
       <MobileBottomSheet open={mobileDetailsOpen && Boolean(selectedAircraft)} onClose={() => handleSelect(null)} title="פרטי מטוס">
         {selectedAircraft && (
-          <AircraftDetails aircraft={selectedAircraft} trail={selectedTrail} onClose={() => handleSelect(null)} />
+          <AircraftDetails
+            aircraft={selectedAircraft}
+            trail={selectedTrail}
+            onClose={() => handleSelect(null)}
+            following={following}
+            onToggleFollow={() => setFollowing((v) => !v)}
+          />
         )}
       </MobileBottomSheet>
     </div>
